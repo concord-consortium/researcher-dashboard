@@ -1,0 +1,19 @@
+# Placeholder for the app's S3 deploy.
+#
+# The real workflow builds `app/` and syncs the result to the dashboard bucket under a versioned path,
+# following the portal-report deploy pattern: `/version/<tag>/` for a tag, `/branch/<name>/` for a
+# branch, and the root for a release. It is manual-only until that is implemented, so it cannot fire
+# on a push and silently do nothing.
+
+name: Deploy app
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "Not implemented yet. See the repository README for the intended deploy." >&2
+          exit 1
