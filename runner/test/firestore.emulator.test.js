@@ -43,6 +43,7 @@ function customToken(claims) {
 
 const SESSION_TOKEN = customToken({
   platform_user_id: USER,
+  platform_id: "https://learn.portal.staging.concord.org",
   user_type: "researcher",
   researcher_dashboard_runner: true
 });

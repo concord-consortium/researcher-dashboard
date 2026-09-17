@@ -18,10 +18,19 @@ export function analysisPath(portal, classHash, analysisId) {
 // tests drive the real state sequences against an in-memory double, and so the
 // Firestore emulator can stand in before todo 13 deploys the rules.
 export class StatusWriter {
-  constructor({ store, portal, platformUserId }) {
+  constructor({ store, portal, platformUserId, platformId }) {
     this.store = store;
     this.portal = portal;
     this.platformUserId = platformUserId;
+    this.platformId = platformId;
+  }
+
+  // Every document carries platform_id, because the rules check it against the
+  // token's claim rather than trusting the {portal} path segment, the same way the
+  // student work rules check it rather than trusting {source}. A merge that omitted
+  // it on the first write would create a document the rules then refuse to read.
+  #stamped(fields) {
+    return { platform_id: this.platformId, ...fields };
   }
 
   #now() {
@@ -30,7 +39,7 @@ export class StatusWriter {
 
   async researcher(fields) {
     const path = researcherPath(this.portal, this.platformUserId);
-    const doc = { ...fields, updated_at: this.#now() };
+    const doc = this.#stamped({ ...fields, updated_at: this.#now() });
     await this.store.merge(path, doc);
     log.info("status.researcher", { state: doc.state ?? null });
     return doc;
@@ -40,10 +49,10 @@ export class StatusWriter {
   // is last-writer-wins by design and carries who wrote it.
   async classCounts(classHash, data) {
     const path = classPath(this.portal, classHash);
-    await this.store.merge(path, {
+    await this.store.merge(path, this.#stamped({
       data: { ...data, last_pull_at: this.#now() },
       last_pulled_by: this.platformUserId
-    });
+    }));
   }
 
   // The runner creates the analysis document, and only once it has accepted the
@@ -51,7 +60,7 @@ export class StatusWriter {
   // requested_by comes from the session token the VM holds, never from the request.
   async analysisCreated(classHash, analysisId, { pkg, requestedBy }) {
     const now = this.#now();
-    await this.store.set(analysisPath(this.portal, classHash, analysisId), {
+    await this.store.set(analysisPath(this.portal, classHash, analysisId), this.#stamped({
       status: "running",
       stage: "starting",
       created_at: now,
@@ -62,36 +71,36 @@ export class StatusWriter {
       requested_by: requestedBy,
       requested_at: now,
       display: null
-    });
+    }));
   }
 
   async analysisStage(classHash, analysisId, stage) {
-    await this.store.merge(analysisPath(this.portal, classHash, analysisId), {
+    await this.store.merge(analysisPath(this.portal, classHash, analysisId), this.#stamped({
       stage,
       updated_at: this.#now()
-    });
+    }));
   }
 
   async analysisDone(classHash, analysisId, display) {
     const now = this.#now();
-    await this.store.merge(analysisPath(this.portal, classHash, analysisId), {
+    await this.store.merge(analysisPath(this.portal, classHash, analysisId), this.#stamped({
       status: "done",
       stage: "done",
       display,
       error: null,
       finished_at: now,
       updated_at: now
-    });
+    }));
   }
 
   async analysisFailed(classHash, analysisId, error) {
     const now = this.#now();
-    await this.store.merge(analysisPath(this.portal, classHash, analysisId), {
+    await this.store.merge(analysisPath(this.portal, classHash, analysisId), this.#stamped({
       status: "failed",
       error,
       finished_at: now,
       updated_at: now
-    });
+    }));
   }
 }
 

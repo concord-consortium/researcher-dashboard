@@ -255,7 +255,10 @@ async function readHistory({ db, portal, classHash, metadata, offeringByKey, out
 // The counts returned here are what the class document's `data` block reports and what
 // the spike's package compares against the hand counts.
 export async function readClue({ store, portal, classHash, dataRoot }) {
-  const out = path.join(dataRoot, "clue-documents");
+  // One VM holds every class its researcher opens, so the corpus is keyed by class.
+  // Without the class segment a second analysis overwrites the first class's corpus and
+  // a package reads whichever was pulled last, under the right class's name.
+  const out = path.join(dataRoot, "classes", classHash, "clue-documents");
   const started = Date.now();
 
   const metadata = await readMetadata({ db: store.db, portal, classHash, out });

@@ -11,6 +11,7 @@ import { DirBackend, Syncer } from "../server/sync/index.js";
 const PORTAL = "learn_portal_staging_concord_org";
 const USER = "439";
 const CLASS = "7be899cf".repeat(6);
+const PLATFORM_ID = "https://learn.portal.staging.concord.org";
 // One per Firebase project the analysis touches, keyed by FirebaseApp name.
 const CLASS_TOKENS = Object.freeze({
   "report-service-dev": "rs-class-token",
@@ -23,6 +24,7 @@ let store;
 const PAYLOAD = JSON.stringify({
   session_token: "session-token",
   platform_user_id: USER,
+  platform_id: PLATFORM_ID,
   portal: PORTAL,
   firebase_project: "report-service-dev",
   bucket: "researcher-dashboard-runner-staging",
@@ -356,4 +358,65 @@ test("hooks before /run are refused rather than writing a doc for nobody", async
   }
   assert.equal(store.writes.length, 0, "a refused hook must write nothing");
   assert.equal(runner.store, null, "no store is built before /run");
+});
+
+// Every status document carries platform_id because report-service's rules check it
+// against the token's claim rather than trusting the {portal} path segment. A runner
+// that omitted it would have every write denied, and only against real rules.
+test("every status document carries platform_id", async () => {
+  const runner = await started();
+  await runner.analyze({
+    analysis_id: "a1",
+    scope: { kind: "class", class_hash: CLASS },
+    package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
+    class_tokens: CLASS_TOKENS
+  });
+  await runner.currentAnalysis?.done;
+
+  for (const path of [rdoc(), `researcher_dashboard/${PORTAL}/classes/${CLASS}`,
+                      analysisPath(PORTAL, CLASS, "a1")]) {
+    assert.equal(store.get(path).platform_id, PLATFORM_ID, `${path} has no platform_id`);
+  }
+});
+
+// Two /analyze calls that arrive together must not both pass the one-at-a-time guard:
+// the check and the claim have to be on the same synchronous turn.
+test("two concurrent analyses cannot both claim the VM", async () => {
+  const runner = await started({
+    stepOverrides: { resolvePackage: async () => ({ expected_duration_seconds: 60 }) }
+  });
+  const body = (id) => ({
+    analysis_id: id,
+    scope: { kind: "class", class_hash: CLASS },
+    package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
+    class_tokens: CLASS_TOKENS
+  });
+
+  const results = await Promise.allSettled([runner.analyze(body("c1")), runner.analyze(body("c2"))]);
+  const accepted = results.filter((r) => r.status === "fulfilled");
+  const refused = results.filter((r) => r.status === "rejected");
+  assert.equal(accepted.length, 1, "exactly one analysis may be accepted");
+  assert.equal(refused.length, 1);
+  assert.equal(refused[0].reason.status, 409);
+});
+
+// A refusal after the claim has to release it, or one rejected request leaves the VM
+// reporting "already running" forever with no analysis to finish.
+test("an analysis refused after the claim leaves the VM able to accept the next one", async () => {
+  let clock = Date.now();
+  const runner = await started({
+    now: () => clock,
+    stepOverrides: { resolvePackage: async () => ({ expected_duration_seconds: 3600 }) }
+  });
+  clock += 7.5 * 60 * 60 * 1000;
+  await assert.rejects(
+    () => runner.analyze({
+      analysis_id: "too-long",
+      scope: { kind: "class", class_hash: CLASS },
+      package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
+      class_tokens: CLASS_TOKENS
+    }),
+    (err) => err instanceof HookError && err.status === 409
+  );
+  assert.equal(runner.currentAnalysis, null, "the refused request must not hold the VM");
 });

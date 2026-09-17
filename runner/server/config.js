@@ -6,11 +6,23 @@
 export const REQUIRED_PAYLOAD_FIELDS = Object.freeze([
   "session_token",
   "platform_user_id",
+  // The rules check platform_id against the token's claim rather than trusting the
+  // {portal} path segment, so every status document carries it and the VM has to be
+  // told what it is. It cannot be derived from `portal`, which drops the scheme.
+  "platform_id",
   "portal",
   "firebase_project",
-  "bucket",
-  "secret_name"
+  "bucket"
 ]);
+
+// Exactly one report-server credential, and which one it is says which world the VM
+// is running in. `secret_name` is the shared site-admin token read from Secrets
+// Manager; `report_server_token` is the requesting researcher's own, minted per
+// launch (design.md, Per-researcher forwarding). They are mutually exclusive on
+// purpose: the narrowed sandbox that gives an analysis package egress is only safe
+// under forwarding, so whatever grants egress must refuse to do so for a VM that
+// arrived with `secret_name`, and cannot if both may be present.
+export const CREDENTIAL_FIELDS = Object.freeze(["secret_name", "report_server_token"]);
 
 export function loadEnv(env = process.env) {
   const backend = (env.SYNC_BACKEND ?? "S3").toUpperCase();
@@ -59,6 +71,14 @@ export function parseRunHookPayload(raw) {
   );
   if (missing.length) {
     throw new Error(`runHookPayload is missing: ${missing.join(", ")}`);
+  }
+  const credentials = CREDENTIAL_FIELDS.filter(
+    (field) => typeof payload[field] === "string" && payload[field] !== ""
+  );
+  if (credentials.length !== 1) {
+    throw new Error(
+      `runHookPayload must carry exactly one of ${CREDENTIAL_FIELDS.join(", ")}, got ${credentials.length}`
+    );
   }
   return payload;
 }

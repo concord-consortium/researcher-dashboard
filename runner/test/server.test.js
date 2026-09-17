@@ -16,6 +16,7 @@ const CLASS = "7be899cf".repeat(6);
 const PAYLOAD = JSON.stringify({
   session_token: "session-token",
   platform_user_id: "439",
+  platform_id: "https://learn.portal.staging.concord.org",
   portal: PORTAL,
   firebase_project: "report-service-dev",
   bucket: "researcher-dashboard-runner-staging",

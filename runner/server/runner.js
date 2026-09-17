@@ -75,7 +75,8 @@ export class Runner {
     this.status = new StatusWriter({
       store: this.store,
       portal: this.payload.portal,
-      platformUserId: this.payload.platform_user_id
+      platformUserId: this.payload.platform_user_id,
+      platformId: this.payload.platform_id
     });
 
     // Before anything else, and fatal if it fails. A package running as the
@@ -101,9 +102,15 @@ export class Runner {
     });
 
     await timed("run.pull_down", {}, () => this.syncer.pullDown());
-    const token = await timed("run.read_secret", {}, () =>
-      this.readSecret(this.payload.secret_name)
-    );
+    // Forwarding hands the researcher's own token straight down in the payload, so
+    // there is nothing to fetch. The Secrets Manager path is the shared site-admin
+    // token and stays only until that lands; parseRunHookPayload permits exactly one
+    // of the two, so this branch cannot silently take both.
+    const forwarded = this.payload.report_server_token;
+    const token = forwarded
+      ? forwarded
+      : await timed("run.read_secret", {}, () => this.readSecret(this.payload.secret_name));
+    log.info("run.report_server_credential", { forwarded: Boolean(forwarded) });
     await timed("run.install_credential", {}, () =>
       this.steps.installCredential({
         token,
@@ -148,31 +155,44 @@ export class Runner {
         analysis_id: this.#analysis.analysisId
       });
     }
+    // Claimed synchronously, before the first await. resolvePackage and
+    // analysisCreated both yield, so a guard that only set #analysis afterwards let
+    // two concurrent /analyze calls past it, and only one of them would then be
+    // terminated or cleared. The claim is released on every refusal below, or a
+    // rejected request would leave the VM permanently busy.
+    const classHash = scope.class_hash;
+    this.#analysis = { analysisId, classHash };
 
-    // Resolving the package is what yields its declared duration, so it has to
-    // precede the expiry check. It writes nothing to Firestore.
-    const manifest = await this.steps.resolvePackage({ pkg });
-    const expectedMs = (manifest.expected_duration_seconds ?? 0) * 1000;
-    const remainingMs = this.#expiresAt - this.now();
-    if (remainingMs < expectedMs) {
-      throw new HookError(
-        409,
-        `VM expires in ${Math.floor(remainingMs / 1000)}s, less than the package's expected ${manifest.expected_duration_seconds}s`
-      );
+    let record;
+    try {
+      // Resolving the package is what yields its declared duration, so it has to
+      // precede the expiry check. It writes nothing to Firestore.
+      const manifest = await this.steps.resolvePackage({ pkg });
+      const expectedMs = (manifest.expected_duration_seconds ?? 0) * 1000;
+      const remainingMs = this.#expiresAt - this.now();
+      if (remainingMs < expectedMs) {
+        throw new HookError(
+          409,
+          `VM expires in ${Math.floor(remainingMs / 1000)}s, less than the package's expected ${manifest.expected_duration_seconds}s`
+        );
+      }
+
+      setContext({ class_hash: classHash, analysis_id: analysisId });
+      await this.status.analysisCreated(classHash, analysisId, {
+        pkg,
+        requestedBy: this.payload.platform_user_id
+      });
+
+      this.#vm.to(STATES.RUNNING);
+      await this.status.researcher({ state: STATES.RUNNING, current_analysis: analysisId });
+
+      record = { analysisId, classHash, classTokens, manifest, pkg };
+      this.#analysis = record;
+    } catch (err) {
+      this.#analysis = null;
+      throw err;
     }
 
-    const classHash = scope.class_hash;
-    setContext({ class_hash: classHash, analysis_id: analysisId });
-    await this.status.analysisCreated(classHash, analysisId, {
-      pkg,
-      requestedBy: this.payload.platform_user_id
-    });
-
-    this.#vm.to(STATES.RUNNING);
-    await this.status.researcher({ state: STATES.RUNNING, current_analysis: analysisId });
-
-    const record = { analysisId, classHash, classTokens, manifest, pkg };
-    this.#analysis = record;
     // The caller gets 202 as soon as the document exists; the work continues here.
     record.done = this.#runAnalysis(record).catch((err) =>
       log.error("analyze.unhandled", { error: err.message })
@@ -231,6 +251,7 @@ export class Runner {
         manifest,
         portal: this.payload.portal,
         dataRoot: this.env.dataRoot,
+        classHash,
         makeStore: this.makeStore
       })
     );
