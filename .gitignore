@@ -5,3 +5,8 @@ build/
 .DS_Store
 .env
 .env.*
+
+# Firebase emulator debug output
+firebase-debug.log
+firestore-debug.log
+ui-debug.log

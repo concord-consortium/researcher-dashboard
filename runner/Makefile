@@ -8,7 +8,7 @@ ARTIFACT_BUCKET ?= concord-devops
 ARTIFACT_PREFIX ?= researcher-dashboard-runner
 ARTIFACT_URI = s3://$(ARTIFACT_BUCKET)/$(ARTIFACT_PREFIX)/$(notdir $(ARTIFACT))
 
-.PHONY: build run tools shell clean test run-hook artifact artifact-uri publish-artifact
+.PHONY: build run tools shell clean test test-emulator run-hook artifact artifact-uri publish-artifact
 
 build:
 	docker buildx build --platform $(PLATFORM) --load -t $(IMAGE) .
@@ -29,6 +29,17 @@ shell:
 
 test:
 	npm test
+
+# Status doc writes against real Firestore and Auth, which the default `npm test`
+# skips so it stays hermetic. Rules arrive with the report-service work; until then
+# this proves the document shapes and the custom-token sign-in.
+FIREBASE_PROJECT ?= demo-researcher-dashboard
+test-emulator:
+	firebase emulators:exec --only firestore,auth --project $(FIREBASE_PROJECT) \
+	  'FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 \
+	   FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9099 \
+	   GCLOUD_PROJECT=$(FIREBASE_PROJECT) \
+	   npm test'
 
 # Drives one hook against a locally running server. DIR mode keeps the status docs
 # in memory and syncs to a directory, so the whole lifecycle runs with no AWS

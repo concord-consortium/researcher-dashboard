@@ -60,3 +60,10 @@ export function parseRunHookPayload(raw) {
 export function researcherPrefix(platformUserId) {
   return `researchers/${platformUserId}`;
 }
+
+// `portal` travels as the Firestore path segment, which is the host with its dots
+// replaced by underscores. cc-data wants the host back. Hostnames cannot contain
+// underscores, so the two forms round-trip exactly.
+export function portalHost(portalSegment) {
+  return portalSegment.replaceAll("_", ".");
+}

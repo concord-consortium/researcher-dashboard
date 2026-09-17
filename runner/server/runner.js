@@ -95,6 +95,7 @@ export class Runner {
       this.steps.installCredential({
         token,
         sessionToken: this.payload.session_token,
+        portal: this.payload.portal,
         store: this.store
       })
     );

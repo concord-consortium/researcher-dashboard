@@ -1,6 +1,6 @@
 import { initializeApp } from "firebase/app";
-import { getAuth, signInWithCustomToken } from "firebase/auth";
-import { doc, getFirestore, setDoc } from "firebase/firestore";
+import { connectAuthEmulator, getAuth, signInWithCustomToken } from "firebase/auth";
+import { connectFirestoreEmulator, doc, getFirestore, setDoc } from "firebase/firestore";
 import { log } from "./log.js";
 
 // The client SDK rather than firebase-admin, because the runner acts as the
@@ -10,11 +10,18 @@ import { log } from "./log.js";
 export class FirestoreStore {
   #signedIn = null;
 
-  constructor({ projectId, emulatorHost = null, app } = {}) {
-    this.app = app ?? initializeApp({ projectId }, `runner-${projectId}`);
+  // `emulators` points the SDK at a local Firestore and Auth instead of the real
+  // project. The client SDK ignores FIRESTORE_EMULATOR_HOST, which only the admin
+  // SDK reads, so the connection has to be made explicitly.
+  constructor({ projectId, emulators = null, app } = {}) {
+    this.app = app ?? initializeApp({ projectId, apiKey: "unused" }, `runner-${projectId}`);
     this.auth = getAuth(this.app);
     this.db = getFirestore(this.app);
-    this.emulatorHost = emulatorHost;
+    if (emulators) {
+      const [host, port] = emulators.firestore.split(":");
+      connectFirestoreEmulator(this.db, host, Number(port));
+      connectAuthEmulator(this.auth, `http://${emulators.auth}`, { disableWarnings: true });
+    }
   }
 
   // Exchanged once and kept: the refresh token outlives the custom token's hour,
