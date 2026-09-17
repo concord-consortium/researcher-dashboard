@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import test from "node:test";
 import { portalHost } from "../server/config.js";
-import { ccDataLogin, makeSteps } from "../server/steps.js";
+import { CLUE_PROJECT, ccDataLogin, makeSteps } from "../server/steps.js";
 
 // Stands in for the cc-data process: records how it was invoked and what was
 // written to its stdin, then closes with the given exit code.
@@ -94,11 +94,74 @@ test("a token refresh re-signs in without reinstalling the report-service token"
   assert.deepEqual(signedIn, ["fresh"]);
 });
 
-test("the analysis steps announce themselves as unimplemented rather than silently passing", () => {
+test("the analysis steps still to be built announce themselves rather than silently passing", () => {
   const steps = makeSteps();
-  for (const name of ["resolvePackage", "pullData", "runPackage"]) {
+  for (const name of ["resolvePackage", "runPackage"]) {
     assert.throws(() => steps[name]({}), /is not implemented yet/, name);
   }
+});
+
+test("pullData reads CLUE with the class token for CLUE's own project", async () => {
+  const calls = [];
+  const signedIn = [];
+  const steps = makeSteps({
+    readClueFn: async (args) => {
+      calls.push(args);
+      return { clue_documents: 22, clue_history_entries: 27135, clue_users: 7 };
+    }
+  });
+
+  const counts = await steps.pullData({
+    classHash: "abc",
+    classTokens: { [CLUE_PROJECT]: "clue-token", "report-service-dev": "rs-token" },
+    manifest: { required_inputs: ["clue_documents"] },
+    portal: "learn_portal_staging_concord_org",
+    dataRoot: "/data",
+    makeStore: ({ projectId }) => ({ projectId, signIn: async (t) => signedIn.push([projectId, t]) })
+  });
+
+  // The report-service token would sign in but read nothing: CLUE's documents are in
+  // CLUE's project, and a token signed by the wrong project cannot be exchanged there.
+  assert.deepEqual(signedIn, [[CLUE_PROJECT, "clue-token"]]);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].classHash, "abc");
+  assert.equal(calls[0].portal, "learn_portal_staging_concord_org");
+  assert.equal(calls[0].dataRoot, "/data");
+  // The class document's data block is a pinned contract, so the reader's extra
+  // counts stay in its logs rather than widening it a field at a time.
+  assert.deepEqual(counts, { clue_documents: 22 });
+});
+
+test("pullData skips the CLUE read when the package does not require it", async () => {
+  let called = false;
+  const steps = makeSteps({ readClueFn: async () => { called = true; return {}; } });
+
+  const counts = await steps.pullData({
+    classHash: "abc",
+    classTokens: { "report-service-dev": "rs-token" },
+    manifest: { required_inputs: ["answers"] },
+    portal: "p",
+    dataRoot: "/data",
+    makeStore: () => assert.fail("no store should be made for a skipped read")
+  });
+
+  assert.equal(called, false, "the AP fixture class has no CLUE documents to read");
+  assert.deepEqual(counts, {});
+});
+
+test("pullData fails loudly when CLUE is required but its class token is missing", async () => {
+  const steps = makeSteps({ readClueFn: async () => assert.fail("must not read without a token") });
+  await assert.rejects(
+    () => steps.pullData({
+      classHash: "abc",
+      classTokens: { "report-service-dev": "rs-token" },
+      manifest: { required_inputs: ["clue_documents"] },
+      portal: "p",
+      dataRoot: "/data",
+      makeStore: () => assert.fail("no store should be made")
+    }),
+    /requires clue_documents but no class token for collaborative-learning-staging/
+  );
 });
 
 test("STATUS_BACKEND selects the store and rejects anything else", async () => {

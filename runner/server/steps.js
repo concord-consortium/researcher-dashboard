@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { readClue } from "./clue-reader.js";
 import { portalHost } from "./config.js";
 import { log } from "./log.js";
 
@@ -39,7 +40,11 @@ export function ccDataLogin({ token, portal, spawnFn = spawn }) {
   });
 }
 
-export function makeSteps({ login = ccDataLogin } = {}) {
+// The Firebase project holding CLUE's documents. It is not the project the status
+// documents live in, so the reader signs in separately with its own class token.
+export const CLUE_PROJECT = "collaborative-learning-staging";
+
+export function makeSteps({ login = ccDataLogin, readClueFn = readClue } = {}) {
   return {
     // Two credentials, both arriving at /run and neither stored in the image: the
     // report-service token goes to cc-data's credential store under $HOME, and the
@@ -50,7 +55,35 @@ export function makeSteps({ login = ccDataLogin } = {}) {
       if (sessionToken && store?.signIn) await store.signIn(sessionToken);
     },
     resolvePackage: notYet("package fetch and checksum verification"),
-    pullData: notYet("the AP, log and CLUE pulls"),
+
+    // One sign-in per class per project, kept for the VM's life: the class token is
+    // good for an hour but the Firebase session it is exchanged for outlives it.
+    pullData: async ({ classHash, classTokens, manifest, portal, dataRoot, makeStore }) => {
+      const counts = {};
+      const required = manifest?.required_inputs ?? [];
+
+      if (required.includes("clue_documents")) {
+        const token = classTokens?.[CLUE_PROJECT];
+        if (!token) {
+          throw new Error(`the package requires clue_documents but no class token for ${CLUE_PROJECT} was sent`);
+        }
+        const store = makeStore({ projectId: CLUE_PROJECT });
+        await store.signIn(token);
+        const read = await readClueFn({ store, portal, classHash, dataRoot });
+        // Only the contracted key reaches the class document, whose `data` block is
+        // {answers, logs, clue_documents, last_pull_at, log_freshness_at}. The richer
+        // counts the reader gathers are in its log line, and the package reads the
+        // corpus itself for anything it wants to display.
+        counts.clue_documents = read.clue_documents;
+      } else {
+        // Criterion 5: an AP class declares no clue_documents input, and the skip is
+        // visible rather than silent so a missing count can be told from a skipped pull.
+        log.info("clue.skipped", { class_hash: classHash, reason: "clue_documents not in required_inputs" });
+      }
+
+      return counts;
+    },
+
     runPackage: notYet("running a package")
   };
 }

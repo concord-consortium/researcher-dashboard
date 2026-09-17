@@ -225,7 +225,14 @@ export class Runner {
     };
 
     const counts = await stage("pull", () =>
-      this.steps.pullData({ classHash, classTokens, dataRoot: this.env.dataRoot })
+      this.steps.pullData({
+        classHash,
+        classTokens,
+        manifest,
+        portal: this.payload.portal,
+        dataRoot: this.env.dataRoot,
+        makeStore: this.makeStore
+      })
     );
     const display = await stage("run_package", () =>
       this.steps.runPackage({
