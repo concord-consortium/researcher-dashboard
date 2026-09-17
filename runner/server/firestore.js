@@ -1,6 +1,7 @@
 import { initializeApp } from "firebase/app";
 import { connectAuthEmulator, getAuth, signInWithCustomToken } from "firebase/auth";
 import { connectFirestoreEmulator, doc, getFirestore, setDoc } from "firebase/firestore";
+import { firebaseConfig } from "./firebase-projects.js";
 import { log } from "./log.js";
 
 // The client SDK rather than firebase-admin, because the runner acts as the
@@ -12,9 +13,11 @@ export class FirestoreStore {
 
   // `emulators` points the SDK at a local Firestore and Auth instead of the real
   // project. The client SDK ignores FIRESTORE_EMULATOR_HOST, which only the admin
-  // SDK reads, so the connection has to be made explicitly.
+  // SDK reads, so the connection has to be made explicitly. An emulator accepts any
+  // apiKey, so it needs no entry in firebase-projects.js and a test project works.
   constructor({ projectId, emulators = null, app } = {}) {
-    this.app = app ?? initializeApp({ projectId, apiKey: "unused" }, `runner-${projectId}`);
+    const config = emulators ? { projectId, apiKey: "unused" } : firebaseConfig(projectId);
+    this.app = app ?? initializeApp(config, `runner-${projectId}`);
     this.auth = getAuth(this.app);
     this.db = getFirestore(this.app);
     if (emulators) {
