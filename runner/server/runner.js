@@ -28,6 +28,10 @@ export class HookError extends Error {
 export class Runner {
   #vm = new VmState();
   #analysis = null;
+  // One signed-in connection per class, kept for the VM's life. The class token is
+  // good for an hour but the Firebase session it is exchanged for outlives it, and a
+  // resumed VM keeps it because memory is preserved.
+  #classStores = new Map();
   #expiresAt = null;
 
   constructor({ env, makeStore, makeSyncer, readSecret, steps, netGuard = verifySandbox, now = () => Date.now() }) {
@@ -76,7 +80,8 @@ export class Runner {
       store: this.store,
       portal: this.payload.portal,
       platformUserId: this.payload.platform_user_id,
-      platformId: this.payload.platform_id
+      platformId: this.payload.platform_id,
+      classStore: (classHash) => this.#classStores.get(classHash) ?? this.store
     });
 
     // Before anything else, and fatal if it fails. A package running as the
@@ -178,6 +183,7 @@ export class Runner {
       }
 
       setContext({ class_hash: classHash, analysis_id: analysisId });
+      await this.#signInForClass(classHash, classTokens);
       await this.status.analysisCreated(classHash, analysisId, {
         pkg,
         requestedBy: this.payload.platform_user_id
@@ -235,6 +241,23 @@ export class Runner {
         await this.status.researcher({ state: STATES.READY, current_analysis: null });
       }
     }
+  }
+
+  // The session token carries no class_hash, so it cannot write this class's documents:
+  // report-service's rules refuse it rather than ignoring the mismatch. This exchanges
+  // the class token for that project once and keeps the session.
+  async #signInForClass(classHash, classTokens) {
+    if (this.#classStores.has(classHash)) return this.#classStores.get(classHash);
+    const projectId = this.payload.firebase_project;
+    const token = classTokens?.[projectId];
+    if (!token) {
+      throw new HookError(400, `class_tokens carries no token for ${projectId}, so this class's results cannot be written`);
+    }
+    const store = this.makeStore({ projectId, appName: `runner-${projectId}-${classHash}` });
+    await store.signIn(token);
+    this.#classStores.set(classHash, store);
+    log.info("status.class_signed_in", { class_hash: classHash, project: projectId });
+    return store;
   }
 
   async #analysisSteps(record) {

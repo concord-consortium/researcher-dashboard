@@ -22,9 +22,12 @@ export class FirestoreStore {
   // project. The client SDK ignores FIRESTORE_EMULATOR_HOST, which only the admin
   // SDK reads, so the connection has to be made explicitly. An emulator accepts any
   // apiKey, so it needs no entry in firebase-projects.js and a test project works.
-  constructor({ projectId, emulators = null, app } = {}) {
+  // `appName` distinguishes two connections to the same project: one Firebase app
+  // holds one signed-in principal, and the runner needs two, because the session token
+  // writes the researcher document while a class token writes that class's results.
+  constructor({ projectId, emulators = null, app, appName } = {}) {
     const config = emulators ? { projectId, apiKey: "unused" } : firebaseConfig(projectId);
-    this.app = app ?? initializeApp(config, `runner-${projectId}`);
+    this.app = app ?? initializeApp(config, appName ?? `runner-${projectId}`);
     this.auth = getAuth(this.app);
     this.db = getFirestore(this.app);
     this.#emulators = emulators;

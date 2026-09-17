@@ -41,7 +41,7 @@ function steps(overrides = {}) {
   };
 }
 
-function build({ stepOverrides = {}, now, envOverrides = {} } = {}) {
+function build({ stepOverrides = {}, now, envOverrides = {}, makeStore } = {}) {
   const env = {
     ...loadEnv({ SYNC_BACKEND: "DIR", SYNC_DIR: path.join(work, "remote") }),
     dataRoot: path.join(work, "data"),
@@ -55,7 +55,7 @@ function build({ stepOverrides = {}, now, envOverrides = {} } = {}) {
   store = new MemoryStore();
   return new Runner({
     env,
-    makeStore: () => store,
+    makeStore: makeStore ?? (() => store),
     makeSyncer: ({ root }) =>
       new Syncer({ backend: new DirBackend(path.join(work, "remote")), root }),
     readSecret: async () => "report-service-token-value",
@@ -419,4 +419,45 @@ test("an analysis refused after the claim leaves the VM able to accept the next 
     (err) => err instanceof HookError && err.status === 409
   );
   assert.equal(runner.currentAnalysis, null, "the refused request must not hold the VM");
+});
+
+// The session token carries no class_hash, so report-service's rules refuse it on the
+// class and analysis documents. The runner therefore has to exchange that class's own
+// token and write those documents through it, not through the launch session.
+test("class-scoped documents are written on the class token, not the session token", async () => {
+  const classStores = [];
+  const runner = await started({
+    makeStore: ({ appName }) => {
+      const s = new MemoryStore();
+      s.appName = appName;
+      if (appName?.includes(CLASS)) classStores.push(s);
+      return s;
+    }
+  });
+  await runner.analyze({
+    analysis_id: "a1",
+    scope: { kind: "class", class_hash: CLASS },
+    package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
+    class_tokens: CLASS_TOKENS
+  });
+  await runner.currentAnalysis?.done;
+
+  assert.equal(classStores.length, 1, "one signed-in connection per class");
+  assert.deepEqual(classStores[0].signedInWith, [CLASS_TOKENS["report-service-dev"]]);
+  const paths = classStores[0].writes.map((w) => w.path);
+  assert.ok(paths.includes(analysisPath(PORTAL, CLASS, "a1")), "the analysis doc goes out on the class token");
+  assert.ok(paths.some((p) => p.endsWith(`classes/${CLASS}`)), "the class doc goes out on the class token");
+});
+
+test("an analysis whose class_tokens omit the status project is refused", async () => {
+  const runner = await started();
+  await assert.rejects(
+    () => runner.analyze({
+      analysis_id: "a1",
+      scope: { kind: "class", class_hash: CLASS },
+      package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
+      class_tokens: { "collaborative-learning-staging": "clue-only" }
+    }),
+    (err) => err instanceof HookError && err.status === 400 && /report-service-dev/.test(err.message)
+  );
 });

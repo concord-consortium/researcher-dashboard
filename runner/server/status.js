@@ -18,8 +18,14 @@ export function analysisPath(portal, classHash, analysisId) {
 // tests drive the real state sequences against an in-memory double, and so the
 // Firestore emulator can stand in before todo 13 deploys the rules.
 export class StatusWriter {
-  constructor({ store, portal, platformUserId, platformId }) {
+  // Two stores, because the rules distinguish the two token shapes. `store` is signed
+  // in with the session token, which carries no class_hash and may write only the
+  // researcher document. `classStore(classHash)` is signed in with that class's token,
+  // which is the only thing report-service's rules let write the class and analysis
+  // documents. Writing those through the session store is denied, not ignored.
+  constructor({ store, classStore, portal, platformUserId, platformId }) {
     this.store = store;
+    this.classStore = classStore ?? (() => store);
     this.portal = portal;
     this.platformUserId = platformUserId;
     this.platformId = platformId;
@@ -49,7 +55,7 @@ export class StatusWriter {
   // is last-writer-wins by design and carries who wrote it.
   async classCounts(classHash, data) {
     const path = classPath(this.portal, classHash);
-    await this.store.merge(path, this.#stamped({
+    await this.classStore(classHash).merge(path, this.#stamped({
       data: { ...data, last_pull_at: this.#now() },
       last_pulled_by: this.platformUserId
     }));
@@ -60,7 +66,7 @@ export class StatusWriter {
   // requested_by comes from the session token the VM holds, never from the request.
   async analysisCreated(classHash, analysisId, { pkg, requestedBy }) {
     const now = this.#now();
-    await this.store.set(analysisPath(this.portal, classHash, analysisId), this.#stamped({
+    await this.classStore(classHash).set(analysisPath(this.portal, classHash, analysisId), this.#stamped({
       status: "running",
       stage: "starting",
       created_at: now,
@@ -75,7 +81,7 @@ export class StatusWriter {
   }
 
   async analysisStage(classHash, analysisId, stage) {
-    await this.store.merge(analysisPath(this.portal, classHash, analysisId), this.#stamped({
+    await this.classStore(classHash).merge(analysisPath(this.portal, classHash, analysisId), this.#stamped({
       stage,
       updated_at: this.#now()
     }));
@@ -83,7 +89,7 @@ export class StatusWriter {
 
   async analysisDone(classHash, analysisId, display) {
     const now = this.#now();
-    await this.store.merge(analysisPath(this.portal, classHash, analysisId), this.#stamped({
+    await this.classStore(classHash).merge(analysisPath(this.portal, classHash, analysisId), this.#stamped({
       status: "done",
       stage: "done",
       display,
@@ -95,7 +101,7 @@ export class StatusWriter {
 
   async analysisFailed(classHash, analysisId, error) {
     const now = this.#now();
-    await this.store.merge(analysisPath(this.portal, classHash, analysisId), this.#stamped({
+    await this.classStore(classHash).merge(analysisPath(this.portal, classHash, analysisId), this.#stamped({
       status: "failed",
       error,
       finished_at: now,
@@ -131,6 +137,14 @@ export class MemoryStore {
   constructor() {
     this.docs = new Map();
     this.writes = [];
+    // Which tokens were exchanged, so a test can assert the class writes went out on
+    // the class token rather than the session one.
+    this.signedInWith = [];
+  }
+
+  async signIn(customToken) {
+    this.signedInWith.push(customToken);
+    return { user: { uid: "memory" } };
   }
 
   async set(path, doc) {
