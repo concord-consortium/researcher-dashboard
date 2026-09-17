@@ -7,6 +7,12 @@ import { StatusWriter } from "./status.js";
 
 const EIGHT_HOURS_MS = 8 * 60 * 60 * 1000;
 
+function isTokenMap(value) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const entries = Object.entries(value);
+  return entries.length > 0 && entries.every(([app, token]) => app !== "" && typeof token === "string" && token !== "");
+}
+
 export class HookError extends Error {
   constructor(status, message, extra = {}) {
     super(message);
@@ -120,7 +126,7 @@ export class Runner {
   // document is created, so a refused request leaves Firestore untouched.
   async analyze(body) {
     this.#requireStarted();
-    const { analysis_id: analysisId, scope, package: pkg, class_token: classToken } = body ?? {};
+    const { analysis_id: analysisId, scope, package: pkg, class_tokens: classTokens } = body ?? {};
 
     if (!analysisId || typeof analysisId !== "string") {
       throw new HookError(400, "analysis_id is required");
@@ -131,8 +137,11 @@ export class Runner {
     if (!pkg?.name || !pkg?.version || !pkg?.checksum) {
       throw new HookError(400, "package must carry name, version and checksum");
     }
-    if (typeof classToken !== "string" || classToken === "") {
-      throw new HookError(400, "class_token is required");
+    // One class token per Firebase project the analysis touches, keyed by FirebaseApp
+    // name, since a custom token is signed by one project's service account and cannot
+    // be exchanged in another.
+    if (!isTokenMap(classTokens)) {
+      throw new HookError(400, "class_tokens must map a firebase app name to a token");
     }
     if (this.#analysis) {
       throw new HookError(409, "an analysis is already running on this VM", {
@@ -162,7 +171,7 @@ export class Runner {
     this.#vm.to(STATES.RUNNING);
     await this.status.researcher({ state: STATES.RUNNING, current_analysis: analysisId });
 
-    const record = { analysisId, classHash, classToken, manifest, pkg };
+    const record = { analysisId, classHash, classTokens, manifest, pkg };
     this.#analysis = record;
     // The caller gets 202 as soon as the document exists; the work continues here.
     record.done = this.#runAnalysis(record).catch((err) =>
@@ -209,14 +218,14 @@ export class Runner {
   }
 
   async #analysisSteps(record) {
-    const { analysisId, classHash, classToken, manifest } = record;
+    const { analysisId, classHash, classTokens, manifest } = record;
     const stage = async (name, fn) => {
       await this.status.analysisStage(classHash, analysisId, name);
       return timed(`analyze.${name}`, {}, fn);
     };
 
     const counts = await stage("pull", () =>
-      this.steps.pullData({ classHash, classToken, dataRoot: this.env.dataRoot })
+      this.steps.pullData({ classHash, classTokens, dataRoot: this.env.dataRoot })
     );
     const display = await stage("run_package", () =>
       this.steps.runPackage({

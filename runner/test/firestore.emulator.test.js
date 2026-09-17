@@ -124,12 +124,14 @@ describe("status writes against the Firestore emulator", { skip: !FIRESTORE || !
       analysis_id: "emu-1",
       scope: { kind: "class", class_hash: CLASS },
       package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
-      class_token: customToken({
-        platform_user_id: USER,
-        user_type: "researcher",
-        researcher_dashboard_runner: true,
-        class_hash: CLASS
-      })
+      class_tokens: {
+        "report-service-dev": customToken({
+          platform_user_id: USER,
+          user_type: "researcher",
+          researcher_dashboard_runner: true,
+          class_hash: CLASS
+        })
+      }
     });
     await runner.currentAnalysis?.done;
 

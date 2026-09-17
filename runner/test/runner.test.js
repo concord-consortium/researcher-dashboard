@@ -11,6 +11,11 @@ import { DirBackend, Syncer } from "../server/sync/index.js";
 const PORTAL = "learn_portal_staging_concord_org";
 const USER = "439";
 const CLASS = "7be899cf".repeat(6);
+// One per Firebase project the analysis touches, keyed by FirebaseApp name.
+const CLASS_TOKENS = Object.freeze({
+  "report-service-dev": "rs-class-token",
+  "collaborative-learning-staging": "clue-class-token"
+});
 
 let work;
 let store;
@@ -104,7 +109,7 @@ test("a full analysis writes starting, ready, running, ready and the class count
     analysis_id: "a1",
     scope: { kind: "class", class_hash: CLASS },
     package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
-    class_token: "class-token"
+    class_tokens: CLASS_TOKENS
   });
   await runner.currentAnalysis?.done;
   assert.equal(res.analysis_id, "a1");
@@ -123,7 +128,7 @@ test("requested_by comes from the session payload, not the request body", async 
     analysis_id: "a1",
     scope: { kind: "class", class_hash: CLASS },
     package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
-    class_token: "class-token",
+    class_tokens: CLASS_TOKENS,
     requested_by: "someone-else"
   });
   await runner.currentAnalysis?.done;
@@ -139,7 +144,7 @@ test("a second analysis is refused with 409 and writes nothing", async () => {
     analysis_id: "a1",
     scope: { kind: "class", class_hash: CLASS },
     package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
-    class_token: "class-token"
+    class_tokens: CLASS_TOKENS
   };
   await runner.analyze(body);
   const before = store.writes.length;
@@ -171,7 +176,7 @@ test("an analysis longer than the VM has left is refused, writing nothing", asyn
         analysis_id: "a1",
         scope: { kind: "class", class_hash: CLASS },
         package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
-        class_token: "class-token"
+        class_tokens: CLASS_TOKENS
       }),
     (err) => err instanceof HookError && err.status === 409 && /expires in/.test(err.message)
   );
@@ -190,6 +195,24 @@ test("a malformed /analyze body is refused before any document is created", asyn
       analysis_id: "a1",
       scope: { kind: "class", class_hash: CLASS },
       package: { name: "d", version: "1", checksum: "c" }
+    },
+    {
+      analysis_id: "a1",
+      scope: { kind: "class", class_hash: CLASS },
+      package: { name: "d", version: "1", checksum: "c" },
+      class_tokens: {}
+    },
+    {
+      analysis_id: "a1",
+      scope: { kind: "class", class_hash: CLASS },
+      package: { name: "d", version: "1", checksum: "c" },
+      class_tokens: ["rs-class-token"]
+    },
+    {
+      analysis_id: "a1",
+      scope: { kind: "class", class_hash: CLASS },
+      package: { name: "d", version: "1", checksum: "c" },
+      class_tokens: { "report-service-dev": "" }
     }
   ]) {
     await assert.rejects(
@@ -212,7 +235,7 @@ test("a failed analysis fails its document but returns the VM to ready", async (
     analysis_id: "a1",
     scope: { kind: "class", class_hash: CLASS },
     package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
-    class_token: "class-token"
+    class_tokens: CLASS_TOKENS
   });
   await runner.currentAnalysis?.done;
 
@@ -232,7 +255,7 @@ test("an analysis that outruns its timeout fails rather than hanging", async () 
     analysis_id: "a1",
     scope: { kind: "class", class_hash: CLASS },
     package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
-    class_token: "class-token"
+    class_tokens: CLASS_TOKENS
   });
   await runner.currentAnalysis?.done;
 
@@ -292,7 +315,7 @@ test("criterion 11: terminate during an analysis fails the analysis and terminat
     analysis_id: "a1",
     scope: { kind: "class", class_hash: CLASS },
     package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
-    class_token: "class-token"
+    class_tokens: CLASS_TOKENS
   });
 
   const inFlight = runner.currentAnalysis.done;

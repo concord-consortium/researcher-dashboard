@@ -93,7 +93,7 @@ test("/analyze answers 202 with the document path, not 200", async () => {
     analysis_id: "a1",
     scope: { kind: "class", class_hash: CLASS },
     package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
-    class_token: "class-token"
+    class_tokens: { "report-service-dev": "rs-class-token" }
   });
   assert.equal(res.status, 202);
   const body = await res.json();
