@@ -95,6 +95,26 @@ export class StatusWriter {
   }
 }
 
+// Writes every status document to the structured log instead of Firestore. It
+// exists for running a VM before the portal can mint a real session token: the
+// state sequence stays observable in CloudWatch, and no sign-in is attempted that
+// could not succeed. It is not a fallback for a broken Firestore, because a VM
+// using it makes no durable claim about its state at all.
+export class LogStore {
+  async signIn(customToken) {
+    log.warn("status.sign_in_skipped", { token_length: customToken?.length ?? 0 });
+    return null;
+  }
+
+  async set(path, doc) {
+    log.info("status.write", { op: "set", path, doc });
+  }
+
+  async merge(path, fields) {
+    log.info("status.write", { op: "merge", path, doc: fields });
+  }
+}
+
 // In-memory store used by the tests and by SYNC_BACKEND=DIR local runs, where no
 // Firebase project is reachable. It records writes in order so a test can assert
 // the sequence of states, which is what criteria 2, 8, 11 and 13 turn on.

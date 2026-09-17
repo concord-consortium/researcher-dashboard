@@ -1,6 +1,7 @@
 import path from "node:path";
 import { log, setContext, timed } from "./log.js";
 import { parseRunHookPayload, researcherPrefix } from "./config.js";
+import { verifySandbox } from "./sandbox.js";
 import { STATES, VmState } from "./state.js";
 import { StatusWriter } from "./status.js";
 
@@ -23,7 +24,7 @@ export class Runner {
   #analysis = null;
   #expiresAt = null;
 
-  constructor({ env, makeStore, makeSyncer, readSecret, steps, now = () => Date.now() }) {
+  constructor({ env, makeStore, makeSyncer, readSecret, steps, netGuard = verifySandbox, now = () => Date.now() }) {
     this.env = env;
     // The store and the syncer are built in /run, not here: the Firebase project
     // and the bucket are per-VM values that arrive in runHookPayload, so neither
@@ -33,6 +34,7 @@ export class Runner {
     this.makeSyncer = makeSyncer;
     this.readSecret = readSecret;
     this.steps = steps;
+    this.netGuard = netGuard;
     this.now = now;
     this.payload = null;
     this.syncer = null;
@@ -69,6 +71,11 @@ export class Runner {
       portal: this.payload.portal,
       platformUserId: this.payload.platform_user_id
     });
+
+    // Before anything else, and fatal if it fails. A package running as the
+    // analysis user can otherwise read execution-role credentials straight from
+    // IMDS, so a VM whose sandbox does not hold must not reach ready.
+    await timed("run.verify_sandbox", {}, () => this.netGuard({ uid: this.env.analysisUid }));
 
     this.#expiresAt = this.now() + EIGHT_HOURS_MS;
     this.#vm.to(STATES.STARTING);

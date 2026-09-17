@@ -4,7 +4,7 @@ import { FirestoreStore } from "./firestore.js";
 import { log } from "./log.js";
 import { HookError, Runner } from "./runner.js";
 import { makeSecretReader } from "./secrets.js";
-import { MemoryStore } from "./status.js";
+import { LogStore, MemoryStore } from "./status.js";
 import { makeSteps } from "./steps.js";
 import { DirBackend, S3Backend, Syncer } from "./sync/index.js";
 
@@ -85,9 +85,11 @@ export function buildRunner(env) {
   const dir = env.backend === "DIR";
   return new Runner({
     env,
-    // DIR mode keeps the status documents in memory so `make run-hook` drives the
-    // whole lifecycle with no Firebase project and no AWS account.
-    makeStore: ({ projectId }) => (dir ? new MemoryStore() : new FirestoreStore({ projectId })),
+    makeStore: ({ projectId }) => {
+      if (env.statusBackend === "LOG") return new LogStore();
+      if (env.statusBackend === "MEMORY" || dir) return new MemoryStore();
+      return new FirestoreStore({ projectId });
+    },
     makeSyncer: ({ bucket, prefix, root }) =>
       new Syncer({
         root,

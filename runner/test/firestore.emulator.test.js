@@ -70,6 +70,7 @@ describe("status writes against the Firestore emulator", { skip: !FIRESTORE || !
       makeSyncer: ({ root }) =>
         new Syncer({ backend: new DirBackend(path.join(work, "remote")), root }),
       readSecret: async () => "report-service-token",
+      netGuard: async () => ({ uid: 1000, binary: "stub" }),
       steps: {
         installCredential: async ({ sessionToken, store: s }) => {
           if (sessionToken) await s.signIn(sessionToken);

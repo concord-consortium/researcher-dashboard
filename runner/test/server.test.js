@@ -42,6 +42,7 @@ beforeEach(async () => {
     makeSyncer: ({ root }) =>
       new Syncer({ backend: new DirBackend(path.join(work, "remote")), root }),
     readSecret: async () => "token",
+    netGuard: async () => ({ uid: 1000, binary: "stub" }),
     steps: {
       installCredential: async () => {},
       resolvePackage: async () => ({ expected_duration_seconds: 1 }),

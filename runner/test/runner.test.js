@@ -52,6 +52,7 @@ function build({ stepOverrides = {}, now, envOverrides = {} } = {}) {
     makeSyncer: ({ root }) =>
       new Syncer({ backend: new DirBackend(path.join(work, "remote")), root }),
     readSecret: async () => "report-service-token-value",
+    netGuard: async () => ({ uid: 1000, binary: "stub" }),
     steps: steps(stepOverrides),
     now
   });

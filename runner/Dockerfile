@@ -38,7 +38,10 @@ ARG DUCKDB_VERSION
 # Node is pinned to a major line rather than taking the `nodejs` default, so a later
 # rebuild cannot change the runtime under a shared VM snapshot. 24 is the current LTS
 # line; the Firebase client SDK declares no engine ceiling and firebase-admin wants >=22.
+# util-linux supplies unshare and setpriv, which the runner uses to give an
+# analysis package its own empty network namespace and an unprivileged uid.
 RUN dnf -y install python3.11 nodejs24 nodejs24-npm unzip tar gzip shadow-utils ca-certificates \
+      util-linux \
     && dnf clean all
 
 RUN curl -fsSL -o /tmp/duckdb.zip \
@@ -60,7 +63,9 @@ WORKDIR /srv
 COPY package.json package-lock.json /srv/
 RUN npm ci --omit=dev && npm cache clean --force
 COPY server/ /srv/server/
-RUN mkdir -p /work && chown analysis:analysis /work
+# /data is the researcher's synced tree, owned by the runner; /work holds an
+# analysis's output and is handed to the analysis user.
+RUN mkdir -p /work /data && chown analysis:analysis /work
 
 EXPOSE 8080
 CMD ["node", "/srv/server/index.js"]

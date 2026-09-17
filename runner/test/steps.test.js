@@ -100,3 +100,19 @@ test("the analysis steps announce themselves as unimplemented rather than silent
     assert.throws(() => steps[name]({}), /is not implemented yet/, name);
   }
 });
+
+test("STATUS_BACKEND selects the store and rejects anything else", async () => {
+  const { loadEnv } = await import("../server/config.js");
+  assert.equal(loadEnv({}).statusBackend, "FIRESTORE");
+  assert.equal(loadEnv({ STATUS_BACKEND: "log" }).statusBackend, "LOG");
+  assert.throws(() => loadEnv({ STATUS_BACKEND: "firestor" }), /must be FIRESTORE, LOG or MEMORY/);
+});
+
+test("LogStore records the state sequence without attempting a sign-in", async () => {
+  const { LogStore } = await import("../server/status.js");
+  const store = new LogStore();
+  // A placeholder session token must not be exchanged: there is no portal to have
+  // minted it, so a sign-in could only fail and take /run down with it.
+  assert.equal(await store.signIn("placeholder"), null);
+  await store.merge("researcher_dashboard/p/researchers/439", { state: "ready" });
+});

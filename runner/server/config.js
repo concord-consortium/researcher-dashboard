@@ -20,14 +20,23 @@ export function loadEnv(env = process.env) {
   if (backend === "DIR" && !env.SYNC_DIR) {
     throw new Error("SYNC_BACKEND=DIR requires SYNC_DIR");
   }
+  // LOG writes the status documents to the log instead of Firestore, for running a
+  // VM before the portal can mint a real session token: the sequence of states is
+  // still observable, without a sign-in that cannot succeed.
+  const statusBackend = (env.STATUS_BACKEND ?? "FIRESTORE").toUpperCase();
+  if (!["FIRESTORE", "LOG", "MEMORY"].includes(statusBackend)) {
+    throw new Error(`STATUS_BACKEND must be FIRESTORE, LOG or MEMORY, got ${statusBackend}`);
+  }
   return {
     port: Number(env.PORT ?? 8080),
     dataRoot: env.DATA_ROOT ?? "/data",
     workRoot: env.WORK_ROOT ?? "/work",
     backend,
+    statusBackend,
     syncDir: env.SYNC_DIR ?? null,
     syncIntervalMs: Number(env.SYNC_INTERVAL_MS ?? 30_000),
-    analysisTimeoutMs: Number(env.ANALYSIS_TIMEOUT_MS ?? 30 * 60_000)
+    analysisTimeoutMs: Number(env.ANALYSIS_TIMEOUT_MS ?? 30 * 60_000),
+    analysisUid: Number(env.ANALYSIS_UID ?? 1000)
   };
 }
 
