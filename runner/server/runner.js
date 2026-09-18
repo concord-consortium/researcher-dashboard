@@ -301,6 +301,9 @@ export class Runner {
       return timed(`analyze.${name}`, {}, fn);
     };
 
+    // The runner pulls only what needs a credential the package must not hold, which
+    // today is CLUE: its class runner token is a Firebase credential, where the
+    // report-server token is the researcher's own and can be handed over.
     const counts = await stage("pull", () =>
       this.steps.pullData({
         classHash,
@@ -308,24 +311,38 @@ export class Runner {
         manifest,
         portal: this.payload.portal,
         dataRoot: this.env.dataRoot,
-        classHash,
         makeStore: this.makeStore
       })
     );
+
+    const prepared = await stage("prepare_package", () =>
+      this.steps.preparePackage({
+        workRoot: this.env.workRoot,
+        dataRoot: this.env.dataRoot,
+        classHash,
+        packageName,
+        portal: this.payload.portal,
+        reportServerToken: this.payload.report_server_token,
+        uid: this.env.analysisUid
+      })
+    );
+
     const display = await stage("run_package", () =>
       this.steps.runPackage({
         manifest,
         classHash,
         dataRoot: this.env.dataRoot,
-        outputDir: path.join(this.env.workRoot, "out", packageName)
+        paths: prepared.paths,
+        env: prepared.env,
+        outputDir: prepared.paths.outputDir
       })
     );
-    // Syncing here rather than only at suspend is what bounds the hook's work: a
-    // crash after this point loses at most the next analysis, not this one.
-    await stage("sync", async () => {
-      const result = await this.syncer.flushAndVerify("analyze");
-      if (!result.ok) throw new Error(result.reason);
-    });
+
+    // The package made the AP and log pulls, so it knows those counts and cannot write
+    // Firestore. Its numbers do not overwrite the runner's own: clue_documents is the
+    // runner's, and a package that reports it anyway does not get to claim it.
+    const reported = await this.steps.readPackageCounts({ outputDir: prepared.paths.outputDir });
+    Object.assign(counts, reported, counts);
 
     return { counts, display };
   }

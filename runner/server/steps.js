@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { readClue } from "./clue-reader.js";
 import { portalHost } from "./config.js";
+import { preparePackage, readPackageCounts } from "./package-env.js";
 import { log } from "./log.js";
 
 // The three things an analysis does, kept behind one interface so the lifecycle,
@@ -55,6 +56,27 @@ export function makeSteps({ login = ccDataLogin, readClueFn = readClue } = {}) {
       if (sessionToken && store?.signIn) await store.signIn(sessionToken);
     },
     resolvePackage: notYet("package fetch and checksum verification"),
+
+    // Everything the package needs before it runs: its own HOME outside the synced data
+    // root with the researcher's cc-data credential in it, the class's data directory,
+    // and an output directory. The package makes the AP and log pulls itself, so this
+    // is what makes that possible; CLUE stays in the runner because its credential must
+    // not reach package code.
+    preparePackage: async ({ workRoot, dataRoot, classHash, packageName, portal, reportServerToken, uid }) =>
+      preparePackage({
+        workRoot,
+        dataRoot,
+        classHash,
+        packageName,
+        portalHost: portalHost(portal),
+        token: reportServerToken,
+        uid
+      }),
+
+    // The package pulled the data, so it knows the answer and log counts, and it cannot
+    // write Firestore. It leaves them in counts.json and the runner merges them with
+    // its own clue_documents count into the class document's data block.
+    readPackageCounts: async ({ outputDir }) => readPackageCounts(outputDir),
 
     // One sign-in per class per project, kept for the VM's life: the class token is
     // good for an hour but the Firebase session it is exchanged for outlives it.

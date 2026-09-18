@@ -35,8 +35,16 @@ function steps(overrides = {}) {
   return {
     installCredential: async () => {},
     resolvePackage: async () => ({ expected_duration_seconds: 60 }),
-    pullData: async () => ({ answers: 201, logs: 490, clue_documents: 12 }),
+    pullData: async () => ({ clue_documents: 12 }),
+    // The package prepares nothing real in these tests; what matters is that the runner
+    // hands it paths and takes counts back.
+    preparePackage: async ({ workRoot, packageName }) => ({
+      paths: { outputDir: path.join(workRoot, "out", packageName), home: path.join(workRoot, "home", packageName) },
+      env: {}
+    }),
     runPackage: async () => ({ version: 1, summary: "ok", sections: [] }),
+    // The AP and log counts come from the package, which made those pulls.
+    readPackageCounts: async () => ({ answers: 201, logs: 490 }),
     ...overrides
   };
 }
