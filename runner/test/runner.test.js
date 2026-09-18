@@ -127,7 +127,7 @@ test("/run refuses a malformed payload rather than serving traffic", async () =>
 test("a full analysis writes starting, ready, running, ready and the class counts", async () => {
   const runner = await started();
   const res = await runner.startPackage({
-    scope: { kind: "class", class_hash: CLASS },
+    scope: { kind: "class", class_hash: CLASS, class_id: 111 },
     package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
     class_tokens: CLASS_TOKENS
   });
@@ -145,7 +145,7 @@ test("a full analysis writes starting, ready, running, ready and the class count
 test("requested_by comes from the session payload, not the request body", async () => {
   const runner = await started();
   await runner.startPackage({
-    scope: { kind: "class", class_hash: CLASS },
+    scope: { kind: "class", class_hash: CLASS, class_id: 111 },
     package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
     class_tokens: CLASS_TOKENS,
     requested_by: "someone-else"
@@ -160,7 +160,7 @@ test("a second analysis is refused with 409 and writes nothing", async () => {
     stepOverrides: { pullData: () => new Promise((r) => (release = r)) }
   });
   const body = {
-    scope: { kind: "class", class_hash: CLASS },
+    scope: { kind: "class", class_hash: CLASS, class_id: 111 },
     package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
     class_tokens: CLASS_TOKENS
   };
@@ -191,7 +191,7 @@ test("an analysis longer than the VM has left is refused, writing nothing", asyn
   await assert.rejects(
     () =>
       runner.startPackage({
-        scope: { kind: "class", class_hash: CLASS },
+        scope: { kind: "class", class_hash: CLASS, class_id: 111 },
         package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
         class_tokens: CLASS_TOKENS
       }),
@@ -209,23 +209,23 @@ test("a malformed /analyze body is refused before any document is created", asyn
     {
       scope: { kind: "cohort" } },
     {
-      scope: { kind: "class", class_hash: CLASS } },
+      scope: { kind: "class", class_hash: CLASS, class_id: 111 } },
     {
-      scope: { kind: "class", class_hash: CLASS },
+      scope: { kind: "class", class_hash: CLASS, class_id: 111 },
       package: { name: "d", version: "1", checksum: "c" }
     },
     {
-      scope: { kind: "class", class_hash: CLASS },
+      scope: { kind: "class", class_hash: CLASS, class_id: 111 },
       package: { name: "d", version: "1", checksum: "c" },
       class_tokens: {}
     },
     {
-      scope: { kind: "class", class_hash: CLASS },
+      scope: { kind: "class", class_hash: CLASS, class_id: 111 },
       package: { name: "d", version: "1", checksum: "c" },
       class_tokens: ["rs-class-token"]
     },
     {
-      scope: { kind: "class", class_hash: CLASS },
+      scope: { kind: "class", class_hash: CLASS, class_id: 111 },
       package: { name: "d", version: "1", checksum: "c" },
       class_tokens: { "report-service-dev": "" }
     }
@@ -247,7 +247,7 @@ test("a failed analysis fails its document but returns the VM to ready", async (
     }
   });
   await runner.startPackage({
-    scope: { kind: "class", class_hash: CLASS },
+    scope: { kind: "class", class_hash: CLASS, class_id: 111 },
     package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
     class_tokens: CLASS_TOKENS
   });
@@ -266,7 +266,7 @@ test("an analysis that outruns its timeout fails rather than hanging", async () 
     stepOverrides: { pullData: () => new Promise(() => {}) }
   });
   await runner.startPackage({
-    scope: { kind: "class", class_hash: CLASS },
+    scope: { kind: "class", class_hash: CLASS, class_id: 111 },
     package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
     class_tokens: CLASS_TOKENS
   });
@@ -325,7 +325,7 @@ test("criterion 11: terminate during an analysis fails the analysis and terminat
     stepOverrides: { pullData: () => new Promise((r) => (release = r)) }
   });
   await runner.startPackage({
-    scope: { kind: "class", class_hash: CLASS },
+    scope: { kind: "class", class_hash: CLASS, class_id: 111 },
     package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
     class_tokens: CLASS_TOKENS
   });
@@ -376,7 +376,7 @@ test("hooks before /run are refused rather than writing a doc for nobody", async
 test("every status document carries platform_id", async () => {
   const runner = await started();
   await runner.startPackage({
-    scope: { kind: "class", class_hash: CLASS },
+    scope: { kind: "class", class_hash: CLASS, class_id: 111 },
     package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
     class_tokens: CLASS_TOKENS
   });
@@ -395,7 +395,7 @@ test("two concurrent analyses cannot both claim the VM", async () => {
     stepOverrides: { resolvePackage: async () => ({ expected_duration_seconds: 60 }) }
   });
   const body = (name) => ({
-    scope: { kind: "class", class_hash: CLASS },
+    scope: { kind: "class", class_hash: CLASS, class_id: 111 },
     package: { name, version: "1.0.0", checksum: "sha256:abc" },
     class_tokens: CLASS_TOKENS
   });
@@ -419,7 +419,7 @@ test("an analysis refused after the claim leaves the VM able to accept the next 
   clock += 7.5 * 60 * 60 * 1000;
   await assert.rejects(
     () => runner.startPackage({
-      scope: { kind: "class", class_hash: CLASS },
+      scope: { kind: "class", class_hash: CLASS, class_id: 111 },
       package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
       class_tokens: CLASS_TOKENS
     }),
@@ -442,7 +442,7 @@ test("class-scoped documents are written on the class token, not the session tok
     }
   });
   await runner.startPackage({
-    scope: { kind: "class", class_hash: CLASS },
+    scope: { kind: "class", class_hash: CLASS, class_id: 111 },
     package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
     class_tokens: CLASS_TOKENS
   });
@@ -459,7 +459,7 @@ test("an analysis whose class_tokens omit the status project is refused", async 
   const runner = await started();
   await assert.rejects(
     () => runner.startPackage({
-      scope: { kind: "class", class_hash: CLASS },
+      scope: { kind: "class", class_hash: CLASS, class_id: 111 },
       package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
       class_tokens: { "collaborative-learning-staging": "clue-only" }
     }),
@@ -472,7 +472,7 @@ test("an analysis whose class_tokens omit the status project is refused", async 
 // blank because the newest run happened to fail.
 test("a failed run leaves the previous display readable", async () => {
   const body = {
-    scope: { kind: "class", class_hash: CLASS },
+    scope: { kind: "class", class_hash: CLASS, class_id: 111 },
     package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
     class_tokens: CLASS_TOKENS
   };
@@ -510,7 +510,7 @@ test("a package name that is not a single path segment is refused", async () => 
   const runner = await started();
   await assert.rejects(
     () => runner.startPackage({
-      scope: { kind: "class", class_hash: CLASS },
+      scope: { kind: "class", class_hash: CLASS, class_id: 111 },
       package: { name: "evil/../other", version: "1.0.0", checksum: "sha256:abc" },
       class_tokens: CLASS_TOKENS
     }),
@@ -531,7 +531,7 @@ test("a class token naming a different class is refused", async () => {
   const runner = await started();
   await assert.rejects(
     () => runner.startPackage({
-      scope: { kind: "class", class_hash: CLASS },
+      scope: { kind: "class", class_hash: CLASS, class_id: 111 },
       package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
       class_tokens: {
         "report-service-dev": jwtWith({ platform_user_id: USER, class_hash: "a-different-class" })
@@ -545,7 +545,7 @@ test("a class token belonging to another researcher is refused", async () => {
   const runner = await started();
   await assert.rejects(
     () => runner.startPackage({
-      scope: { kind: "class", class_hash: CLASS },
+      scope: { kind: "class", class_hash: CLASS, class_id: 111 },
       package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
       class_tokens: {
         "report-service-dev": jwtWith({ platform_user_id: "999", class_hash: CLASS })
@@ -558,7 +558,7 @@ test("a class token belonging to another researcher is refused", async () => {
 test("a token whose claims cannot be read is left to sign-in to reject", async () => {
   const runner = await started();
   const res = await runner.startPackage({
-    scope: { kind: "class", class_hash: CLASS },
+    scope: { kind: "class", class_hash: CLASS, class_id: 111 },
     package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
     class_tokens: { "report-service-dev": "not-a-jwt" }
   });
@@ -596,7 +596,7 @@ test("refresh-token replaces the report-server credential when one is sent", asy
 test("the result records the package name, version and checksum that ran", async () => {
   const runner = await started();
   await runner.startPackage({
-    scope: { kind: "class", class_hash: CLASS },
+    scope: { kind: "class", class_hash: CLASS, class_id: 111 },
     package: { name: "class-counts", version: "2.0.0", checksum: "sha256:beef" },
     class_tokens: CLASS_TOKENS
   });
@@ -668,4 +668,39 @@ test("DIR mode declines to revoke the report-server credential", async () => {
     fetchImpl: async () => { called = true; return { ok: true }; }
   });
   assert.equal(called, false);
+});
+
+// report-server filters a run by the portal's numeric class id, and nothing inside the VM
+// can derive it from the class hash. Refusing here costs nothing; discovering it missing
+// inside a package costs a pull that cannot be made.
+test("a scope without a class_id is refused", async () => {
+  const runner = await started();
+
+  await assert.rejects(
+    () => runner.startPackage({
+      scope: { kind: "class", class_hash: CLASS },
+      package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
+      class_tokens: CLASS_TOKENS
+    }),
+    (err) => err.status === 400 && /class_id/.test(err.message)
+  );
+});
+
+// The package makes the AP and log pulls itself, so the id has to reach its environment
+// rather than stopping at the runner.
+test("the portal class id reaches the package's environment", async () => {
+  let prepared = null;
+  const runner = build({ stepOverrides: { preparePackage: async (args) => {
+    prepared = args;
+    return { paths: { home: "/h", outputDir: "/o", dataDir: "/d" }, env: {} };
+  } } });
+  await runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+
+  await runner.startPackage({
+    scope: { kind: "class", class_hash: CLASS, class_id: 111 },
+    package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
+    class_tokens: CLASS_TOKENS
+  });
+  await runner.currentAnalysis?.done;
+  assert.equal(prepared?.classId, 111);
 });

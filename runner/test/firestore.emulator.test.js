@@ -122,7 +122,7 @@ describe("status writes against the Firestore emulator", { skip: !FIRESTORE || !
 
   test("an analysis writes a real document that reads back as done", async () => {
     await runner.startPackage({
-      scope: { kind: "class", class_hash: CLASS },
+      scope: { kind: "class", class_hash: CLASS, class_id: 111 },
       package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
       class_tokens: {
         "report-service-dev": customToken({

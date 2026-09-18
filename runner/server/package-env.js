@@ -50,20 +50,23 @@ export function writeCcDataCredential({ home, portalHost, token }) {
 // The package runs as another uid in its own namespace, so it inherits nothing useful
 // and everything it needs has to be named here. No AWS variables and no Firebase
 // session: it pulls through cc-data as the researcher and nothing else.
-export function packageEnvironment({ paths, portalHost, classHash }) {
+export function packageEnvironment({ paths, portalHost, classHash, classId }) {
   return {
     HOME: paths.home,
     PATH: "/usr/local/bin:/usr/bin:/bin",
     CC_DATA_LOCAL: paths.dataDir,
     CC_DATA_PORTAL: portalHost,
     RD_CLASS_HASH: classHash,
+    // What report-server filters a run by. The hash identifies the class to Firebase and
+    // CLUE; this identifies it to the portal, and neither derives from the other.
+    RD_PORTAL_CLASS_ID: String(classId),
     RD_DATA_DIR: paths.dataDir,
     RD_OUTPUT_DIR: paths.outputDir
   };
 }
 
 // Everything the package needs, prepared and owned by the analysis uid.
-export function preparePackage({ workRoot, dataRoot, classHash, packageName, portalHost, token, uid }) {
+export function preparePackage({ workRoot, dataRoot, classHash, classId, packageName, portalHost, token, uid }) {
   const paths = packagePaths({ workRoot, dataRoot, classHash, packageName });
 
   fs.rmSync(paths.home, { recursive: true, force: true });
@@ -90,7 +93,7 @@ export function preparePackage({ workRoot, dataRoot, classHash, packageName, por
     credential: Boolean(credentialFile)
   });
 
-  return { paths, env: packageEnvironment({ paths, portalHost, classHash }) };
+  return { paths, env: packageEnvironment({ paths, portalHost, classHash, classId }) };
 }
 
 // What the package reports back, because it makes the pulls and the runner writes

@@ -92,7 +92,7 @@ test("the lifecycle hooks route through to the runner", async () => {
 test("/run-package answers 202 with the document path, not 200", async () => {
   await post(`${HOOK}/run`, { microvmId: "mvm-1", runHookPayload: PAYLOAD });
   const res = await post("/run-package", {
-    scope: { kind: "class", class_hash: CLASS },
+    scope: { kind: "class", class_hash: CLASS, class_id: 111 },
     package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
     class_tokens: { "report-service-dev": "rs-class-token" }
   });

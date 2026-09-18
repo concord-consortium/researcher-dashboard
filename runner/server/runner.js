@@ -177,8 +177,14 @@ export class Runner {
     this.#requireStarted();
     const { scope, package: pkg, class_tokens: classTokens } = body ?? {};
 
+    // class_id as well as class_hash: Firestore and CLUE key on the hash, while
+    // report-server filters a run by the portal's numeric class id, and nothing in the
+    // VM can derive one from the other.
     if (!scope || scope.kind !== "class" || typeof scope.class_hash !== "string") {
-      throw new HookError(400, "scope must be {kind: 'class', class_hash}");
+      throw new HookError(400, "scope must be {kind: 'class', class_hash, class_id}");
+    }
+    if (scope.class_id === undefined || scope.class_id === null || scope.class_id === "") {
+      throw new HookError(400, "scope must carry class_id, which report-server filters runs by");
     }
     if (!pkg?.name || !pkg?.version || !pkg?.checksum) {
       throw new HookError(400, "package must carry name, version and checksum");
@@ -221,6 +227,7 @@ export class Runner {
     // terminated or cleared. The claim is released on every refusal below, or a
     // rejected request would leave the VM permanently busy.
     const classHash = scope.class_hash;
+    const classId = scope.class_id;
     const packageName = pkg.name;
     this.#analysis = { packageName, classHash };
 
@@ -253,7 +260,7 @@ export class Runner {
       this.#vm.to(STATES.RUNNING);
       await this.status.researcher({ state: STATES.RUNNING, current_package: packageName });
 
-      record = { packageName, classHash, classTokens, manifest, pkg };
+      record = { packageName, classHash, classId, classTokens, manifest, pkg };
       this.#analysis = record;
     } catch (err) {
       this.#analysis = null;
@@ -322,7 +329,7 @@ export class Runner {
   }
 
   async #analysisSteps(record) {
-    const { packageName, classHash, classTokens, manifest } = record;
+    const { packageName, classHash, classId, classTokens, manifest } = record;
     const stage = async (name, fn) => {
       await this.status.resultStage(classHash, packageName, name);
       return timed(`analyze.${name}`, {}, fn);
@@ -347,6 +354,7 @@ export class Runner {
         workRoot: this.env.workRoot,
         dataRoot: this.env.dataRoot,
         classHash,
+        classId,
         packageName,
         portal: this.payload.portal,
         reportServerToken: this.payload.report_server_token,
