@@ -40,7 +40,10 @@ export function createServer({ runner, env }) {
     }),
     // 202, not 200: the document exists and the work has started, but the analysis
     // is still running when this returns.
-    "POST /analyze": async (req) => ({ status: 202, body: await runner.analyze(await readJson(req)) }),
+    // The result document is keyed by package name, so the caller already knows the
+    // path it is asking to have recomputed. Named for the package rather than the page
+    // that first asked: "analyze class" is one caller of this, not what it is.
+    "POST /run-package": async (req) => ({ status: 202, body: await runner.startPackage(await readJson(req)) }),
     "POST /refresh-token": async (req) => ({
       status: 200,
       body: await runner.refreshToken(await readJson(req))
@@ -50,7 +53,7 @@ export function createServer({ runner, env }) {
       body: {
         state: runner.state,
         microvm_id: runner.microvmId,
-        current_analysis: runner.currentAnalysis?.analysisId ?? null,
+        current_package: runner.currentAnalysis?.packageName ?? null,
         expires_at: runner.expiresAt ? new Date(runner.expiresAt).toISOString() : null,
         sync_backend: env.backend
       }

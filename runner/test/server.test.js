@@ -88,23 +88,22 @@ test("the lifecycle hooks route through to the runner", async () => {
   ]);
 });
 
-test("/analyze answers 202 with the document path, not 200", async () => {
+test("/run-package answers 202 with the document path, not 200", async () => {
   await post(`${HOOK}/run`, { microvmId: "mvm-1", runHookPayload: PAYLOAD });
-  const res = await post("/analyze", {
-    analysis_id: "a1",
+  const res = await post("/run-package", {
     scope: { kind: "class", class_hash: CLASS },
     package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
     class_tokens: { "report-service-dev": "rs-class-token" }
   });
   assert.equal(res.status, 202);
   const body = await res.json();
-  assert.equal(body.analysis_id, "a1");
-  assert.equal(body.doc_path, `researcher_dashboard/${PORTAL}/classes/${CLASS}/analyses/a1`);
+  assert.equal(body.package, "demo");
+  assert.equal(body.doc_path, `researcher_dashboard/${PORTAL}/classes/${CLASS}/results/demo`);
 });
 
 test("a refusal surfaces its own status code and reason", async () => {
   await post(`${HOOK}/run`, { microvmId: "mvm-1", runHookPayload: PAYLOAD });
-  const res = await post("/analyze", { analysis_id: "a1" });
+  const res = await post("/run-package", {});
   assert.equal(res.status, 400);
   assert.match((await res.json()).error, /scope must be/);
 });
@@ -116,7 +115,7 @@ test("a hook before /run is refused with 409 rather than 500", async () => {
 });
 
 test("malformed JSON is a 400, not an unhandled crash", async () => {
-  const res = await fetch(`${base}/analyze`, { method: "POST", body: "{not json" });
+  const res = await fetch(`${base}/run-package`, { method: "POST", body: "{not json" });
   assert.equal(res.status, 400);
   assert.match((await res.json()).error, /not valid JSON/);
 });

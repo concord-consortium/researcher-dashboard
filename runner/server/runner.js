@@ -97,7 +97,7 @@ export class Runner {
       started_at: new Date(this.now()).toISOString(),
       expires_at: new Date(this.#expiresAt).toISOString(),
       classes: [],
-      current_analysis: null
+      current_package: null
     });
 
     this.syncer = this.makeSyncer({
@@ -134,20 +134,22 @@ export class Runner {
     return { state: this.#vm.state };
   }
 
-  // Validation order matters: every refusal below happens before the analysis
-  // document is created, so a refused request leaves Firestore untouched.
-  async analyze(body) {
+  // Validation order matters: every refusal below happens before the result document
+  // is touched, so a refused request leaves Firestore unchanged.
+  async startPackage(body) {
     this.#requireStarted();
-    const { analysis_id: analysisId, scope, package: pkg, class_tokens: classTokens } = body ?? {};
+    const { scope, package: pkg, class_tokens: classTokens } = body ?? {};
 
-    if (!analysisId || typeof analysisId !== "string") {
-      throw new HookError(400, "analysis_id is required");
-    }
     if (!scope || scope.kind !== "class" || typeof scope.class_hash !== "string") {
       throw new HookError(400, "scope must be {kind: 'class', class_hash}");
     }
     if (!pkg?.name || !pkg?.version || !pkg?.checksum) {
       throw new HookError(400, "package must carry name, version and checksum");
+    }
+    // The package name is the result document's id, so it has to be a single path
+    // segment; a name with a slash would silently write a nested collection.
+    if (pkg.name.includes("/") || pkg.name === "." || pkg.name === "..") {
+      throw new HookError(400, "package name must be a single path segment");
     }
     // One class token per Firebase project the analysis touches, keyed by FirebaseApp
     // name, since a custom token is signed by one project's service account and cannot
@@ -156,17 +158,18 @@ export class Runner {
       throw new HookError(400, "class_tokens must map a firebase app name to a token");
     }
     if (this.#analysis) {
-      throw new HookError(409, "an analysis is already running on this VM", {
-        analysis_id: this.#analysis.analysisId
+      throw new HookError(409, "a package is already running on this VM", {
+        package: this.#analysis.packageName
       });
     }
     // Claimed synchronously, before the first await. resolvePackage and
-    // analysisCreated both yield, so a guard that only set #analysis afterwards let
+    // resultStarted both yield, so a guard that only set #analysis afterwards let
     // two concurrent /analyze calls past it, and only one of them would then be
     // terminated or cleared. The claim is released on every refusal below, or a
     // rejected request would leave the VM permanently busy.
     const classHash = scope.class_hash;
-    this.#analysis = { analysisId, classHash };
+    const packageName = pkg.name;
+    this.#analysis = { packageName, classHash };
 
     let record;
     try {
@@ -182,17 +185,17 @@ export class Runner {
         );
       }
 
-      setContext({ class_hash: classHash, analysis_id: analysisId });
+      setContext({ class_hash: classHash, package: packageName });
       await this.#signInForClass(classHash, classTokens);
-      await this.status.analysisCreated(classHash, analysisId, {
+      await this.status.resultStarted(classHash, packageName, {
         pkg,
         requestedBy: this.payload.platform_user_id
       });
 
       this.#vm.to(STATES.RUNNING);
-      await this.status.researcher({ state: STATES.RUNNING, current_analysis: analysisId });
+      await this.status.researcher({ state: STATES.RUNNING, current_package: packageName });
 
-      record = { analysisId, classHash, classTokens, manifest, pkg };
+      record = { packageName, classHash, classTokens, manifest, pkg };
       this.#analysis = record;
     } catch (err) {
       this.#analysis = null;
@@ -205,13 +208,13 @@ export class Runner {
     );
 
     return {
-      analysis_id: analysisId,
-      doc_path: `researcher_dashboard/${this.payload.portal}/classes/${classHash}/analyses/${analysisId}`
+      package: packageName,
+      doc_path: `researcher_dashboard/${this.payload.portal}/classes/${classHash}/results/${packageName}`
     };
   }
 
   async #runAnalysis(record) {
-    const { analysisId, classHash } = record;
+    const { packageName, classHash } = record;
     let timer;
     const timeout = new Promise((_, reject) => {
       timer = setTimeout(
@@ -223,22 +226,22 @@ export class Runner {
     try {
       const result = await Promise.race([this.#analysisSteps(record), timeout]);
       await this.status.classCounts(classHash, result.counts);
-      await this.status.analysisDone(classHash, analysisId, result.display);
+      await this.status.resultDone(classHash, packageName, result.display);
     } catch (err) {
       log.error("analyze.failed", { error: err.message });
-      await this.status.analysisFailed(classHash, analysisId, err.message);
+      await this.status.resultFailed(classHash, packageName, err.message);
     } finally {
       // Cleared rather than unref'd: unref would stop the timeout firing whenever
       // nothing else holds the loop, and leaving it armed would keep a handle alive
       // for the full timeout after a fast analysis.
       clearTimeout(timer);
       this.#analysis = null;
-      setContext({ class_hash: null, analysis_id: null });
+      setContext({ class_hash: null, package: null });
       // An analysis failure is the analysis's, not the VM's: the VM is still able
       // to serve, so it returns to ready. Only a failed sync makes the VM failed.
       if (!this.#vm.isTerminal && this.#vm.state === STATES.RUNNING) {
         this.#vm.to(STATES.READY);
-        await this.status.researcher({ state: STATES.READY, current_analysis: null });
+        await this.status.researcher({ state: STATES.READY, current_package: null });
       }
     }
   }
@@ -261,9 +264,9 @@ export class Runner {
   }
 
   async #analysisSteps(record) {
-    const { analysisId, classHash, classTokens, manifest } = record;
+    const { packageName, classHash, classTokens, manifest } = record;
     const stage = async (name, fn) => {
-      await this.status.analysisStage(classHash, analysisId, name);
+      await this.status.resultStage(classHash, packageName, name);
       return timed(`analyze.${name}`, {}, fn);
     };
 
@@ -283,7 +286,7 @@ export class Runner {
         manifest,
         classHash,
         dataRoot: this.env.dataRoot,
-        outputDir: path.join(this.env.workRoot, "out", analysisId)
+        outputDir: path.join(this.env.workRoot, "out", packageName)
       })
     );
     // Syncing here rather than only at suspend is what bounds the hook's work: a
@@ -327,8 +330,8 @@ export class Runner {
     // A VM torn down mid-analysis leaves a document that would otherwise read
     // `running` forever, so it is failed here before the VM stops writing.
     if (this.#analysis) {
-      const { classHash, analysisId } = this.#analysis;
-      await this.status.analysisFailed(classHash, analysisId, "VM terminated during analysis");
+      const { classHash, packageName } = this.#analysis;
+      await this.status.resultFailed(classHash, packageName, "VM terminated during analysis");
       this.#analysis = null;
     }
 

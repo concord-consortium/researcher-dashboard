@@ -10,8 +10,12 @@ export function classPath(portal, classHash) {
   return `researcher_dashboard/${portal}/classes/${classHash}`;
 }
 
-export function analysisPath(portal, classHash, analysisId) {
-  return `${classPath(portal, classHash)}/analyses/${analysisId}`;
+// One document per class and package, holding that package's current result for that
+// class rather than a record per run. The source data in S3 is overwritten on every
+// pull and cc-data's manifest carries its provenance, so a history of results here
+// would be snapshots of inputs that no longer exist.
+export function resultPath(portal, classHash, packageName) {
+  return `${classPath(portal, classHash)}/results/${packageName}`;
 }
 
 // Writes the three documents the dashboard reads. The store is injected so the
@@ -61,35 +65,38 @@ export class StatusWriter {
     }));
   }
 
-  // The runner creates the analysis document, and only once it has accepted the
-  // work, so there is no `requested` state and a refused /analyze writes nothing.
-  // requested_by comes from the session token the VM holds, never from the request.
-  async analysisCreated(classHash, analysisId, { pkg, requestedBy }) {
+  // The runner writes the result document only once it has accepted the work, so a
+  // refused request changes nothing. requested_by comes from the session token the VM
+  // holds, never from the request, and records who ran it last: the document is shared
+  // by every researcher of the class, so overwriting one another is the intent.
+  //
+  // A merge rather than a set, and display is deliberately absent: a run that is
+  // starting must not wipe the last good display, which stays visible until this run
+  // produces a new one.
+  async resultStarted(classHash, packageName, { pkg, requestedBy }) {
     const now = this.#now();
-    await this.classStore(classHash).set(analysisPath(this.portal, classHash, analysisId), this.#stamped({
+    await this.classStore(classHash).merge(resultPath(this.portal, classHash, packageName), this.#stamped({
       status: "running",
       stage: "starting",
-      created_at: now,
       updated_at: now,
       finished_at: null,
       error: null,
       package: pkg,
       requested_by: requestedBy,
-      requested_at: now,
-      display: null
+      requested_at: now
     }));
   }
 
-  async analysisStage(classHash, analysisId, stage) {
-    await this.classStore(classHash).merge(analysisPath(this.portal, classHash, analysisId), this.#stamped({
+  async resultStage(classHash, packageName, stage) {
+    await this.classStore(classHash).merge(resultPath(this.portal, classHash, packageName), this.#stamped({
       stage,
       updated_at: this.#now()
     }));
   }
 
-  async analysisDone(classHash, analysisId, display) {
+  async resultDone(classHash, packageName, display) {
     const now = this.#now();
-    await this.classStore(classHash).merge(analysisPath(this.portal, classHash, analysisId), this.#stamped({
+    await this.classStore(classHash).merge(resultPath(this.portal, classHash, packageName), this.#stamped({
       status: "done",
       stage: "done",
       display,
@@ -99,9 +106,11 @@ export class StatusWriter {
     }));
   }
 
-  async analysisFailed(classHash, analysisId, error) {
+  // display is not cleared: a failed run leaves the last good result readable, with
+  // the failure beside it, rather than blanking the page.
+  async resultFailed(classHash, packageName, error) {
     const now = this.#now();
-    await this.classStore(classHash).merge(analysisPath(this.portal, classHash, analysisId), this.#stamped({
+    await this.classStore(classHash).merge(resultPath(this.portal, classHash, packageName), this.#stamped({
       status: "failed",
       error,
       finished_at: now,

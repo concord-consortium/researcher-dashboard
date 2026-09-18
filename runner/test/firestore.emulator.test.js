@@ -7,7 +7,7 @@ import { doc, getDoc } from "firebase/firestore";
 import { loadEnv } from "../server/config.js";
 import { FirestoreStore } from "../server/firestore.js";
 import { Runner } from "../server/runner.js";
-import { analysisPath, classPath, researcherPath } from "../server/status.js";
+import { resultPath, classPath, researcherPath } from "../server/status.js";
 import { DirBackend, Syncer } from "../server/sync/index.js";
 
 // Skipped unless the emulators are up, so the default `npm test` stays hermetic.
@@ -121,8 +121,7 @@ describe("status writes against the Firestore emulator", { skip: !FIRESTORE || !
   });
 
   test("an analysis writes a real document that reads back as done", async () => {
-    await runner.analyze({
-      analysis_id: "emu-1",
+    await runner.startPackage({
       scope: { kind: "class", class_hash: CLASS },
       package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
       class_tokens: {
@@ -136,7 +135,7 @@ describe("status writes against the Firestore emulator", { skip: !FIRESTORE || !
     });
     await runner.currentAnalysis?.done;
 
-    const analysis = await read(analysisPath(PORTAL, CLASS, "emu-1"));
+    const analysis = await read(resultPath(PORTAL, CLASS, "demo"));
     assert.equal(analysis.status, "done");
     assert.equal(analysis.requested_by, USER);
     assert.deepEqual(analysis.package, {

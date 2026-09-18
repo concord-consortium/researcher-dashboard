@@ -5,7 +5,7 @@ import path from "node:path";
 import test, { afterEach, beforeEach } from "node:test";
 import { loadEnv } from "../server/config.js";
 import { HookError, Runner } from "../server/runner.js";
-import { MemoryStore, analysisPath, researcherPath } from "../server/status.js";
+import { MemoryStore, resultPath, researcherPath } from "../server/status.js";
 import { DirBackend, Syncer } from "../server/sync/index.js";
 
 const PORTAL = "learn_portal_staging_concord_org";
@@ -107,17 +107,16 @@ test("/run refuses a malformed payload rather than serving traffic", async () =>
 
 test("a full analysis writes starting, ready, running, ready and the class counts", async () => {
   const runner = await started();
-  const res = await runner.analyze({
-    analysis_id: "a1",
+  const res = await runner.startPackage({
     scope: { kind: "class", class_hash: CLASS },
     package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
     class_tokens: CLASS_TOKENS
   });
   await runner.currentAnalysis?.done;
-  assert.equal(res.analysis_id, "a1");
+  assert.equal(res.package, "demo");
 
   assert.deepEqual(store.states(rdoc()), ["starting", "ready", "running", "ready"]);
-  const doc = store.get(analysisPath(PORTAL, CLASS, "a1"));
+  const doc = store.get(resultPath(PORTAL, CLASS, "demo"));
   assert.equal(doc.status, "done");
   assert.equal(doc.requested_by, USER);
   assert.deepEqual(doc.package, { name: "demo", version: "1.0.0", checksum: "sha256:abc" });
@@ -126,15 +125,14 @@ test("a full analysis writes starting, ready, running, ready and the class count
 
 test("requested_by comes from the session payload, not the request body", async () => {
   const runner = await started();
-  await runner.analyze({
-    analysis_id: "a1",
+  await runner.startPackage({
     scope: { kind: "class", class_hash: CLASS },
     package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
     class_tokens: CLASS_TOKENS,
     requested_by: "someone-else"
   });
   await runner.currentAnalysis?.done;
-  assert.equal(store.get(analysisPath(PORTAL, CLASS, "a1")).requested_by, USER);
+  assert.equal(store.get(resultPath(PORTAL, CLASS, "demo")).requested_by, USER);
 });
 
 test("a second analysis is refused with 409 and writes nothing", async () => {
@@ -143,20 +141,19 @@ test("a second analysis is refused with 409 and writes nothing", async () => {
     stepOverrides: { pullData: () => new Promise((r) => (release = r)) }
   });
   const body = {
-    analysis_id: "a1",
     scope: { kind: "class", class_hash: CLASS },
     package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
     class_tokens: CLASS_TOKENS
   };
-  await runner.analyze(body);
+  await runner.startPackage(body);
   const before = store.writes.length;
 
   await assert.rejects(
-    () => runner.analyze({ ...body, analysis_id: "a2" }),
+    () => runner.startPackage({ ...body, package: { name: "other", version: "1.0.0", checksum: "sha256:def" } }),
     (err) => err instanceof HookError && err.status === 409
   );
   assert.equal(store.writes.length, before, "a refusal must leave Firestore untouched");
-  assert.equal(store.get(analysisPath(PORTAL, CLASS, "a2")), undefined);
+  assert.equal(store.get(resultPath(PORTAL, CLASS, "other")), undefined);
 
   release({ answers: 1, logs: 1, clue_documents: 1 });
   await runner.currentAnalysis?.done;
@@ -174,8 +171,7 @@ test("an analysis longer than the VM has left is refused, writing nothing", asyn
 
   await assert.rejects(
     () =>
-      runner.analyze({
-        analysis_id: "a1",
+      runner.startPackage({
         scope: { kind: "class", class_hash: CLASS },
         package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
         class_tokens: CLASS_TOKENS
@@ -190,35 +186,33 @@ test("a malformed /analyze body is refused before any document is created", asyn
   const before = store.writes.length;
   for (const body of [
     {},
-    { analysis_id: "a1" },
-    { analysis_id: "a1", scope: { kind: "cohort" } },
-    { analysis_id: "a1", scope: { kind: "class", class_hash: CLASS } },
+    {},
     {
-      analysis_id: "a1",
+      scope: { kind: "cohort" } },
+    {
+      scope: { kind: "class", class_hash: CLASS } },
+    {
       scope: { kind: "class", class_hash: CLASS },
       package: { name: "d", version: "1", checksum: "c" }
     },
     {
-      analysis_id: "a1",
       scope: { kind: "class", class_hash: CLASS },
       package: { name: "d", version: "1", checksum: "c" },
       class_tokens: {}
     },
     {
-      analysis_id: "a1",
       scope: { kind: "class", class_hash: CLASS },
       package: { name: "d", version: "1", checksum: "c" },
       class_tokens: ["rs-class-token"]
     },
     {
-      analysis_id: "a1",
       scope: { kind: "class", class_hash: CLASS },
       package: { name: "d", version: "1", checksum: "c" },
       class_tokens: { "report-service-dev": "" }
     }
   ]) {
     await assert.rejects(
-      () => runner.analyze(body),
+      () => runner.startPackage(body),
       (err) => err instanceof HookError && err.status === 400
     );
   }
@@ -233,15 +227,14 @@ test("a failed analysis fails its document but returns the VM to ready", async (
       }
     }
   });
-  await runner.analyze({
-    analysis_id: "a1",
+  await runner.startPackage({
     scope: { kind: "class", class_hash: CLASS },
     package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
     class_tokens: CLASS_TOKENS
   });
   await runner.currentAnalysis?.done;
 
-  const doc = store.get(analysisPath(PORTAL, CLASS, "a1"));
+  const doc = store.get(resultPath(PORTAL, CLASS, "demo"));
   assert.equal(doc.status, "failed");
   assert.match(doc.error, /package exited 1/);
   assert.equal(runner.state, "ready", "the VM can still serve, so it is not failed");
@@ -253,15 +246,14 @@ test("an analysis that outruns its timeout fails rather than hanging", async () 
     envOverrides: { analysisTimeoutMs: 20 },
     stepOverrides: { pullData: () => new Promise(() => {}) }
   });
-  await runner.analyze({
-    analysis_id: "a1",
+  await runner.startPackage({
     scope: { kind: "class", class_hash: CLASS },
     package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
     class_tokens: CLASS_TOKENS
   });
   await runner.currentAnalysis?.done;
 
-  const doc = store.get(analysisPath(PORTAL, CLASS, "a1"));
+  const doc = store.get(resultPath(PORTAL, CLASS, "demo"));
   assert.equal(doc.status, "failed");
   assert.match(doc.error, /exceeded 20ms/);
   assert.equal(runner.state, "ready");
@@ -313,8 +305,7 @@ test("criterion 11: terminate during an analysis fails the analysis and terminat
   const runner = await started({
     stepOverrides: { pullData: () => new Promise((r) => (release = r)) }
   });
-  await runner.analyze({
-    analysis_id: "a1",
+  await runner.startPackage({
     scope: { kind: "class", class_hash: CLASS },
     package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
     class_tokens: CLASS_TOKENS
@@ -323,8 +314,8 @@ test("criterion 11: terminate during an analysis fails the analysis and terminat
   const inFlight = runner.currentAnalysis.done;
   await runner.terminate();
   assert.equal(runner.state, "terminated");
-  assert.equal(store.get(analysisPath(PORTAL, CLASS, "a1")).status, "failed");
-  assert.match(store.get(analysisPath(PORTAL, CLASS, "a1")).error, /terminated during analysis/);
+  assert.equal(store.get(resultPath(PORTAL, CLASS, "demo")).status, "failed");
+  assert.match(store.get(resultPath(PORTAL, CLASS, "demo")).error, /terminated during analysis/);
   assert.equal(store.states(rdoc()).at(-1), "terminated");
 
   release({ answers: 0, logs: 0, clue_documents: 0 });
@@ -348,7 +339,7 @@ test("/refresh-token replaces the session token and re-signs in", async () => {
 test("hooks before /run are refused rather than writing a doc for nobody", async () => {
   const runner = build();
   for (const call of [
-    () => runner.analyze({}),
+    () => runner.startPackage({}),
     () => runner.suspend(),
     () => runner.resume(),
     () => runner.terminate(),
@@ -365,8 +356,7 @@ test("hooks before /run are refused rather than writing a doc for nobody", async
 // that omitted it would have every write denied, and only against real rules.
 test("every status document carries platform_id", async () => {
   const runner = await started();
-  await runner.analyze({
-    analysis_id: "a1",
+  await runner.startPackage({
     scope: { kind: "class", class_hash: CLASS },
     package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
     class_tokens: CLASS_TOKENS
@@ -374,7 +364,7 @@ test("every status document carries platform_id", async () => {
   await runner.currentAnalysis?.done;
 
   for (const path of [rdoc(), `researcher_dashboard/${PORTAL}/classes/${CLASS}`,
-                      analysisPath(PORTAL, CLASS, "a1")]) {
+                      resultPath(PORTAL, CLASS, "demo")]) {
     assert.equal(store.get(path).platform_id, PLATFORM_ID, `${path} has no platform_id`);
   }
 });
@@ -385,14 +375,13 @@ test("two concurrent analyses cannot both claim the VM", async () => {
   const runner = await started({
     stepOverrides: { resolvePackage: async () => ({ expected_duration_seconds: 60 }) }
   });
-  const body = (id) => ({
-    analysis_id: id,
+  const body = (name) => ({
     scope: { kind: "class", class_hash: CLASS },
-    package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
+    package: { name, version: "1.0.0", checksum: "sha256:abc" },
     class_tokens: CLASS_TOKENS
   });
 
-  const results = await Promise.allSettled([runner.analyze(body("c1")), runner.analyze(body("c2"))]);
+  const results = await Promise.allSettled([runner.startPackage(body("first")), runner.startPackage(body("second"))]);
   const accepted = results.filter((r) => r.status === "fulfilled");
   const refused = results.filter((r) => r.status === "rejected");
   assert.equal(accepted.length, 1, "exactly one analysis may be accepted");
@@ -410,8 +399,7 @@ test("an analysis refused after the claim leaves the VM able to accept the next 
   });
   clock += 7.5 * 60 * 60 * 1000;
   await assert.rejects(
-    () => runner.analyze({
-      analysis_id: "too-long",
+    () => runner.startPackage({
       scope: { kind: "class", class_hash: CLASS },
       package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
       class_tokens: CLASS_TOKENS
@@ -434,8 +422,7 @@ test("class-scoped documents are written on the class token, not the session tok
       return s;
     }
   });
-  await runner.analyze({
-    analysis_id: "a1",
+  await runner.startPackage({
     scope: { kind: "class", class_hash: CLASS },
     package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
     class_tokens: CLASS_TOKENS
@@ -445,19 +432,69 @@ test("class-scoped documents are written on the class token, not the session tok
   assert.equal(classStores.length, 1, "one signed-in connection per class");
   assert.deepEqual(classStores[0].signedInWith, [CLASS_TOKENS["report-service-dev"]]);
   const paths = classStores[0].writes.map((w) => w.path);
-  assert.ok(paths.includes(analysisPath(PORTAL, CLASS, "a1")), "the analysis doc goes out on the class token");
+  assert.ok(paths.includes(resultPath(PORTAL, CLASS, "demo")), "the analysis doc goes out on the class token");
   assert.ok(paths.some((p) => p.endsWith(`classes/${CLASS}`)), "the class doc goes out on the class token");
 });
 
 test("an analysis whose class_tokens omit the status project is refused", async () => {
   const runner = await started();
   await assert.rejects(
-    () => runner.analyze({
-      analysis_id: "a1",
+    () => runner.startPackage({
       scope: { kind: "class", class_hash: CLASS },
       package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
       class_tokens: { "collaborative-learning-staging": "clue-only" }
     }),
     (err) => err instanceof HookError && err.status === 400 && /report-service-dev/.test(err.message)
+  );
+});
+
+// One document per class and package means a failing run writes over a good one. The
+// last display stays readable with the failure beside it, rather than the page going
+// blank because the newest run happened to fail.
+test("a failed run leaves the previous display readable", async () => {
+  const body = {
+    scope: { kind: "class", class_hash: CLASS },
+    package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
+    class_tokens: CLASS_TOKENS
+  };
+
+  // One runner and one store across both runs: the point is what the second run does
+  // to the document the first one wrote.
+  let attempt = 0;
+  const runner = await started({
+    stepOverrides: {
+      runPackage: async () => {
+        attempt += 1;
+        if (attempt === 2) throw new Error("package exited 1");
+        return { version: 1, summary: "first run", sections: [] };
+      }
+    }
+  });
+
+  await runner.startPackage(body);
+  await runner.currentAnalysis?.done;
+  const display = store.get(resultPath(PORTAL, CLASS, "demo")).display;
+  assert.ok(display, "the first run produced a display");
+
+  await runner.startPackage(body);
+  await runner.currentAnalysis?.done;
+
+  const doc = store.get(resultPath(PORTAL, CLASS, "demo"));
+  assert.equal(doc.status, "failed");
+  assert.match(doc.error, /package exited 1/);
+  assert.deepEqual(doc.display, display, "the last good display survives the failure");
+});
+
+// The document id is the package name, so a name with a slash would write into a
+// nested collection instead of the class's results.
+test("a package name that is not a single path segment is refused", async () => {
+  const runner = await started();
+  await assert.rejects(
+    () => runner.startPackage({
+      scope: { kind: "class", class_hash: CLASS },
+      package: { name: "evil/../other", version: "1.0.0", checksum: "sha256:abc" },
+      class_tokens: CLASS_TOKENS
+    }),
+    (err) => err instanceof HookError && err.status === 400 && /single path segment/.test(err.message)
   );
 });
