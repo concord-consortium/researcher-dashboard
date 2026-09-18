@@ -498,3 +498,76 @@ test("a package name that is not a single path segment is refused", async () => 
     (err) => err instanceof HookError && err.status === 400 && /single path segment/.test(err.message)
   );
 });
+
+// The mint is the only gate on which class a researcher may read, so the runner checks
+// that the token it was handed says what the request says. A launcher bug that sent the
+// wrong class's token would otherwise pull that class's student work into this
+// researcher's prefix and hand it to their package.
+function jwtWith(claims) {
+  const b64 = (o) => Buffer.from(JSON.stringify(o)).toString("base64url");
+  return `${b64({ alg: "RS256" })}.${b64({ uid: "u", claims })}.sig`;
+}
+
+test("a class token naming a different class is refused", async () => {
+  const runner = await started();
+  await assert.rejects(
+    () => runner.startPackage({
+      scope: { kind: "class", class_hash: CLASS },
+      package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
+      class_tokens: {
+        "report-service-dev": jwtWith({ platform_user_id: USER, class_hash: "a-different-class" })
+      }
+    }),
+    (err) => err instanceof HookError && err.status === 400 && /not the requested class/.test(err.message)
+  );
+});
+
+test("a class token belonging to another researcher is refused", async () => {
+  const runner = await started();
+  await assert.rejects(
+    () => runner.startPackage({
+      scope: { kind: "class", class_hash: CLASS },
+      package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
+      class_tokens: {
+        "report-service-dev": jwtWith({ platform_user_id: "999", class_hash: CLASS })
+      }
+    }),
+    (err) => err instanceof HookError && err.status === 400 && /another researcher/.test(err.message)
+  );
+});
+
+test("a token whose claims cannot be read is left to sign-in to reject", async () => {
+  const runner = await started();
+  const res = await runner.startPackage({
+    scope: { kind: "class", class_hash: CLASS },
+    package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
+    class_tokens: { "report-service-dev": "not-a-jwt" }
+  });
+  await runner.currentAnalysis?.done;
+  assert.equal(res.package, "demo");
+});
+
+test("a replacement session token for another researcher is refused", async () => {
+  const runner = await started();
+  await assert.rejects(
+    () => runner.refreshToken({ session_token: jwtWith({ platform_user_id: "999" }) }),
+    (err) => err instanceof HookError && err.status === 400 && /another researcher/.test(err.message)
+  );
+});
+
+test("refresh-token replaces the report-server credential when one is sent", async () => {
+  const logins = [];
+  const runner = await started({
+    stepOverrides: {
+      installCredential: async ({ token, sessionToken, store }) => {
+        if (token) logins.push(token);
+        if (sessionToken && store?.signIn) await store.signIn(sessionToken);
+      }
+    }
+  });
+  await runner.refreshToken({
+    session_token: jwtWith({ platform_user_id: USER }),
+    report_server_token: "fresh-report-server-token"
+  });
+  assert.deepEqual(logins.slice(-1), ["fresh-report-server-token"]);
+});

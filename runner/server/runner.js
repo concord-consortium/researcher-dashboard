@@ -1,11 +1,26 @@
 import path from "node:path";
-import { log, setContext, timed } from "./log.js";
+import { log, redact, setContext, timed } from "./log.js";
 import { parseRunHookPayload, researcherPrefix } from "./config.js";
 import { verifySandbox } from "./sandbox.js";
 import { STATES, VmState } from "./state.js";
 import { StatusWriter } from "./status.js";
 
 const EIGHT_HOURS_MS = 8 * 60 * 60 * 1000;
+
+// The claims a runner token carries, read without verifying the signature: Firebase
+// verifies it at sign-in, and this is only checking that the token says what the
+// request says. A token whose claims cannot be read at all is not rejected here, since
+// sign-in is the thing that decides whether it is real.
+export function tokenClaims(token) {
+  try {
+    const [, payload] = String(token).split(".");
+    if (!payload) return null;
+    const json = Buffer.from(payload.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8");
+    return JSON.parse(json)?.claims ?? null;
+  } catch {
+    return null;
+  }
+}
 
 function isTokenMap(value) {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
@@ -157,6 +172,22 @@ export class Runner {
     if (!isTokenMap(classTokens)) {
       throw new HookError(400, "class_tokens must map a firebase app name to a token");
     }
+    // The mint is the only gate on which class a researcher may read, and the design
+    // says so explicitly. This is the second line: a token that names a different class
+    // or a different researcher than the request would pull another class's student
+    // work into this researcher's prefix and hand it to their package. Cheap to check,
+    // and it fails a launcher bug loudly instead of silently mixing corpora.
+    for (const [app, token] of Object.entries(classTokens)) {
+      const claims = tokenClaims(token);
+      if (!claims) continue;
+      if (claims.class_hash && claims.class_hash !== scope.class_hash) {
+        throw new HookError(400, `the ${app} class token names class ${claims.class_hash}, not the requested class`);
+      }
+      if (claims.platform_user_id != null
+          && String(claims.platform_user_id) !== String(this.payload.platform_user_id)) {
+        throw new HookError(400, `the ${app} class token belongs to another researcher`);
+      }
+    }
     if (this.#analysis) {
       throw new HookError(409, "a package is already running on this VM", {
         package: this.#analysis.packageName
@@ -229,7 +260,7 @@ export class Runner {
       await this.status.resultDone(classHash, packageName, result.display);
     } catch (err) {
       log.error("analyze.failed", { error: err.message });
-      await this.status.resultFailed(classHash, packageName, err.message);
+      await this.status.resultFailed(classHash, packageName, redact(err.message));
     } finally {
       // Cleared rather than unref'd: unref would stop the timeout firing whenever
       // nothing else holds the loop, and leaving it armed would keep a handle alive
@@ -353,12 +384,34 @@ export class Runner {
   async refreshToken(body) {
     this.#requireStarted();
     const token = body?.session_token;
+    const reportServerToken = body?.report_server_token;
     if (typeof token !== "string" || token === "") {
       throw new HookError(400, "session_token is required");
     }
+    // A replacement for a different researcher would leave the VM signed in as one
+    // principal while writing another's document paths. The rules deny that, so it
+    // fails closed either way, but it fails as an opaque permission error much later
+    // rather than here where the cause is obvious.
+    const claims = tokenClaims(token);
+    if (claims?.platform_user_id != null
+        && String(claims.platform_user_id) !== String(this.payload.platform_user_id)) {
+      throw new HookError(400, "the replacement session token belongs to another researcher");
+    }
+
     this.payload.session_token = token;
     await this.steps.installCredential({ sessionToken: token, store: this.store });
-    log.info("refresh_token.ok", {});
+
+    // The report-server credential is minted per launch and the VM outlives it if it is
+    // ever given a shorter life, so /refresh-token carries a replacement for it too.
+    if (typeof reportServerToken === "string" && reportServerToken !== "") {
+      this.payload.report_server_token = reportServerToken;
+      await this.steps.installCredential({
+        token: reportServerToken,
+        portal: this.payload.portal
+      });
+    }
+
+    log.info("refresh_token.ok", { report_server_token: Boolean(reportServerToken) });
     return { ok: true };
   }
 }
