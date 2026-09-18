@@ -1,4 +1,8 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { EventEmitter } from "node:events";
 import test from "node:test";
 import { portalHost } from "../server/config.js";
@@ -94,11 +98,60 @@ test("a token refresh re-signs in without reinstalling the report-service token"
   assert.deepEqual(signedIn, ["fresh"]);
 });
 
-test("the analysis steps still to be built announce themselves rather than silently passing", () => {
+// Every analysis step is implemented now; what is left of notYet is nothing, so the
+// test that asserted the stubs announced themselves is gone rather than weakened.
+
+test("runPackage runs the entrypoint as the analysis uid with only the named environment", async () => {
+  const calls = [];
+  const dir = await mkdtemp(path.join(tmpdir(), "rd-steps-"));
+  const outputDir = path.join(dir, "out");
+  fs.mkdirSync(outputDir, { recursive: true });
+  fs.writeFileSync(path.join(outputDir, "display.json"), JSON.stringify({ version: 1, summary: "ok" }));
+  fs.writeFileSync(path.join(dir, "run.py"), "");
+
   const steps = makeSteps();
-  for (const name of ["resolvePackage", "runPackage"]) {
-    assert.throws(() => steps[name]({}), /is not implemented yet/, name);
-  }
+  const display = await steps.runPackage({
+    manifest: { name: "class-counts", version: "1.0.0", entrypoint: "run.py", dir },
+    paths: { outputDir },
+    env: { HOME: "/work/home/class-counts", CC_DATA_LOCAL: "/data/classes/x" },
+    uid: 1000,
+    timeoutMs: 1000,
+    exec: async (command, args, options) => {
+      calls.push({ command, args, options });
+      return { stdout: "", stderr: "" };
+    }
+  });
+
+  assert.deepEqual(display, { version: 1, summary: "ok" });
+  const [call] = calls;
+  // unshare --net, then setpriv to the analysis uid: the sandbox, not a bare spawn.
+  assert.equal(call.command, "unshare");
+  assert.ok(call.args.includes("--net"));
+  assert.ok(call.args.includes("--reuid=1000"));
+  assert.ok(call.args.includes("python3.11"));
+  // Replaced, not extended: a package inherits nothing from the runner's process, which
+  // holds the report-service token in its own HOME.
+  assert.deepEqual(Object.keys(call.options.env).sort(), ["CC_DATA_LOCAL", "HOME"]);
+  await rm(dir, { recursive: true, force: true });
+});
+
+test("runPackage fails when the package wrote no readable display.json", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "rd-steps-"));
+  const outputDir = path.join(dir, "out");
+  fs.mkdirSync(outputDir, { recursive: true });
+
+  const steps = makeSteps();
+  await assert.rejects(
+    () => steps.runPackage({
+      manifest: { name: "class-counts", version: "1.0.0", entrypoint: "run.py", dir },
+      paths: { outputDir },
+      env: {},
+      uid: 1000,
+      exec: async () => ({ stdout: "", stderr: "" })
+    }),
+    /no readable display.json/
+  );
+  await rm(dir, { recursive: true, force: true });
 });
 
 test("pullData reads CLUE with the class token for CLUE's own project", async () => {

@@ -5,7 +5,18 @@ import { log } from "./log.js";
 import { HookError, Runner } from "./runner.js";
 import { makeSecretReader } from "./secrets.js";
 import { LogStore, MemoryStore } from "./status.js";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { makeSteps } from "./steps.js";
+
+const execFileAsync = promisify(execFile);
+
+// The image installs `unzip`; using it rather than a Node library keeps the package
+// path free of a dependency that would have to be trusted with untrusted archives.
+// -o so a re-fetch overwrites, and the destination is created by the caller.
+async function unzipArchive(archive, dest) {
+  await execFileAsync("unzip", ["-q", "-o", archive, "-d", dest], { timeout: 60_000 });
+}
 import { DirBackend, S3Backend, Syncer } from "./sync/index.js";
 
 // Lambda posts every lifecycle and build hook under this prefix, on the port
@@ -101,6 +112,13 @@ export function buildRunner(env) {
           ? new DirBackend(`${env.syncDir}/${prefix}`)
           : new S3Backend({ bucket, prefix })
       }),
+    // Packages are fetched from the same bucket the data syncs to, under scripts/, so
+    // one execution role permission covers both.
+    makePackageBackend: ({ bucket }) =>
+      dir
+        ? new DirBackend(`${env.syncDir}/scripts`)
+        : new S3Backend({ bucket, prefix: "scripts" }),
+    unzip: unzipArchive,
     readSecret: dir ? async () => "dir-mode-token" : makeSecretReader(),
     steps: makeSteps()
   });

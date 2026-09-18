@@ -24,6 +24,14 @@ export const REQUIRED_PAYLOAD_FIELDS = Object.freeze([
 // arrived with `secret_name`, and cannot if both may be present.
 export const CREDENTIAL_FIELDS = Object.freeze(["secret_name", "report_server_token"]);
 
+function analysisUid(env) {
+  const uid = Number(env.ANALYSIS_UID ?? 1000);
+  if (!Number.isInteger(uid) || uid < 1000) {
+    throw new Error(`ANALYSIS_UID must be an integer of at least 1000, got ${env.ANALYSIS_UID}`);
+  }
+  return uid;
+}
+
 export function loadEnv(env = process.env) {
   const backend = (env.SYNC_BACKEND ?? "S3").toUpperCase();
   if (backend !== "S3" && backend !== "DIR") {
@@ -48,7 +56,10 @@ export function loadEnv(env = process.env) {
     syncDir: env.SYNC_DIR ?? null,
     syncIntervalMs: Number(env.SYNC_INTERVAL_MS ?? 30_000),
     analysisTimeoutMs: Number(env.ANALYSIS_TIMEOUT_MS ?? 30 * 60_000),
-    analysisUid: Number(env.ANALYSIS_UID ?? 1000)
+    // Rejected below 1000 rather than defaulted: verifySandbox compares the observed
+    // uid to this one, so ANALYSIS_UID=0 would pass the check while giving the package
+    // root, a route back to the host namespace and the credential store.
+    analysisUid: analysisUid(env)
   };
 }
 

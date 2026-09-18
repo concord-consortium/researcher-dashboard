@@ -70,3 +70,18 @@ export async function verifySandbox({ uid = 1000, exec = run } = {}) {
   log.info("sandbox.verified", { uid });
   return { uid };
 }
+
+// Runs an analysis package's entrypoint in the sandbox, as the analysis uid.
+//
+// The environment is replaced rather than extended: a package inherits nothing from the
+// runner's process, which holds the report-service token in its own $HOME and, after a
+// resume, whatever the SDK has cached. What it gets is what package-env named.
+export async function runSandboxed({ uid, command, args = [], env, cwd, timeout, exec = run }) {
+  const spec = sandboxCommand({ uid, command, args });
+  return exec(spec.command, spec.args, {
+    cwd,
+    timeout,
+    env,
+    maxBuffer: 8 * 1024 * 1024
+  });
+}

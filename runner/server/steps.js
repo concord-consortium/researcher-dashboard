@@ -1,7 +1,11 @@
 import { spawn } from "node:child_process";
 import { readClue } from "./clue-reader.js";
 import { portalHost } from "./config.js";
+import fs from "node:fs";
+import path from "node:path";
 import { preparePackage, readPackageCounts } from "./package-env.js";
+import { fetchPackage } from "./package-fetch.js";
+import { runSandboxed } from "./sandbox.js";
 import { log } from "./log.js";
 
 // The three things an analysis does, kept behind one interface so the lifecycle,
@@ -55,7 +59,13 @@ export function makeSteps({ login = ccDataLogin, readClueFn = readClue } = {}) {
       if (token && portal) await login({ token, portal });
       if (sessionToken && store?.signIn) await store.signIn(sessionToken);
     },
-    resolvePackage: notYet("package fetch and checksum verification"),
+    // Fetched and verified before anything is unpacked: the package is code the runner
+    // did not write, and the checksum is what stands between the catalog's claim and
+    // whatever happens to be at that key.
+    resolvePackage: async ({ pkg, backend, workRoot, unzip }) => {
+      const { manifest, dir } = await fetchPackage({ backend, pkg, workRoot, unzip });
+      return { ...manifest, dir };
+    },
 
     // Everything the package needs before it runs: its own HOME outside the synced data
     // root with the researcher's cc-data credential in it, the class's data directory,
@@ -106,6 +116,32 @@ export function makeSteps({ login = ccDataLogin, readClueFn = readClue } = {}) {
       return counts;
     },
 
-    runPackage: notYet("running a package")
+    // The entrypoint runs as the analysis uid in the sandbox, with the environment
+    // package-env named and nothing inherited from the runner's own process. Its
+    // display.json is the result; counts.json is read separately by the caller.
+    runPackage: async ({ manifest, paths, env, uid, timeoutMs, exec }) => {
+      const entrypoint = path.resolve(manifest.dir, manifest.entrypoint);
+      const interpreter = entrypoint.endsWith(".py") ? "python3.11" : entrypoint;
+      const args = entrypoint.endsWith(".py") ? [entrypoint] : [];
+
+      await runSandboxed({
+        uid,
+        command: interpreter,
+        args,
+        env,
+        cwd: manifest.dir,
+        timeout: timeoutMs,
+        ...(exec ? { exec } : {})
+      });
+
+      const displayFile = path.join(paths.outputDir, "display.json");
+      let display;
+      try {
+        display = JSON.parse(fs.readFileSync(displayFile, "utf8"));
+      } catch (err) {
+        throw new Error(`package wrote no readable display.json: ${err.message}`);
+      }
+      return display;
+    }
   };
 }

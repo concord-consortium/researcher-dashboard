@@ -49,12 +49,17 @@ export class Runner {
   #classStores = new Map();
   #expiresAt = null;
 
-  constructor({ env, makeStore, makeSyncer, readSecret, steps, netGuard = verifySandbox, now = () => Date.now() }) {
+  constructor({ env, makeStore, makeSyncer, makePackageBackend, readSecret, steps, unzip, netGuard = verifySandbox, now = () => Date.now() }) {
     this.env = env;
     // The store and the syncer are built in /run, not here: the Firebase project
     // and the bucket are per-VM values that arrive in runHookPayload, so neither
     // can be constructed before that payload exists.
     this.makeStore = makeStore;
+    // Packages live under their own prefix of the same bucket the researcher's data
+    // syncs to, so the backend is built per run like the syncer's; unzip is injected so
+    // the tests need neither S3 nor a real archive.
+    this.makePackageBackend = makePackageBackend;
+    this.unzip = unzip;
     this.store = null;
     this.makeSyncer = makeSyncer;
     this.readSecret = readSecret;
@@ -115,6 +120,7 @@ export class Runner {
       current_package: null
     });
 
+    this.packageBackend = this.makePackageBackend?.({ bucket: this.payload.bucket });
     this.syncer = this.makeSyncer({
       bucket: this.payload.bucket,
       prefix: researcherPrefix(this.payload.platform_user_id),
@@ -206,7 +212,12 @@ export class Runner {
     try {
       // Resolving the package is what yields its declared duration, so it has to
       // precede the expiry check. It writes nothing to Firestore.
-      const manifest = await this.steps.resolvePackage({ pkg });
+      const manifest = await this.steps.resolvePackage({
+        pkg,
+        backend: this.packageBackend,
+        workRoot: this.env.workRoot,
+        unzip: this.unzip
+      });
       const expectedMs = (manifest.expected_duration_seconds ?? 0) * 1000;
       const remainingMs = this.#expiresAt - this.now();
       if (remainingMs < expectedMs) {
@@ -330,11 +341,10 @@ export class Runner {
     const display = await stage("run_package", () =>
       this.steps.runPackage({
         manifest,
-        classHash,
-        dataRoot: this.env.dataRoot,
         paths: prepared.paths,
         env: prepared.env,
-        outputDir: prepared.paths.outputDir
+        uid: this.env.analysisUid,
+        timeoutMs: this.env.analysisTimeoutMs
       })
     );
 

@@ -64,6 +64,8 @@ function build({ stepOverrides = {}, now, envOverrides = {}, makeStore } = {}) {
   return new Runner({
     env,
     makeStore: makeStore ?? (() => store),
+    makePackageBackend: () => ({ async get() {} }),
+    unzip: async () => {},
     makeSyncer: ({ root }) =>
       new Syncer({ backend: new DirBackend(path.join(work, "remote")), root }),
     readSecret: async () => "report-service-token-value",
@@ -578,4 +580,20 @@ test("refresh-token replaces the report-server credential when one is sent", asy
     report_server_token: "fresh-report-server-token"
   });
   assert.deepEqual(logins.slice(-1), ["fresh-report-server-token"]);
+});
+
+// Criterion 19: publishing a new version and asking for it runs that version with no
+// image rebuild, and the result records what ran.
+test("the result records the package name, version and checksum that ran", async () => {
+  const runner = await started();
+  await runner.startPackage({
+    scope: { kind: "class", class_hash: CLASS },
+    package: { name: "class-counts", version: "2.0.0", checksum: "sha256:beef" },
+    class_tokens: CLASS_TOKENS
+  });
+  await runner.currentAnalysis?.done;
+
+  const doc = store.get(resultPath(PORTAL, CLASS, "class-counts"));
+  assert.deepEqual(doc.package, { name: "class-counts", version: "2.0.0", checksum: "sha256:beef" });
+  assert.equal(doc.status, "done");
 });
