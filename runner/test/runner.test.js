@@ -41,6 +41,7 @@ const FORWARDED_PAYLOAD = JSON.stringify({
 
 function steps(overrides = {}) {
   return {
+    signIn: async () => {},
     installCredential: async () => {},
     resolvePackage: async () => ({ expected_duration_seconds: 60 }),
     pullData: async () => ({ clue_documents: 12 }),
@@ -342,13 +343,13 @@ test("criterion 11: terminate during an analysis fails the analysis and terminat
 });
 
 test("/refresh-token replaces the session token and re-signs in", async () => {
-  const installed = [];
+  const signedIn = [];
   const runner = await started({
-    stepOverrides: { installCredential: async (args) => installed.push(args) }
+    stepOverrides: { signIn: async (args) => signedIn.push(args) }
   });
   await runner.refreshToken({ session_token: "fresh-token" });
 
-  assert.equal(installed.at(-1).sessionToken, "fresh-token");
+  assert.equal(signedIn.at(-1).sessionToken, "fresh-token");
   await assert.rejects(
     () => runner.refreshToken({}),
     (err) => err instanceof HookError && err.status === 400
@@ -578,10 +579,7 @@ test("refresh-token replaces the report-server credential when one is sent", asy
   const logins = [];
   const runner = await started({
     stepOverrides: {
-      installCredential: async ({ token, sessionToken, store }) => {
-        if (token) logins.push(token);
-        if (sessionToken && store?.signIn) await store.signIn(sessionToken);
-      }
+      installCredential: async ({ token }) => { if (token) logins.push(token); }
     }
   });
   await runner.refreshToken({
@@ -703,4 +701,21 @@ test("the portal class id reaches the package's environment", async () => {
   });
   await runner.currentAnalysis?.done;
   assert.equal(prepared?.classId, 111);
+});
+
+// The first status write carries the session token's claims or the rules refuse it, and
+// a VM whose /run fails is terminated by Lambda. Signing in later than this reads as a
+// permission error from Firestore with nothing to say which step was out of order.
+test("signs in before the first status document is written", async () => {
+  let existedAtSignIn = "unset";
+  const runner = build({
+    stepOverrides: {
+      signIn: async () => { existedAtSignIn = store.get(researcherPath(PORTAL, USER)); }
+    }
+  });
+
+  await runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+
+  assert.equal(existedAtSignIn, undefined, "signIn ran after the first write");
+  assert.ok(store.get(researcherPath(PORTAL, USER)), "no status document was written at all");
 });

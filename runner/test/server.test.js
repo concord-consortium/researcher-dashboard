@@ -46,6 +46,7 @@ beforeEach(async () => {
     readSecret: async () => "token",
     netGuard: async () => ({ uid: 1000, binary: "stub" }),
     steps: {
+      signIn: async () => {},
       installCredential: async () => {},
       resolvePackage: async () => ({ expected_duration_seconds: 1 }),
       pullData: async () => ({ answers: 1, logs: 2, clue_documents: 3 }),

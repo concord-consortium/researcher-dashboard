@@ -55,9 +55,15 @@ export function makeSteps({ login = ccDataLogin, readClueFn = readClue } = {}) {
     // report-service token goes to cc-data's credential store under $HOME, and the
     // session token signs the Firebase client in. $HOME is outside the synced data
     // root, so neither credential is ever written to S3.
-    installCredential: async ({ token, sessionToken, portal, store }) => {
-      if (token && portal) await login({ token, portal });
+    // The Firebase session the status documents are written through. Separate from the
+    // cc-data credential below: they are unrelated credentials on unrelated schedules,
+    // and this one has to be in place before anything is written.
+    signIn: async ({ store, sessionToken }) => {
       if (sessionToken && store?.signIn) await store.signIn(sessionToken);
+    },
+
+    installCredential: async ({ token, portal }) => {
+      if (token && portal) await login({ token, portal });
     },
     // Fetched and verified before anything is unpacked: the package is code the runner
     // did not write, and the checksum is what stands between the catalog's claim and

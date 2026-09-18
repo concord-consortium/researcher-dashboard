@@ -41,11 +41,13 @@ ARG DUCKDB_VERSION
 # util-linux supplies setpriv and iproute supplies `ip netns`, which the runner uses to
 # run an analysis package as an unprivileged uid inside a network namespace whose only
 # route out is the egress proxy. iptables is what keeps the runner's own HTTP server
-# off the one address that namespace can reach.
+# off the one address that namespace can reach. procps-ng supplies sysctl, which is how
+# IPv6 is disabled inside the namespace; the base image does not carry it.
 RUN dnf -y install python3.11 nodejs24 nodejs24-npm unzip tar gzip shadow-utils ca-certificates \
       util-linux \
       iproute \
       iptables-nft \
+      procps-ng \
     && dnf clean all
 
 RUN curl -fsSL -o /tmp/duckdb.zip \

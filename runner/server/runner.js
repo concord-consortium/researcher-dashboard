@@ -125,6 +125,14 @@ export class Runner {
       this.netGuard({ uid: this.env.analysisUid, proxyUrl: this.proxyUrl })
     );
 
+    // Before the first status write. Every write needs the session token's claims, so
+    // signing in later means the first one goes out unauthenticated and the rules
+    // refuse it.
+    await timed("run.sign_in", {}, () => this.steps.signIn({
+      store: this.store,
+      sessionToken: this.payload.session_token
+    }));
+
     this.#expiresAt = this.now() + EIGHT_HOURS_MS;
     this.#vm.to(STATES.STARTING);
     await this.status.researcher({
@@ -156,9 +164,7 @@ export class Runner {
     await timed("run.install_credential", {}, () =>
       this.steps.installCredential({
         token,
-        sessionToken: this.payload.session_token,
-        portal: this.payload.portal,
-        store: this.store
+        portal: this.payload.portal
       })
     );
 
@@ -473,7 +479,7 @@ export class Runner {
     }
 
     this.payload.session_token = token;
-    await this.steps.installCredential({ sessionToken: token, store: this.store });
+    await this.steps.signIn({ store: this.store, sessionToken: token });
 
     // The report-server credential is minted per launch and the VM outlives it if it is
     // ever given a shorter life, so /refresh-token carries a replacement for it too.

@@ -69,33 +69,24 @@ test("a rejected token fails /run with cc-data's reason", async () => {
   );
 });
 
-test("installCredential installs the report-service token and signs Firebase in", async () => {
+test("installCredential installs the report-service token and nothing else", async () => {
   const seen = [];
-  const signedIn = [];
   const steps = makeSteps({ login: async (args) => seen.push(args) });
-  await steps.installCredential({
-    token: "report-token",
-    sessionToken: "session-token",
-    portal: "learn_concord_org",
-    store: { signIn: async (t) => signedIn.push(t) }
-  });
+  await steps.installCredential({ token: "report-token", portal: "learn_concord_org" });
 
   assert.deepEqual(seen, [{ token: "report-token", portal: "learn_concord_org" }]);
-  assert.deepEqual(signedIn, ["session-token"]);
 });
 
-test("a token refresh re-signs in without reinstalling the report-service token", async () => {
+// Separate from the cc-data credential: the Firebase session has to be in place before
+// the first status document is written, which is several steps earlier.
+test("signIn signs Firebase in and leaves cc-data alone", async () => {
   const seen = [];
   const signedIn = [];
   const steps = makeSteps({ login: async (args) => seen.push(args) });
-  // /refresh-token carries only a session token, so cc-data must not be touched.
-  await steps.installCredential({
-    sessionToken: "fresh",
-    store: { signIn: async (t) => signedIn.push(t) }
-  });
+  await steps.signIn({ sessionToken: "session-token", store: { signIn: async (t) => signedIn.push(t) } });
 
   assert.deepEqual(seen, []);
-  assert.deepEqual(signedIn, ["fresh"]);
+  assert.deepEqual(signedIn, ["session-token"]);
 });
 
 // Every analysis step is implemented now; what is left of notYet is nothing, so the
