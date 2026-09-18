@@ -119,7 +119,7 @@ export function makeSteps({ login = ccDataLogin, readClueFn = readClue } = {}) {
     // The entrypoint runs as the analysis uid in the sandbox, with the environment
     // package-env named and nothing inherited from the runner's own process. Its
     // display.json is the result; counts.json is read separately by the caller.
-    runPackage: async ({ manifest, paths, env, uid, timeoutMs, exec }) => {
+    runPackage: async ({ manifest, paths, env, uid, timeoutMs, proxyUrl, exec }) => {
       const entrypoint = path.resolve(manifest.dir, manifest.entrypoint);
       const interpreter = entrypoint.endsWith(".py") ? "python3.11" : entrypoint;
       const args = entrypoint.endsWith(".py") ? [entrypoint] : [];
@@ -131,6 +131,7 @@ export function makeSteps({ login = ccDataLogin, readClueFn = readClue } = {}) {
         env,
         cwd: manifest.dir,
         timeout: timeoutMs,
+        proxyUrl,
         ...(exec ? { exec } : {})
       });
 

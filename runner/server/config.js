@@ -59,7 +59,15 @@ export function loadEnv(env = process.env) {
     // Rejected below 1000 rather than defaulted: verifySandbox compares the observed
     // uid to this one, so ANALYSIS_UID=0 would pass the check while giving the package
     // root, a route back to the host namespace and the credential store.
-    analysisUid: analysisUid(env)
+    analysisUid: analysisUid(env),
+    // Where an analysis package may reach, enforced by the egress proxy rather than
+    // asserted. A leading dot allows a zone's subdomains and not the zone itself.
+    // report-server is the whole of it today; anything else a package needs goes
+    // through the runner, which is the point of having one list.
+    egressAllowlist: (env.EGRESS_ALLOWLIST ?? "report-server.concordqa.org,report-server.concord.org")
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean)
   };
 }
 

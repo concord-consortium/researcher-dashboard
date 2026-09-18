@@ -7,6 +7,8 @@ import { makeSecretReader } from "./secrets.js";
 import { LogStore, MemoryStore } from "./status.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { createEgressProxy } from "./egress-proxy.js";
+import { HOST_ADDR, PROXY_PORT, setupNamespace } from "./netns.js";
 import { makeSteps } from "./steps.js";
 
 const execFileAsync = promisify(execFile);
@@ -119,6 +121,14 @@ export function buildRunner(env) {
         ? new DirBackend(`${env.syncDir}/scripts`)
         : new S3Backend({ bucket, prefix: "scripts" }),
     unzip: unzipArchive,
+    // Skipped in DIR mode, which runs on a laptop with no namespaces and no need for
+    // one: there is no execution role there to protect.
+    startEgress: dir ? null : async () => {
+      const { proxyUrl } = await setupNamespace({ proxyPort: PROXY_PORT });
+      const proxy = createEgressProxy({ allowlist: env.egressAllowlist });
+      await new Promise((resolve) => proxy.listen(PROXY_PORT, HOST_ADDR, resolve));
+      return proxyUrl;
+    },
     readSecret: dir ? async () => "dir-mode-token" : makeSecretReader(),
     steps: makeSteps()
   });

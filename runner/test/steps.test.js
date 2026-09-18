@@ -116,6 +116,7 @@ test("runPackage runs the entrypoint as the analysis uid with only the named env
     env: { HOME: "/work/home/class-counts", CC_DATA_LOCAL: "/data/classes/x" },
     uid: 1000,
     timeoutMs: 1000,
+    proxyUrl: "http://10.201.0.1:8123",
     exec: async (command, args, options) => {
       calls.push({ command, args, options });
       return { stdout: "", stderr: "" };
@@ -124,14 +125,20 @@ test("runPackage runs the entrypoint as the analysis uid with only the named env
 
   assert.deepEqual(display, { version: 1, summary: "ok" });
   const [call] = calls;
-  // unshare --net, then setpriv to the analysis uid: the sandbox, not a bare spawn.
-  assert.equal(call.command, "unshare");
-  assert.ok(call.args.includes("--net"));
+  // ip netns exec into the prepared namespace, then setpriv: the sandbox, not a spawn.
+  assert.equal(call.command, "ip");
+  assert.ok(call.args.includes("netns") && call.args.includes("analysis"));
   assert.ok(call.args.includes("--reuid=1000"));
+  assert.ok(call.args.includes("--no-new-privs"));
   assert.ok(call.args.includes("python3.11"));
   // Replaced, not extended: a package inherits nothing from the runner's process, which
   // holds the report-service token in its own HOME.
-  assert.deepEqual(Object.keys(call.options.env).sort(), ["CC_DATA_LOCAL", "HOME"]);
+  // Exactly what package-env named, plus the proxy, which is the only route out of the
+  // namespace and is how cc-data reaches report-server.
+  assert.deepEqual(Object.keys(call.options.env).sort(),
+    ["CC_DATA_LOCAL", "HOME", "HTTPS_PROXY", "https_proxy"]);
+  assert.equal(call.options.env.HTTPS_PROXY, "http://10.201.0.1:8123");
+  assert.ok(!("AWS_REGION" in call.options.env), "nothing is inherited from the runner's process");
   await rm(dir, { recursive: true, force: true });
 });
 

@@ -2,6 +2,7 @@ import path from "node:path";
 import { log, redact, setContext, timed } from "./log.js";
 import { parseRunHookPayload, researcherPrefix } from "./config.js";
 import { verifySandbox } from "./sandbox.js";
+import { PROXY_PORT, setupNamespace } from "./netns.js";
 import { STATES, VmState } from "./state.js";
 import { StatusWriter } from "./status.js";
 
@@ -49,7 +50,7 @@ export class Runner {
   #classStores = new Map();
   #expiresAt = null;
 
-  constructor({ env, makeStore, makeSyncer, makePackageBackend, readSecret, steps, unzip, netGuard = verifySandbox, now = () => Date.now() }) {
+  constructor({ env, makeStore, makeSyncer, makePackageBackend, readSecret, steps, unzip, startEgress, netGuard = verifySandbox, now = () => Date.now() }) {
     this.env = env;
     // The store and the syncer are built in /run, not here: the Firebase project
     // and the bucket are per-VM values that arrive in runHookPayload, so neither
@@ -60,6 +61,9 @@ export class Runner {
     // the tests need neither S3 nor a real archive.
     this.makePackageBackend = makePackageBackend;
     this.unzip = unzip;
+    // Builds the analysis namespace and starts the egress proxy. Injected so the tests
+    // need neither root nor a network, and so DIR mode can skip it.
+    this.startEgress = startEgress;
     this.store = null;
     this.makeSyncer = makeSyncer;
     this.readSecret = readSecret;
@@ -107,7 +111,16 @@ export class Runner {
     // Before anything else, and fatal if it fails. A package running as the
     // analysis user can otherwise read execution-role credentials straight from
     // IMDS, so a VM whose sandbox does not hold must not reach ready.
-    await timed("run.verify_sandbox", {}, () => this.netGuard({ uid: this.env.analysisUid }));
+    // The namespace and its proxy come up before the sandbox is verified, because the
+    // verification now asserts the proxy is reachable as well as that the metadata
+    // service is not: without the positive check, a namespace with no route at all
+    // would verify clean and leave every package silently offline.
+    if (this.startEgress) {
+      this.proxyUrl = await timed("run.start_egress", {}, () => this.startEgress());
+    }
+    await timed("run.verify_sandbox", {}, () =>
+      this.netGuard({ uid: this.env.analysisUid, proxyUrl: this.proxyUrl })
+    );
 
     this.#expiresAt = this.now() + EIGHT_HOURS_MS;
     this.#vm.to(STATES.STARTING);
@@ -344,7 +357,8 @@ export class Runner {
         paths: prepared.paths,
         env: prepared.env,
         uid: this.env.analysisUid,
-        timeoutMs: this.env.analysisTimeoutMs
+        timeoutMs: this.env.analysisTimeoutMs,
+        proxyUrl: this.proxyUrl
       })
     );
 
