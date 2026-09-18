@@ -20,6 +20,7 @@ const PAYLOAD = JSON.stringify({
   portal: PORTAL,
   firebase_project: "report-service-dev",
   bucket: "researcher-dashboard-runner-staging",
+  report_server_url: "https://report-server.example.org",
   secret_name: "researcher-dashboard-runner-staging/report-service-token"
 });
 

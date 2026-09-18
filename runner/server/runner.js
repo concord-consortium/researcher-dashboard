@@ -5,6 +5,7 @@ import { verifySandbox } from "./sandbox.js";
 import { PROXY_PORT, setupNamespace } from "./netns.js";
 import { STATES, VmState } from "./state.js";
 import { StatusWriter } from "./status.js";
+import { revokeOwnToken } from "./report-server.js";
 
 const EIGHT_HOURS_MS = 8 * 60 * 60 * 1000;
 
@@ -50,7 +51,7 @@ export class Runner {
   #classStores = new Map();
   #expiresAt = null;
 
-  constructor({ env, makeStore, makeSyncer, makePackageBackend, readSecret, steps, unzip, startEgress, netGuard = verifySandbox, now = () => Date.now() }) {
+  constructor({ env, makeStore, makeSyncer, makePackageBackend, readSecret, steps, unzip, startEgress, netGuard = verifySandbox, revokeReportServerToken = revokeOwnToken, now = () => Date.now() }) {
     this.env = env;
     // The store and the syncer are built in /run, not here: the Firebase project
     // and the bucket are per-VM values that arrive in runHookPayload, so neither
@@ -69,6 +70,8 @@ export class Runner {
     this.readSecret = readSecret;
     this.steps = steps;
     this.netGuard = netGuard;
+    // Injected so the tests need no network and DIR mode can decline to revoke.
+    this.revokeReportServerToken = revokeReportServerToken;
     this.now = now;
     this.payload = null;
     this.syncer = null;
@@ -405,6 +408,28 @@ export class Runner {
       const { classHash, packageName } = this.#analysis;
       await this.status.resultFailed(classHash, packageName, "VM terminated during analysis");
       this.#analysis = null;
+    }
+
+    // Only the researcher's own forwarded credential. A VM that arrived with
+    // `secret_name` is holding the shared account's token, which belongs to every VM
+    // and must outlive this one.
+    //
+    // Before the sync, because the sync can fail the hook and the credential should
+    // stop working whether or not the data made it out. Revocation needs nothing from S3.
+    if (this.payload.report_server_token) {
+      try {
+        await this.revokeReportServerToken({
+          baseUrl: this.payload.report_server_url,
+          token: this.payload.report_server_token
+        });
+        log.info("terminate.revoked", {});
+      } catch (err) {
+        // The VM is going either way, and an unrevoked token is a residual the design
+        // accepts: the researcher's next launch revokes it when it mints the next one.
+        // Failing the hook here would buy nothing and would mark the researcher's
+        // document failed for something that is not a data loss.
+        log.warn("terminate.revoke_failed", { error: err.message });
+      }
     }
 
     const result = await this.syncer.flushAndVerify("terminate");

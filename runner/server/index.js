@@ -10,6 +10,7 @@ import { promisify } from "node:util";
 import { createEgressProxy } from "./egress-proxy.js";
 import { HOST_ADDR, PROXY_PORT, setupNamespace } from "./netns.js";
 import { makeSteps } from "./steps.js";
+import { revokeOwnToken } from "./report-server.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -130,6 +131,9 @@ export function buildRunner(env) {
       return proxyUrl;
     },
     readSecret: dir ? async () => "dir-mode-token" : makeSecretReader(),
+    // A DIR-mode run is a laptop using the developer's own report-server token, so
+    // retiring it on teardown would revoke a credential they still want.
+    revokeReportServerToken: dir ? async () => {} : revokeOwnToken,
     steps: makeSteps()
   });
 }

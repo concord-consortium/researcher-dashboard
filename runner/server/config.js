@@ -12,7 +12,11 @@ export const REQUIRED_PAYLOAD_FIELDS = Object.freeze([
   "platform_id",
   "portal",
   "firebase_project",
-  "bucket"
+  "bucket",
+  // Where the VM retires its own report-server credential when it is torn down. It
+  // comes from the caller rather than a map here because whatever launches the VM has
+  // already had to reach report-server to obtain the credential in the first place.
+  "report_server_url"
 ]);
 
 // Exactly one report-server credential, and which one it is says which world the VM

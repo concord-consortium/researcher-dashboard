@@ -5,6 +5,7 @@ import path from "node:path";
 import test, { afterEach, beforeEach } from "node:test";
 import { loadEnv } from "../server/config.js";
 import { HookError, Runner } from "../server/runner.js";
+import { buildRunner } from "../server/index.js";
 import { MemoryStore, resultPath, researcherPath } from "../server/status.js";
 import { DirBackend, Syncer } from "../server/sync/index.js";
 
@@ -28,7 +29,14 @@ const PAYLOAD = JSON.stringify({
   portal: PORTAL,
   firebase_project: "report-service-dev",
   bucket: "researcher-dashboard-runner-staging",
+  report_server_url: "https://report-server.example.org",
   secret_name: "researcher-dashboard-runner-staging/report-service-token"
+});
+
+const FORWARDED_PAYLOAD = JSON.stringify({
+  ...JSON.parse(PAYLOAD),
+  secret_name: undefined,
+  report_server_token: "forwarded-report-server-token"
 });
 
 function steps(overrides = {}) {
@@ -49,7 +57,7 @@ function steps(overrides = {}) {
   };
 }
 
-function build({ stepOverrides = {}, now, envOverrides = {}, makeStore } = {}) {
+function build({ stepOverrides = {}, now, envOverrides = {}, makeStore, revokeReportServerToken } = {}) {
   const env = {
     ...loadEnv({ SYNC_BACKEND: "DIR", SYNC_DIR: path.join(work, "remote") }),
     dataRoot: path.join(work, "data"),
@@ -70,6 +78,7 @@ function build({ stepOverrides = {}, now, envOverrides = {}, makeStore } = {}) {
       new Syncer({ backend: new DirBackend(path.join(work, "remote")), root }),
     readSecret: async () => "report-service-token-value",
     netGuard: async () => ({ uid: 1000, binary: "stub" }),
+    revokeReportServerToken: revokeReportServerToken ?? (async () => true),
     steps: steps(stepOverrides),
     now
   });
@@ -596,4 +605,67 @@ test("the result records the package name, version and checksum that ran", async
   const doc = store.get(resultPath(PORTAL, CLASS, "class-counts"));
   assert.deepEqual(doc.package, { name: "class-counts", version: "2.0.0", checksum: "sha256:beef" });
   assert.equal(doc.status, "done");
+});
+
+// The credential the VM pulled with dies with the VM rather than living until the
+// researcher's next launch. It authenticates the revocation with the token being
+// revoked, so the VM needs no other standing at report-server.
+// A VM launched with the shared account's token rather than the researcher's own must
+// not revoke it: that credential belongs to every VM.
+test("terminate leaves a shared-account credential alone", async () => {
+  const calls = [];
+  const runner = build({ revokeReportServerToken: async (args) => { calls.push(args); return true; } });
+  await runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+
+  await runner.terminate();
+
+  assert.equal(calls.length, 0);
+});
+
+test("terminate revokes the VM's own report-server credential", async () => {
+  const calls = [];
+  const runner = build({ revokeReportServerToken: async (args) => { calls.push(args); return true; } });
+  await runner.run({ microvmId: "mvm-1", runHookPayload: FORWARDED_PAYLOAD });
+
+  await runner.terminate();
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].baseUrl, "https://report-server.example.org");
+  assert.equal(calls[0].token, "forwarded-report-server-token");
+});
+
+// Suspend is not the end of the VM: it resumes holding the same credential and would
+// have no way to obtain another.
+test("suspend leaves the report-server credential alone", async () => {
+  const calls = [];
+  const runner = build({ revokeReportServerToken: async (args) => { calls.push(args); return true; } });
+  await runner.run({ microvmId: "mvm-1", runHookPayload: FORWARDED_PAYLOAD });
+
+  await runner.suspend();
+
+  assert.equal(calls.length, 0);
+});
+
+// The VM is going away either way, and an unrevoked token is a residual the design
+// already accepts: the researcher's next launch revokes it when it mints the next one.
+test("a refused revocation does not fail the terminate hook", async () => {
+  const runner = build({ revokeReportServerToken: async () => { throw new Error("report-server down"); } });
+  await runner.run({ microvmId: "mvm-1", runHookPayload: FORWARDED_PAYLOAD });
+
+  await assert.doesNotReject(() => runner.terminate());
+  assert.equal(runner.state, "terminated");
+});
+
+// Criterion 21 runs this image on a laptop against staging with the developer's own
+// report-server token. Retiring it on teardown would revoke a credential they still want.
+test("DIR mode declines to revoke the report-server credential", async () => {
+  let called = false;
+  const env = loadEnv({ SYNC_BACKEND: "DIR", SYNC_DIR: path.join(work, "remote") });
+  const runner = buildRunner(env);
+  await runner.revokeReportServerToken({
+    baseUrl: "https://report-server.example.org",
+    token: "the-developers-own-token",
+    fetchImpl: async () => { called = true; return { ok: true }; }
+  });
+  assert.equal(called, false);
 });
