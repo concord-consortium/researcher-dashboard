@@ -68,7 +68,12 @@ export function loadEnv(env = process.env) {
     // asserted. A leading dot allows a zone's subdomains and not the zone itself.
     // report-server is the whole of it today; anything else a package needs goes
     // through the runner, which is the point of having one list.
-    egressAllowlist: (env.EGRESS_ALLOWLIST ?? "report-server.concordqa.org,report-server.concord.org")
+    // report-server delivers a report's CSV as a presigned S3 URL rather than a stream,
+    // so a package that may pull its own data has to reach S3 as well as report-server.
+    // This grants no bucket access: the package holds no AWS credentials and the
+    // metadata service is unreachable from its namespace, so the only S3 requests it can
+    // make are the presigned ones it has already been handed.
+    egressAllowlist: (env.EGRESS_ALLOWLIST ?? "report-server.concordqa.org,report-server.concord.org,s3.amazonaws.com,s3.us-east-1.amazonaws.com")
       .split(",")
       .map((entry) => entry.trim())
       .filter(Boolean)
