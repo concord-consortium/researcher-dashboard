@@ -28,12 +28,15 @@ function fakeExec({ ranAs = "1000", imdsReachable = false, proxyReachable = true
 
 test("a sandboxed command enters the prepared namespace as the analysis uid", () => {
   const spec = sandboxCommand({ uid: 1000, command: "python3.11", args: ["run.py"] });
-  assert.equal(spec.command, "ip");
+  // Absolute: the package's PATH excludes /usr/sbin on purpose, and this wrapper is
+  // the runner's, so it must not be resolved through the environment handed to the
+  // package. Spawning it by bare name fails with ENOENT only on a real VM.
+  assert.equal(spec.command, "/usr/sbin/ip");
   assert.deepEqual(spec.args, [
     "netns",
     "exec",
     "analysis",
-    "setpriv",
+    "/usr/bin/setpriv",
     "--reuid=1000",
     "--regid=1000",
     "--clear-groups",
@@ -89,6 +92,6 @@ test("verification passes when the proxy answers and the metadata service does n
   const { exec, calls } = fakeExec();
   await verifySandbox({ uid: 1000, proxyUrl: "http://10.201.0.1:8123", exec });
   assert.ok(calls.some((c) => c.includes("10.201.0.1:8123")), "it must probe the proxy");
-  assert.ok(calls.every((c) => c.startsWith("ip netns exec analysis")),
+  assert.ok(calls.every((c) => c.startsWith("/usr/sbin/ip netns exec analysis")),
     "every probe runs inside the namespace, or it proves nothing about the package");
 });

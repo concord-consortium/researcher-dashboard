@@ -117,7 +117,7 @@ test("runPackage runs the entrypoint as the analysis uid with only the named env
   assert.deepEqual(display, { version: 1, summary: "ok" });
   const [call] = calls;
   // ip netns exec into the prepared namespace, then setpriv: the sandbox, not a spawn.
-  assert.equal(call.command, "ip");
+  assert.equal(call.command, "/usr/sbin/ip");
   assert.ok(call.args.includes("netns") && call.args.includes("analysis"));
   assert.ok(call.args.includes("--reuid=1000"));
   assert.ok(call.args.includes("--no-new-privs"));

@@ -27,14 +27,20 @@ export const IMDS_ADDRESS = "169.254.169.254";
 // CAP_NET_ADMIN in it, so it cannot undo any of this. That property depends on not
 // passing `--user`, which would be the obvious way to make the setup easier and would
 // silently hand it back.
+// Absolute paths, because the package's environment is scrubbed down to a PATH that
+// deliberately excludes /usr/sbin, and these two are the runner's own wrapper rather
+// than anything the package is entitled to resolve for itself.
+const IP = "/usr/sbin/ip";
+const SETPRIV = "/usr/bin/setpriv";
+
 export function sandboxCommand({ uid, command, args = [], netns = NETNS }) {
   return {
-    command: "ip",
+    command: IP,
     args: [
       "netns",
       "exec",
       netns,
-      "setpriv",
+      SETPRIV,
       `--reuid=${uid}`,
       `--regid=${uid}`,
       "--clear-groups",
