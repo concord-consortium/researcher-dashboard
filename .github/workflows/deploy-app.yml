@@ -62,12 +62,15 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: app/package-lock.json
+      # The action builds but does not install, so the dependencies have to be here.
+      - run: npm ci
+        working-directory: app
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::612297603577:role/researcher-dashboard
           aws-region: us-east-1
       # The action runs the build itself in workingDirectory and deploys its `dist`, which
-      # are both its defaults, so the app is built once here rather than built and copied.
+      # are both its defaults.
       - uses: concord-consortium/s3-deploy-action@v1
         with:
           bucket: models-resources

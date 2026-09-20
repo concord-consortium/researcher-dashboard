@@ -14,7 +14,8 @@ export default defineConfig({
     )
   },
   test: {
-    globals: true,
+    // No `globals`: every test imports describe/it/expect from vitest, so the type check
+    // does not need a test runner's ambient types to pass.
     environment: "jsdom",
     include: ["tests/**/*.test.{ts,tsx}"]
   }
