@@ -69,6 +69,20 @@ export function packageEnvironment({ paths, portalHost, classHash, classId, prox
   };
 }
 
+// Every directory from the root down to the leaf, inclusive, so each can be made
+// searchable by the analysis uid.
+function parentsBetween(root, leaf) {
+  const dirs = [];
+  let current = leaf;
+  while (current.startsWith(root) && current.length >= root.length) {
+    dirs.push(current);
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  return dirs;
+}
+
 // Everything the package needs, prepared and owned by the analysis uid.
 export function preparePackage({ workRoot, dataRoot, classHash, classId, packageName, portalHost, token, uid, proxyUrl }) {
   const paths = packagePaths({ workRoot, dataRoot, classHash, packageName });
@@ -89,12 +103,21 @@ export function preparePackage({ workRoot, dataRoot, classHash, classId, package
       fs.chownSync(dir, uid, uid);
     }
     if (credentialFile) fs.chownSync(credentialFile, uid, uid);
+    // Owning the leaf is not enough: creating a file in it also needs search permission
+    // on every directory above it, and those are made by the syncer and the CLUE reader
+    // as root. Without this the package fails with EACCES on a directory it owns.
+    for (const dir of parentsBetween(paths.datasetRoot, paths.dataDir)) {
+      fs.chmodSync(dir, 0o755);
+    }
   }
 
   log.info("package.prepared", {
     package: packageName,
     class_hash: classHash,
-    credential: Boolean(credentialFile)
+    credential: Boolean(credentialFile),
+    uid: uid ?? null,
+    data_dir_mode: (fs.statSync(paths.dataDir).mode & 0o777).toString(8),
+    data_dir_uid: fs.statSync(paths.dataDir).uid
   });
 
   return { paths, env: packageEnvironment({ paths, portalHost, classHash, classId, proxyUrl }) };
