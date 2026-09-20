@@ -25,11 +25,13 @@ on:
       - "app/**"
       - ".github/workflows/deploy-app.yml"
 
-# Required for the OIDC token exchange; without it the role assumption fails with a
-# permissions error rather than a credentials one.
+# An explicit permissions block replaces the default token entirely, so everything the
+# workflow needs has to be listed: id-token for the OIDC exchange with AWS, and deployments
+# because the s3-deploy-action records each deploy as a GitHub deployment.
 permissions:
   id-token: write
   contents: read
+  deployments: write
 
 jobs:
   build_test:
