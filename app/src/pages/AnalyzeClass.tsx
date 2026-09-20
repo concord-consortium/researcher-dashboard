@@ -4,6 +4,7 @@ import { DisplayView } from "../components/Display";
 import { parseDisplay } from "../shell/display";
 import { emulatorsFromEnv, inClass, paths, signIn, watchCollection, watchDoc } from "../shell/firebase";
 import type { ClassRef } from "../shell/launch";
+import { Info } from "./Info";
 import { Portal, PortalError, type ClassInfo } from "../shell/portal";
 import { describe, isBusy, isUnresponsive, type ResearcherStatus } from "../shell/status";
 
@@ -131,7 +132,7 @@ export function AnalyzeClass({ ref_, token }: { ref_: ClassRef; token: string })
     wasBusy.current = busy;
   }, [busy, queued, analyze]);
 
-  if (expired) return <ExpiredNotice />;
+  if (expired) return <Info reason="bad-token" />;
   if (!info) return <main className="loading">{failure ?? "Loading the class…"}</main>;
 
   const chosen = results.find((r) => r.id === selected) ?? null;
@@ -198,17 +199,6 @@ export function AnalyzeClass({ ref_, token }: { ref_: ClassRef; token: string })
         {chosen?.status === "failed" && chosen.error && <p className="error">{chosen.error}</p>}
         {display && <DisplayView display={display} />}
       </section>
-    </main>
-  );
-}
-
-function ExpiredNotice() {
-  return (
-    <main className="info">
-      <h1>Researcher Dashboard</h1>
-      <p className="notice">
-        This link has expired. Launch the dashboard again from the portal to get a new one.
-      </p>
     </main>
   );
 }
