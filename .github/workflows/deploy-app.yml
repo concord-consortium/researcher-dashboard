@@ -9,6 +9,13 @@
 # scopes it to this prefix by way of the role's own RepoName tag. There is no access key in
 # this repository's secrets. portal-report stores a key pair instead; that is the older
 # pattern and not the one to copy here.
+#
+# The role is made by `scripts/create-deploy-role.sh <repo>` in starter-projects, which
+# trusts both OIDC subject formats. That matters here: this repository was created after
+# 2026-07-15, so GitHub sends the immutable subject with numeric owner and repo ids, and a
+# trust policy carrying only the legacy name form is refused as
+# "Not authorized to perform sts:AssumeRoleWithWebIdentity", which reads like a permissions
+# problem and is not one. See starter-projects doc/deploy-setup.md.
 
 name: Deploy app
 
@@ -53,13 +60,6 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: app/package-lock.json
-      # Temporary: prints the claims AWS will match the role's trust policy against, so a
-      # refusal says which of sub, aud or issuer disagrees instead of "Not authorized".
-      - name: Show the OIDC claims this repository sends
-        run: |
-          TOKEN=$(curl -sH "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | jq -r .value)
-          echo "$TOKEN" | cut -d. -f2 | base64 -d 2>/dev/null | jq '{sub, aud, iss, repository, ref}'
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::612297603577:role/researcher-dashboard
