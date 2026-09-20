@@ -53,6 +53,13 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: app/package-lock.json
+      # Temporary: prints the claims AWS will match the role's trust policy against, so a
+      # refusal says which of sub, aud or issuer disagrees instead of "Not authorized".
+      - name: Show the OIDC claims this repository sends
+        run: |
+          TOKEN=$(curl -sH "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | jq -r .value)
+          echo "$TOKEN" | cut -d. -f2 | base64 -d 2>/dev/null | jq '{sub, aud, iss, repository, ref}'
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::612297603577:role/researcher-dashboard
