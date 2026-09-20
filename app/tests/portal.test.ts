@@ -112,3 +112,25 @@ describe("Portal", () => {
     });
   });
 });
+
+// The default fetch is the one path no other test here covers, because every one of them
+// injects a stub. Calling a bare `fetch` reference as a method of the Portal instance is
+// rejected by browsers with "Illegal invocation", which only shows up in a real one.
+describe("the default fetch", () => {
+  it("calls the global fetch with the global as its receiver", async () => {
+    const calls: string[] = [];
+    const stub = vi.fn(function (this: unknown, url: string) {
+      // A real browser fetch throws unless `this` is the window; asserting the receiver is
+      // what makes this test fail when the implementation stores a bare reference.
+      if (this !== globalThis && this !== undefined) throw new TypeError("Illegal invocation");
+      calls.push(url);
+      return Promise.resolve(jsonResponse({ id: 111 }));
+    });
+    vi.stubGlobal("fetch", stub);
+
+    await new Portal(ORIGIN, TOKEN).getClass("111");
+
+    expect(calls).toEqual([`${ORIGIN}/api/v1/researcher_dashboard/classes/111`]);
+    vi.unstubAllGlobals();
+  });
+});

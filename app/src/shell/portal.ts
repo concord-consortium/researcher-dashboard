@@ -47,7 +47,11 @@ export class Portal {
   constructor(
     private readonly origin: string,
     private readonly token: string,
-    private readonly fetchImpl: typeof fetch = fetch
+    // Wrapped rather than passed as a bare reference. `fetch` must be called with `window`
+    // as its receiver, and storing it on an instance makes `this.fetchImpl(...)` a method
+    // call on the Portal, which browsers reject with "Illegal invocation". Every test
+    // injects its own, so nothing but a real browser exercises this default.
+    private readonly fetchImpl: typeof fetch = (input, init) => globalThis.fetch(input, init)
   ) {}
 
   getClass(classId: string): Promise<ClassInfo> {
