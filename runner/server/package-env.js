@@ -69,6 +69,18 @@ export function packageEnvironment({ paths, portalHost, classHash, classId, prox
   };
 }
 
+// The home is rebuilt per preparation and belongs entirely to the package, so it is
+// handed over whole. Chowning only the directory and the credential file inside it left
+// the .config/cc-data path root-owned, and cc-data writes its own config.json there.
+function chownTree(dir, uid) {
+  fs.chownSync(dir, uid, uid);
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) chownTree(full, uid);
+    else fs.chownSync(full, uid, uid);
+  }
+}
+
 // Every directory from the root down to the leaf, inclusive, so each can be made
 // searchable by the analysis uid.
 function parentsBetween(root, leaf) {
@@ -99,10 +111,10 @@ export function preparePackage({ workRoot, dataRoot, classHash, classId, package
   // The package runs as `uid`, so it has to own what it is expected to write. The data
   // directory is included because the package pulls into it.
   if (typeof uid === "number") {
-    for (const dir of [paths.home, paths.outputDir, paths.dataDir]) {
+    chownTree(paths.home, uid);
+    for (const dir of [paths.outputDir, paths.dataDir]) {
       fs.chownSync(dir, uid, uid);
     }
-    if (credentialFile) fs.chownSync(credentialFile, uid, uid);
     // Owning the leaf is not enough: creating a file in it also needs search permission
     // on every directory above it, and those are made by the syncer and the CLUE reader
     // as root. Without this the package fails with EACCES on a directory it owns.

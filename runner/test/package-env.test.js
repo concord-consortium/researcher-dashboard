@@ -131,3 +131,23 @@ test("a package with no proxy is given no proxy variables to misread", () => {
 
   assert.ok(!("HTTPS_PROXY" in env));
 });
+
+// cc-data writes its own config.json beside the credential, so owning the home and the
+// credential file is not enough: the directories between them have to be handed over too.
+test("the package owns every path inside its home, not just the credential", async () => {
+  const uid = process.getuid();
+  const { paths } = preparePackage({
+    workRoot: path.join(root, "work"),
+    dataRoot: path.join(root, "data"),
+    classHash: "abc",
+    classId: 111,
+    packageName: "demo",
+    portalHost: "learn.portal.staging.concord.org",
+    token: "report-token",
+    uid
+  });
+
+  const configDir = path.join(paths.home, ".config", "cc-data");
+  assert.equal(fs.statSync(configDir).uid, uid, ".config/cc-data must be the package's");
+  assert.equal(fs.statSync(path.join(paths.home, ".config")).uid, uid, ".config must be the package's");
+});
