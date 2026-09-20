@@ -38,14 +38,31 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 archive="$work/$version.zip"
 
+# The study's own files, plus the shared `_lib` beside it if there is one. A study
+# imports it as `_lib.<module>`, which works because it lands at the archive root next to
+# the entrypoint and the entrypoint puts its own directory on the path. Shared rather than
+# copied per study, so the SQL describing how cc-data lays a report out has one home.
+staged="$work/package"
+mkdir -p "$staged"
+copy_tree() {
+  ( cd "$1" && find . -type f -not -path './local-data/*' -not -path '*/__pycache__/*' \
+      -not -name '*.pyc' -print0 | LC_ALL=C sort -z \
+      | tar --null -cf - --files-from=- ) | ( cd "$2" && tar -xf - )
+}
+copy_tree "$study_dir" "$staged"
+
+shared_lib="$(dirname "$study_dir")/_lib"
+if [ -d "$shared_lib" ]; then
+  mkdir -p "$staged/_lib"
+  copy_tree "$shared_lib" "$staged/_lib"
+fi
+
 # -X drops extra file attributes, and the sorted file list plus a fixed timestamp make
 # the archive reproducible: the same study publishes to the same checksum, so a rebuild
 # is visibly a rebuild rather than a new package.
-( cd "$study_dir" && find . -type f -not -path './local-data/*' -not -name '*.pyc' -print0 \
-  | LC_ALL=C sort -z \
+( cd "$staged" && find . -type f -print0 | LC_ALL=C sort -z \
   | xargs -0 touch -t 202001010000.00 2>/dev/null || true )
-( cd "$study_dir" && find . -type f -not -path './local-data/*' -not -name '*.pyc' -print \
-  | LC_ALL=C sort | zip -X -q "$archive" -@ )
+( cd "$staged" && find . -type f -print | LC_ALL=C sort | zip -X -q "$archive" -@ )
 
 checksum="sha256:$(sha256sum "$archive" | cut -d' ' -f1)"
 echo "$checksum" > "$work/$version.sha256"
