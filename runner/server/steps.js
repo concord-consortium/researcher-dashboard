@@ -78,7 +78,7 @@ export function makeSteps({ login = ccDataLogin, readClueFn = readClue } = {}) {
     // and an output directory. The package makes the AP and log pulls itself, so this
     // is what makes that possible; CLUE stays in the runner because its credential must
     // not reach package code.
-    preparePackage: async ({ workRoot, dataRoot, classHash, classId, packageName, portal, reportServerToken, uid }) =>
+    preparePackage: async ({ workRoot, dataRoot, classHash, classId, packageName, portal, reportServerToken, uid, proxyUrl }) =>
       preparePackage({
         workRoot,
         dataRoot,
@@ -87,7 +87,8 @@ export function makeSteps({ login = ccDataLogin, readClueFn = readClue } = {}) {
         packageName,
         portalHost: portalHost(portal),
         token: reportServerToken,
-        uid
+        uid,
+        proxyUrl
       }),
 
     // The package pulled the data, so it knows the answer and log counts, and it cannot

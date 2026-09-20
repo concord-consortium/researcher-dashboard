@@ -369,7 +369,8 @@ export class Runner {
         packageName,
         portal: this.payload.portal,
         reportServerToken: this.payload.report_server_token,
-        uid: this.env.analysisUid
+        uid: this.env.analysisUid,
+        proxyUrl: this.proxyUrl
       })
     );
 

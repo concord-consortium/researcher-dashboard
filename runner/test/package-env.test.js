@@ -4,7 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test, { afterEach, beforeEach } from "node:test";
-import { packagePaths, preparePackage, readPackageCounts } from "../server/package-env.js";
+import { packageEnvironment, packagePaths, preparePackage, readPackageCounts } from "../server/package-env.js";
 
 const CLASS = "7be899cf".repeat(6);
 const PORTAL_HOST = "learn.portal.staging.concord.org";
@@ -103,4 +103,31 @@ test("a missing or unreadable counts.json is not a failure", () => {
   assert.deepEqual(readPackageCounts(paths.outputDir), {});
   fs.writeFileSync(path.join(paths.outputDir, "counts.json"), "{not json");
   assert.deepEqual(readPackageCounts(paths.outputDir), {});
+});
+
+// The namespace has no default route, so the proxy is the only way out. A package that
+// is not told where it is fails with whatever its HTTP client says about an unreachable
+// host, which for cc-data is an empty stderr.
+test("the package is told where the egress proxy is", () => {
+  const env = packageEnvironment({
+    paths: { home: "/h", dataDir: "/d", outputDir: "/o" },
+    portalHost: "learn.portal.staging.concord.org",
+    classHash: "abc",
+    classId: 111,
+    proxyUrl: "http://10.201.0.1:8123"
+  });
+
+  assert.equal(env.HTTPS_PROXY, "http://10.201.0.1:8123");
+  assert.equal(env.https_proxy, "http://10.201.0.1:8123");
+});
+
+test("a package with no proxy is given no proxy variables to misread", () => {
+  const env = packageEnvironment({
+    paths: { home: "/h", dataDir: "/d", outputDir: "/o" },
+    portalHost: "learn.portal.staging.concord.org",
+    classHash: "abc",
+    classId: 111
+  });
+
+  assert.ok(!("HTTPS_PROXY" in env));
 });

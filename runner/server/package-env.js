@@ -50,10 +50,14 @@ export function writeCcDataCredential({ home, portalHost, token }) {
 // The package runs as another uid in its own namespace, so it inherits nothing useful
 // and everything it needs has to be named here. No AWS variables and no Firebase
 // session: it pulls through cc-data as the researcher and nothing else.
-export function packageEnvironment({ paths, portalHost, classHash, classId }) {
+export function packageEnvironment({ paths, portalHost, classHash, classId, proxyUrl }) {
   return {
     HOME: paths.home,
     PATH: "/usr/local/bin:/usr/bin:/bin",
+    // The namespace has no default route, so the proxy is the only way out and the
+    // package has to be told where it is. Without these the package is simply offline
+    // and its HTTP client fails with nothing useful to say.
+    ...(proxyUrl ? { HTTPS_PROXY: proxyUrl, HTTP_PROXY: proxyUrl, https_proxy: proxyUrl, http_proxy: proxyUrl } : {}),
     CC_DATA_LOCAL: paths.dataDir,
     CC_DATA_PORTAL: portalHost,
     RD_CLASS_HASH: classHash,
@@ -66,7 +70,7 @@ export function packageEnvironment({ paths, portalHost, classHash, classId }) {
 }
 
 // Everything the package needs, prepared and owned by the analysis uid.
-export function preparePackage({ workRoot, dataRoot, classHash, classId, packageName, portalHost, token, uid }) {
+export function preparePackage({ workRoot, dataRoot, classHash, classId, packageName, portalHost, token, uid, proxyUrl }) {
   const paths = packagePaths({ workRoot, dataRoot, classHash, packageName });
 
   fs.rmSync(paths.home, { recursive: true, force: true });
@@ -93,7 +97,7 @@ export function preparePackage({ workRoot, dataRoot, classHash, classId, package
     credential: Boolean(credentialFile)
   });
 
-  return { paths, env: packageEnvironment({ paths, portalHost, classHash, classId }) };
+  return { paths, env: packageEnvironment({ paths, portalHost, classHash, classId, proxyUrl }) };
 }
 
 // What the package reports back, because it makes the pulls and the runner writes
