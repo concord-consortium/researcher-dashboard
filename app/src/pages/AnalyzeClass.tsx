@@ -13,8 +13,8 @@ import { describe, isBusy, isUnresponsive, type ResearcherStatus } from "../shel
 // gaining a catalog changes where this comes from and nothing else.
 const PACKAGE = {
   name: "class-counts",
-  version: "1.0.5",
-  checksum: "sha256:2855449fa8c01060f58e1f97324663bcdf00172952d5f879bb07e480cd83b8e9"
+  version: "1.0.6",
+  checksum: "sha256:7dadc0abe8021e1748713676ad3dcab285eff904fb1bc23483bfa1717724f5c6"
 };
 
 const STATUS_PROJECT = "report-service-dev";
