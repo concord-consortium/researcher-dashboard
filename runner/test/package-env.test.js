@@ -82,7 +82,7 @@ test("the environment names the paths and carries no AWS or Firebase credential"
   assert.equal(env.CC_DATA_PORTAL, PORTAL_HOST);
   assert.equal(env.RD_CLASS_HASH, CLASS);
   assert.ok(env.CC_DATA_LOCAL.endsWith(path.join("classes", CLASS)));
-  assert.ok(env.HOME && env.RD_OUTPUT_DIR);
+  assert.ok(env.HOME && env.RD_OUTPUT_DIR && env.CC_DATA_ROOT && env.RD_DATASET);
   for (const key of Object.keys(env)) {
     assert.ok(!/^AWS_/.test(key), `${key} must not be handed to a package`);
   }
@@ -116,8 +116,9 @@ test("a missing or unreadable counts.json is not a failure", async () => {
 // host, which for cc-data is an empty stderr.
 test("the package is told where the egress proxy is", async () => {
   const env = packageEnvironment({
-    paths: { home: "/h", dataDir: "/d", outputDir: "/o" },
+    paths: { home: "/h", dataDir: "/d", outputDir: "/o", ccDataRoot: "/d/cc-data" },
     portalHost: "learn.portal.staging.concord.org",
+    packageName: "counts",
     classHash: "abc",
     classId: 111,
     proxyUrl: "http://10.201.0.1:8123"
@@ -129,8 +130,9 @@ test("the package is told where the egress proxy is", async () => {
 
 test("a package with no proxy is given no proxy variables to misread", async () => {
   const env = packageEnvironment({
-    paths: { home: "/h", dataDir: "/d", outputDir: "/o" },
+    paths: { home: "/h", dataDir: "/d", outputDir: "/o", ccDataRoot: "/d/cc-data" },
     portalHost: "learn.portal.staging.concord.org",
+    packageName: "counts",
     classHash: "abc",
     classId: 111
   });
@@ -177,4 +179,80 @@ test("the package owns the files it wrote before, but not the CLUE corpus", asyn
 
   assert.equal(fs.statSync(stale).uid, uid, "its own state file must be reopenable");
   assert.notEqual(fs.statSync(path.join(corpus, "content.jsonl")).uid, undefined);
+});
+
+// CC_DATA_ROOT is the only variable cc-data reads for its dataset root. Unset, it falls
+// back to $HOME/cc-data, which here is the home wiped before every run, so a pull would
+// be discarded rather than kept and the package would find nothing where it looked.
+test("cc-data pulls into the synced data root, not into the throwaway home", async () => {
+  const { env, paths } = await prepare();
+
+  assert.ok(env.CC_DATA_ROOT, "cc-data falls back to $HOME/cc-data without it");
+  assert.ok(env.CC_DATA_ROOT.startsWith(path.join(root, "data")),
+    "a pull outside the data root is never synced and dies with the VM");
+  assert.ok(!env.CC_DATA_ROOT.startsWith(env.HOME), "and it must not be under the wiped HOME");
+  assert.equal(env.CC_DATA_ROOT, paths.ccDataRoot);
+});
+
+// One dataset per package, because a package decides for itself how many classes it
+// pulls. Sharing one would merge two packages' holdings under one manifest.
+test("each package pulls into its own dataset", async () => {
+  const { env } = await prepare();
+  const other = await prepare({ packageName: "other-counts" });
+
+  assert.equal(env.RD_DATASET, `${PORTAL_HOST}/counts`);
+  assert.equal(other.env.RD_DATASET, `${PORTAL_HOST}/other-counts`);
+});
+
+// The pulled corpus is the expensive thing. It has to outlive a run the way the class
+// directory does, or every analysis re-downloads the class.
+test("the dataset root survives a rerun and belongs to the package", async () => {
+  const uid = process.getuid();
+  const first = await prepare({ uid });
+  fs.writeFileSync(path.join(first.paths.ccDataRoot, "pulled"), "keep me");
+
+  const second = await prepare({ uid });
+  assert.ok(fs.existsSync(path.join(second.paths.ccDataRoot, "pulled")), "the pull survives");
+  assert.equal(fs.statSync(second.paths.ccDataRoot).uid, uid,
+    "cc-data creates the portal and dataset directories under it, as the package");
+});
+
+// A cold start restores this tree from S3 as root, which is the same shape as the class
+// directory and the same failure: the package cannot write into what it does not own.
+// Asserted on the chown calls rather than on the owner, because the test runs as the uid
+// it would be chowning to, so checking the owner afterwards passes either way.
+test("a dataset root restored as root is handed back to the package", async () => {
+  const uid = process.getuid();
+  const chowned = [];
+  const first = await prepare({ uid, chown: (target) => chowned.push(target) });
+  const restored = path.join(first.paths.ccDataRoot, PORTAL_HOST, "datasets", "counts");
+  fs.mkdirSync(restored, { recursive: true });
+  fs.writeFileSync(path.join(restored, "manifest.json"), "{}");
+
+  chowned.length = 0;
+  await prepare({ uid, chown: (target) => chowned.push(target) });
+
+  assert.ok(chowned.includes(first.paths.ccDataRoot), "the root itself");
+  assert.ok(chowned.includes(path.join(restored, "manifest.json")),
+    "and everything the syncer restored under it, or the package cannot rewrite it");
+});
+
+// The package name is a Firestore document id, a path segment and now a cc-data dataset
+// name. The last has the narrowest alphabet, so it is the one to check against.
+test("a package name cc-data cannot use as a dataset name is refused", async () => {
+  await assert.rejects(prepare({ packageName: "Class_Counts" }), /dataset name/);
+  await assert.rejects(prepare({ packageName: "-leading-dash" }), /dataset name/);
+});
+
+// isolation-probe's report-server check reads this, and a probe that cannot check
+// reports nothing rather than reporting that it could not, which is exactly the answer
+// todo 17 exists to get. The payload has carried the URL since the forwarding work.
+test("a package that probes what it can reach is told where report-server is", async () => {
+  const { env } = await prepare({ reportServerUrl: "https://report-server.concordqa.org" });
+  assert.equal(env.RD_REPORT_SERVER_URL, "https://report-server.concordqa.org");
+});
+
+test("no report-server URL means no variable, rather than an empty one to misread", async () => {
+  const { env } = await prepare();
+  assert.ok(!("RD_REPORT_SERVER_URL" in env));
 });

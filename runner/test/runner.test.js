@@ -701,6 +701,9 @@ test("the portal class id reaches the package's environment", async () => {
   });
   await runner.currentAnalysis?.done;
   assert.equal(prepared?.classId, 111);
+  // The same for the report-server URL, which isolation-probe needs in order to report
+  // that report-server is reachable rather than skipping the check.
+  assert.equal(prepared?.reportServerUrl, "https://report-server.example.org");
 });
 
 // The first status write carries the session token's claims or the rules refuse it, and

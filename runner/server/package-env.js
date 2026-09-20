@@ -13,9 +13,17 @@ import { log } from "./log.js";
 //
 // The package's HOME sits outside the synced data root, so the credential is never
 // written to S3, the same reason the runner's own is under $HOME rather than /data.
-// The dataset is under the data root, because the corpus is exactly what should survive
-// a suspend and be there for the next analysis.
+// cc-data's dataset root is under the data root, because the pulled corpus is exactly
+// what should survive a suspend and be there for the next analysis.
+//
+// cc-data reads one variable for that root, CC_DATA_ROOT, and nothing else: without it
+// it falls back to $HOME/cc-data, which here is the throwaway home, so every pull lands
+// somewhere that is deleted before the next run and is never synced.
 
+
+// A package name is a Firestore document id, a filesystem path segment and a cc-data
+// dataset name, and the last is the narrowest of the three.
+export const DATASET_NAME = /^[a-z0-9][a-z0-9_-]{0,62}$/;
 
 export function packagePaths({ workRoot, dataRoot, classHash, packageName }) {
   return {
@@ -26,7 +34,12 @@ export function packagePaths({ workRoot, dataRoot, classHash, packageName }) {
     // Shared across packages and across runs: the pulled corpus is the expensive thing
     // and belongs to the researcher, keyed by class.
     dataDir: path.join(dataRoot, "classes", classHash),
-    datasetRoot: dataRoot
+    // cc-data's own root, which holds <portal>/datasets/<name> beneath it. One dataset
+    // per package rather than per class: a package decides for itself how many classes
+    // it pulls, and cc-data records the run each row came from, so scoping a count to
+    // one class is the package's query rather than a directory the runner picks.
+    ccDataRoot: path.join(dataRoot, "cc-data"),
+    dataRoot
   };
 }
 
@@ -34,7 +47,7 @@ export function packagePaths({ workRoot, dataRoot, classHash, packageName }) {
 // The package runs as another uid in its own namespace, so it inherits nothing useful
 // and everything it needs has to be named here. No AWS variables and no Firebase
 // session: it pulls through cc-data as the researcher and nothing else.
-export function packageEnvironment({ paths, portalHost, classHash, classId, proxyUrl }) {
+export function packageEnvironment({ paths, portalHost, packageName, classHash, classId, proxyUrl, reportServerUrl }) {
   return {
     HOME: paths.home,
     PATH: "/usr/local/bin:/usr/bin:/bin",
@@ -42,8 +55,18 @@ export function packageEnvironment({ paths, portalHost, classHash, classId, prox
     // package has to be told where it is. Without these the package is simply offline
     // and its HTTP client fails with nothing useful to say.
     ...(proxyUrl ? { HTTPS_PROXY: proxyUrl, HTTP_PROXY: proxyUrl, https_proxy: proxyUrl, http_proxy: proxyUrl } : {}),
+    // Where cc-data keeps its datasets. The one variable it reads for this.
+    CC_DATA_ROOT: paths.ccDataRoot,
+    // The dataset this package pulls into, named here rather than composed by the
+    // package, so the layout stays the runner's to change.
+    RD_DATASET: `${portalHost}/${packageName}`,
     CC_DATA_LOCAL: paths.dataDir,
     CC_DATA_PORTAL: portalHost,
+    // Which report-server the researcher's credential is for. cc-data resolves it from
+    // the login, so a package pulling with cc-data never needs it; a package that probes
+    // what it can reach does, and without it the probe reports nothing rather than
+    // reporting that it could not check.
+    ...(reportServerUrl ? { RD_REPORT_SERVER_URL: reportServerUrl } : {}),
     RD_CLASS_HASH: classHash,
     // What report-server filters a run by. The hash identifies the class to Firebase and
     // CLUE; this identifies it to the portal, and neither derives from the other.
@@ -60,13 +83,13 @@ export function packageEnvironment({ paths, portalHost, classHash, classId, prox
 // it, which is the read-only half of the contract in design.md.
 export const RUNNER_OWNED = "clue-documents";
 
-function chownTree(dir, uid, skip = null) {
-  fs.chownSync(dir, uid, uid);
+function chownTree(dir, uid, skip = null, chown = fs.chownSync) {
+  chown(dir, uid, uid);
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     if (skip && entry.name === skip) continue;
     const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) chownTree(full, uid, skip);
-    else fs.chownSync(full, uid, uid);
+    if (entry.isDirectory()) chownTree(full, uid, skip, chown);
+    else chown(full, uid, uid);
   }
 }
 
@@ -85,18 +108,25 @@ function parentsBetween(root, leaf) {
 }
 
 // Everything the package needs, prepared and owned by the analysis uid.
-export async function preparePackage({ workRoot, dataRoot, classHash, classId, packageName, portalHost, token, uid, proxyUrl, login }) {
+// `chown` is a seam: the effect it has cannot be observed by a test, which runs as the
+// uid it would be chowning to, so what a test can check is that it was asked for.
+export async function preparePackage({ workRoot, dataRoot, classHash, classId, packageName, portalHost, token, uid, proxyUrl, reportServerUrl, login, chown = fs.chownSync }) {
+  if (!DATASET_NAME.test(packageName)) {
+    throw new Error(`package name ${packageName} is not a usable cc-data dataset name (${DATASET_NAME})`);
+  }
   const paths = packagePaths({ workRoot, dataRoot, classHash, packageName });
 
   fs.rmSync(paths.home, { recursive: true, force: true });
-  for (const dir of [paths.home, paths.outputDir, paths.dataDir]) {
+  // The cc-data root is not rebuilt: it holds the pulled corpus, which is the thing
+  // worth keeping across runs and across suspends.
+  for (const dir of [paths.home, paths.outputDir, paths.dataDir, paths.ccDataRoot]) {
     fs.mkdirSync(dir, { recursive: true });
   }
 
   // The credential is installed by cc-data itself, into the package's own HOME and as
   // the package's own uid. Its store has a version, a portals map and a backend that
   // may be a keyring or a file, and none of that is ours to reproduce.
-  if (typeof uid === "number") chownTree(paths.home, uid);
+  if (typeof uid === "number") chownTree(paths.home, uid, null, chown);
   if (token && login) {
     await login({ token, portal: portalHost, home: paths.home, uid });
   }
@@ -104,16 +134,21 @@ export async function preparePackage({ workRoot, dataRoot, classHash, classId, p
   // The package runs as `uid`, so it has to own what it is expected to write. The data
   // directory is included because the package pulls into it.
   if (typeof uid === "number") {
-    chownTree(paths.home, uid);
-    fs.chownSync(paths.outputDir, uid, uid);
+    chownTree(paths.home, uid, null, chown);
+    chown(paths.outputDir, uid, uid);
     // The whole class directory except the CLUE corpus. Its contents come back from S3
     // on every cold start, written by the syncer as root, so owning only the directory
     // leaves the package unable to reopen a file it wrote on a previous run.
-    chownTree(paths.dataDir, uid, RUNNER_OWNED);
+    chownTree(paths.dataDir, uid, RUNNER_OWNED, chown);
+    // The same, for the datasets the package pulls into. cc-data creates the portal and
+    // dataset directories under this root itself, as the package, so the root is all it
+    // needs to own; the tree is walked because a cold start restores it from S3 as root.
+    chownTree(paths.ccDataRoot, uid, null, chown);
     // Owning the leaf is not enough: creating a file in it also needs search permission
     // on every directory above it, and those are made by the syncer and the CLUE reader
     // as root. Without this the package fails with EACCES on a directory it owns.
-    for (const dir of parentsBetween(paths.datasetRoot, paths.dataDir)) {
+    for (const dir of [...parentsBetween(paths.dataRoot, paths.dataDir),
+                       ...parentsBetween(paths.dataRoot, paths.ccDataRoot)]) {
       fs.chmodSync(dir, 0o755);
     }
   }
@@ -124,10 +159,12 @@ export async function preparePackage({ workRoot, dataRoot, classHash, classId, p
     credential: Boolean(token),
     uid: uid ?? null,
     data_dir_mode: (fs.statSync(paths.dataDir).mode & 0o777).toString(8),
-    data_dir_uid: fs.statSync(paths.dataDir).uid
+    data_dir_uid: fs.statSync(paths.dataDir).uid,
+    cc_data_root: paths.ccDataRoot,
+    cc_data_root_uid: fs.statSync(paths.ccDataRoot).uid
   });
 
-  return { paths, env: packageEnvironment({ paths, portalHost, classHash, classId, proxyUrl }) };
+  return { paths, env: packageEnvironment({ paths, portalHost, packageName, classHash, classId, proxyUrl, reportServerUrl }) };
 }
 
 // What the package reports back, because it makes the pulls and the runner writes

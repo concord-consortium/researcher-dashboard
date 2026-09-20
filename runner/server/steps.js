@@ -54,6 +54,24 @@ export function ccDataLogin({ token, portal, home, uid, spawnFn = spawn }) {
 // documents live in, so the reader signs in separately with its own class token.
 export const CLUE_PROJECT = "collaborative-learning-staging";
 
+// Enough of a package's output to read a failure from, and bounded because it reaches
+// CloudWatch: a package that prints its whole corpus should cost a truncated log line
+// rather than the log group.
+const PACKAGE_OUTPUT_LIMIT = 4000;
+
+function tail(text) {
+  const value = String(text ?? "").trim();
+  return value.length > PACKAGE_OUTPUT_LIMIT ? `...${value.slice(-PACKAGE_OUTPUT_LIMIT)}` : value;
+}
+
+function logPackageOutput(name, result, level) {
+  log[level]("package.output", {
+    package: name,
+    stdout: tail(result?.stdout),
+    stderr: tail(result?.stderr)
+  });
+}
+
 export function makeSteps({ login = ccDataLogin, readClueFn = readClue } = {}) {
   return {
     // Two credentials, both arriving at /run and neither stored in the image: the
@@ -83,7 +101,7 @@ export function makeSteps({ login = ccDataLogin, readClueFn = readClue } = {}) {
     // and an output directory. The package makes the AP and log pulls itself, so this
     // is what makes that possible; CLUE stays in the runner because its credential must
     // not reach package code.
-    preparePackage: async ({ workRoot, dataRoot, classHash, classId, packageName, portal, reportServerToken, uid, proxyUrl }) =>
+    preparePackage: async ({ workRoot, dataRoot, classHash, classId, packageName, portal, reportServerToken, reportServerUrl, uid, proxyUrl }) =>
       preparePackage({
         login,
         workRoot,
@@ -93,6 +111,7 @@ export function makeSteps({ login = ccDataLogin, readClueFn = readClue } = {}) {
         packageName,
         portalHost: portalHost(portal),
         token: reportServerToken,
+        reportServerUrl,
         uid,
         proxyUrl
       }),
@@ -149,16 +168,28 @@ export function makeSteps({ login = ccDataLogin, readClueFn = readClue } = {}) {
       const interpreter = entrypoint.endsWith(".py") ? "python3.11" : entrypoint;
       const args = entrypoint.endsWith(".py") ? [entrypoint] : [];
 
-      await runSandboxed({
-        uid,
-        command: interpreter,
-        args,
-        env,
-        cwd: manifest.dir,
-        timeout: timeoutMs,
-        proxyUrl,
-        ...(exec ? { exec } : {})
-      });
+      // A package's own output is the only account of what it did, and the runner is
+      // the only thing positioned to keep it: the sandbox has no route to CloudWatch
+      // and the VM's disk dies with it. Logged on the way through whether the package
+      // succeeded or failed, because a package that succeeds while counting nothing
+      // says so here and nowhere else.
+      let result;
+      try {
+        result = await runSandboxed({
+          uid,
+          command: interpreter,
+          args,
+          env,
+          cwd: manifest.dir,
+          timeout: timeoutMs,
+          proxyUrl,
+          ...(exec ? { exec } : {})
+        });
+      } catch (err) {
+        logPackageOutput(manifest.name, err, "error");
+        throw err;
+      }
+      logPackageOutput(manifest.name, result, "info");
 
       const displayFile = path.join(paths.outputDir, "display.json");
       let display;

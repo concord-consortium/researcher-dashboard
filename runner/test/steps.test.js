@@ -230,3 +230,88 @@ test("LogStore records the state sequence without attempting a sign-in", async (
   assert.equal(await store.signIn("placeholder"), null);
   await store.merge("researcher_dashboard/p/researchers/439", { state: "ready" });
 });
+
+// Captures the runner's own log lines, which go straight to stdout for CloudWatch.
+function captureLog(run) {
+  const lines = [];
+  const original = process.stdout.write;
+  process.stdout.write = (chunk) => { lines.push(String(chunk)); return true; };
+  return Promise.resolve()
+    .then(run)
+    .finally(() => { process.stdout.write = original; })
+    .then(() => lines.map((line) => JSON.parse(line)));
+}
+
+// The package's own output is the only account of what it did, and the sandbox has no
+// route to CloudWatch. A package can exit zero having counted nothing, and this is the
+// only place that says so.
+test("runPackage logs what the package printed", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "rd-steps-"));
+  const outputDir = path.join(dir, "out");
+  fs.mkdirSync(outputDir, { recursive: true });
+  fs.writeFileSync(path.join(outputDir, "display.json"), JSON.stringify({ version: 1, summary: "ok" }));
+
+  const steps = makeSteps();
+  const lines = await captureLog(() => steps.runPackage({
+    manifest: { name: "class-counts", version: "1.0.0", entrypoint: "run.py", dir },
+    paths: { outputDir },
+    env: {},
+    uid: 1000,
+    timeoutMs: 1000,
+    exec: async () => ({ stdout: '{"logs": 490}', stderr: "dataset: x" })
+  }));
+
+  const output = lines.find((line) => line.event === "package.output");
+  assert.ok(output, "the package's output must reach the log");
+  assert.equal(output.package, "class-counts");
+  assert.equal(output.stdout, '{"logs": 490}');
+  assert.equal(output.stderr, "dataset: x");
+  await rm(dir, { recursive: true, force: true });
+});
+
+test("a package that fails has its output logged before the failure is raised", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "rd-steps-"));
+
+  const steps = makeSteps();
+  const failure = Object.assign(new Error("exited 1"), { stdout: "", stderr: "cc-data: NOT_AUTHENTICATED" });
+  const lines = await captureLog(async () => {
+    await assert.rejects(steps.runPackage({
+      manifest: { name: "class-counts", version: "1.0.0", entrypoint: "run.py", dir },
+      paths: { outputDir: path.join(dir, "out") },
+      env: {},
+      uid: 1000,
+      timeoutMs: 1000,
+      exec: async () => { throw failure; }
+    }), /exited 1/);
+  });
+
+  const output = lines.find((line) => line.event === "package.output");
+  assert.ok(output, "a failing package is exactly when its output is needed");
+  assert.equal(output.level, "error");
+  assert.equal(output.stderr, "cc-data: NOT_AUTHENTICATED");
+  await rm(dir, { recursive: true, force: true });
+});
+
+// A package that prints its corpus should cost a truncated line, not the log group.
+test("a package that prints too much is truncated rather than dropped", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "rd-steps-"));
+  const outputDir = path.join(dir, "out");
+  fs.mkdirSync(outputDir, { recursive: true });
+  fs.writeFileSync(path.join(outputDir, "display.json"), JSON.stringify({ version: 1, summary: "ok" }));
+
+  const steps = makeSteps();
+  const lines = await captureLog(() => steps.runPackage({
+    manifest: { name: "class-counts", version: "1.0.0", entrypoint: "run.py", dir },
+    paths: { outputDir },
+    env: {},
+    uid: 1000,
+    timeoutMs: 1000,
+    exec: async () => ({ stdout: `${"x".repeat(9000)}THE END`, stderr: "" })
+  }));
+
+  const output = lines.find((line) => line.event === "package.output");
+  assert.ok(output.stdout.length < 9000, "the line is bounded");
+  // The tail, not the head: the reason a package failed is at the end of its output.
+  assert.ok(output.stdout.endsWith("THE END"));
+  await rm(dir, { recursive: true, force: true });
+});
