@@ -71,9 +71,16 @@ test("setup tears down a leftover namespace first", () => {
 
 // One list, in one place, is the property that makes this reviewable for an outside
 // researcher's package: everything else a package needs goes through the runner.
-test("the default allowlist is report-server and nothing else", async () => {
+// report-server and the S3 it presigns a report's CSV on, and nothing else. The list is
+// exact hostnames: a zone wildcard would open every bucket and every service under it.
+test("the default allowlist is report-server, its presigned S3, and nothing else", async () => {
   const { loadEnv } = await import("../server/config.js");
   const env = loadEnv({ SYNC_BACKEND: "DIR", SYNC_DIR: "/tmp/x" });
-  assert.deepEqual(env.egressAllowlist, ["report-server.concordqa.org", "report-server.concord.org"]);
+  assert.deepEqual(env.egressAllowlist, [
+    "report-server.concordqa.org",
+    "report-server.concord.org",
+    "s3.amazonaws.com",
+    "s3.us-east-1.amazonaws.com"
+  ]);
   assert.ok(!env.egressAllowlist.some((h) => h.startsWith(".")), "no zone wildcards by default");
 });
