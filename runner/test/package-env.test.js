@@ -17,7 +17,10 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
+let logins = [];
+
 function prepare(overrides = {}) {
+  logins = [];
   return preparePackage({
     workRoot: path.join(root, "work"),
     dataRoot: path.join(root, "data"),
@@ -25,13 +28,14 @@ function prepare(overrides = {}) {
     packageName: "counts",
     portalHost: PORTAL_HOST,
     token: "ccd_secret",
+    login: async (args) => { logins.push(args); },
     ...overrides
   });
 }
 
 // The credential must never become durable state. The runner's own lives under $HOME
 // for the same reason: the syncer walks the data root and nothing else.
-test("the package's HOME is outside the synced data root", () => {
+test("the package's HOME is outside the synced data root", async () => {
   const paths = packagePaths({
     workRoot: path.join(root, "work"),
     dataRoot: path.join(root, "data"),
@@ -42,37 +46,39 @@ test("the package's HOME is outside the synced data root", () => {
   assert.ok(paths.dataDir.startsWith(path.join(root, "data")), "the corpus must be under it, so it syncs");
 });
 
-test("the cc-data credential is written 0600 and keyed by portal host", () => {
-  const { paths } = prepare();
-  const file = path.join(paths.home, ".config", "cc-data", "credentials.json");
+// cc-data owns the shape of its credential store: it has a version, a portals map and a
+// backend that may be a keyring or a file. Writing that by hand is a guess, and the guess
+// failed as NOT_AUTHENTICATED with a perfectly good token on disk.
+test("the credential is installed by cc-data itself, into the package's home", async () => {
+  const { paths } = await prepare();
 
-  assert.equal(fs.statSync(file).mode & 0o777, 0o600, "a umask must not widen it");
-  assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8")), {
-    [PORTAL_HOST]: { token: "ccd_secret" }
-  });
+  assert.equal(logins.length, 1);
+  assert.equal(logins[0].token, "ccd_secret");
+  assert.equal(logins[0].portal, PORTAL_HOST);
+  assert.equal(logins[0].home, paths.home, "it must log in to the package's HOME, not the runner's");
 });
 
-test("no credential is written when none was sent", () => {
-  const { paths } = prepare({ token: null });
-  assert.ok(!fs.existsSync(path.join(paths.home, ".config", "cc-data", "credentials.json")));
+test("no login happens when no token was sent", async () => {
+  await prepare({ token: null });
+  assert.equal(logins.length, 0);
 });
 
 // A rerun must not read the previous run's working files, and a package that wrote
 // something odd into its HOME must not leave it for the next one.
-test("HOME is recreated on each preparation, the corpus is not", () => {
-  const first = prepare();
+test("HOME is recreated on each preparation, the corpus is not", async () => {
+  const first = await prepare();
   fs.writeFileSync(path.join(first.paths.home, "leftover"), "x");
   fs.writeFileSync(path.join(first.paths.dataDir, "corpus"), "keep me");
 
-  const second = prepare();
+  const second = await prepare();
   assert.ok(!fs.existsSync(path.join(second.paths.home, "leftover")), "HOME is wiped");
   assert.ok(fs.existsSync(path.join(second.paths.dataDir, "corpus")), "the pulled corpus survives");
 });
 
 // The package runs as another uid in its own namespace, so it inherits nothing and
 // everything it needs has to be named. No AWS variables, and no Firebase session.
-test("the environment names the paths and carries no AWS or Firebase credential", () => {
-  const { env } = prepare();
+test("the environment names the paths and carries no AWS or Firebase credential", async () => {
+  const { env } = await prepare();
   assert.equal(env.CC_DATA_PORTAL, PORTAL_HOST);
   assert.equal(env.RD_CLASS_HASH, CLASS);
   assert.ok(env.CC_DATA_LOCAL.endsWith(path.join("classes", CLASS)));
@@ -83,8 +89,8 @@ test("the environment names the paths and carries no AWS or Firebase credential"
   assert.ok(!("session_token" in env) && !("RD_SESSION_TOKEN" in env));
 });
 
-test("counts.json is read back, and only the contracted keys", () => {
-  const { paths } = prepare();
+test("counts.json is read back, and only the contracted keys", async () => {
+  const { paths } = await prepare();
   fs.writeFileSync(path.join(paths.outputDir, "counts.json"), JSON.stringify({
     answers: 201, learners: 6, logs: 490, log_freshness_at: "2026-08-26T00:00:00Z",
     clue_documents: 9999, something_else: true
@@ -98,8 +104,8 @@ test("counts.json is read back, and only the contracted keys", () => {
   assert.ok(!("clue_documents" in counts));
 });
 
-test("a missing or unreadable counts.json is not a failure", () => {
-  const { paths } = prepare();
+test("a missing or unreadable counts.json is not a failure", async () => {
+  const { paths } = await prepare();
   assert.deepEqual(readPackageCounts(paths.outputDir), {});
   fs.writeFileSync(path.join(paths.outputDir, "counts.json"), "{not json");
   assert.deepEqual(readPackageCounts(paths.outputDir), {});
@@ -108,7 +114,7 @@ test("a missing or unreadable counts.json is not a failure", () => {
 // The namespace has no default route, so the proxy is the only way out. A package that
 // is not told where it is fails with whatever its HTTP client says about an unreachable
 // host, which for cc-data is an empty stderr.
-test("the package is told where the egress proxy is", () => {
+test("the package is told where the egress proxy is", async () => {
   const env = packageEnvironment({
     paths: { home: "/h", dataDir: "/d", outputDir: "/o" },
     portalHost: "learn.portal.staging.concord.org",
@@ -121,7 +127,7 @@ test("the package is told where the egress proxy is", () => {
   assert.equal(env.https_proxy, "http://10.201.0.1:8123");
 });
 
-test("a package with no proxy is given no proxy variables to misread", () => {
+test("a package with no proxy is given no proxy variables to misread", async () => {
   const env = packageEnvironment({
     paths: { home: "/h", dataDir: "/d", outputDir: "/o" },
     portalHost: "learn.portal.staging.concord.org",
@@ -132,11 +138,13 @@ test("a package with no proxy is given no proxy variables to misread", () => {
   assert.ok(!("HTTPS_PROXY" in env));
 });
 
-// cc-data writes its own config.json beside the credential, so owning the home and the
-// credential file is not enough: the directories between them have to be handed over too.
-test("the package owns every path inside its home, not just the credential", async () => {
+// cc-data creates its own credential store and config under HOME, as the package's uid,
+// so the home has to belong to the package before the login runs rather than after.
+test("the home belongs to the package before cc-data is logged in", async () => {
   const uid = process.getuid();
-  const { paths } = preparePackage({
+  let ownerAtLogin = null;
+
+  const { paths } = await preparePackage({
     workRoot: path.join(root, "work"),
     dataRoot: path.join(root, "data"),
     classHash: "abc",
@@ -144,10 +152,10 @@ test("the package owns every path inside its home, not just the credential", asy
     packageName: "demo",
     portalHost: "learn.portal.staging.concord.org",
     token: "report-token",
-    uid
+    uid,
+    login: async ({ home }) => { ownerAtLogin = fs.statSync(home).uid; }
   });
 
-  const configDir = path.join(paths.home, ".config", "cc-data");
-  assert.equal(fs.statSync(configDir).uid, uid, ".config/cc-data must be the package's");
-  assert.equal(fs.statSync(path.join(paths.home, ".config")).uid, uid, ".config must be the package's");
+  assert.equal(ownerAtLogin, uid, "cc-data cannot create its store in a home it does not own");
+  assert.equal(fs.statSync(paths.home).uid, uid);
 });

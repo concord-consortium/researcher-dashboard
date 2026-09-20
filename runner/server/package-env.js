@@ -16,7 +16,6 @@ import { log } from "./log.js";
 // The dataset is under the data root, because the corpus is exactly what should survive
 // a suspend and be there for the next analysis.
 
-export const CC_DATA_CREDENTIAL_MODE = 0o600;
 
 export function packagePaths({ workRoot, dataRoot, classHash, packageName }) {
   return {
@@ -31,21 +30,6 @@ export function packagePaths({ workRoot, dataRoot, classHash, packageName }) {
   };
 }
 
-// cc-data reads its credential from $HOME/.config/cc-data/credentials.json and warns
-// about a missing keychain before falling back to exactly that path, which is the
-// expected arrangement on a VM with no dbus rather than a problem.
-export function writeCcDataCredential({ home, portalHost, token }) {
-  const dir = path.join(home, ".config", "cc-data");
-  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const file = path.join(dir, "credentials.json");
-  fs.writeFileSync(file, JSON.stringify({ [portalHost]: { token } }, null, 2), {
-    mode: CC_DATA_CREDENTIAL_MODE
-  });
-  // Written, then tightened: writeFileSync's mode is masked by the process umask, so a
-  // umask of 022 would leave it readable by anything else on the VM.
-  fs.chmodSync(file, CC_DATA_CREDENTIAL_MODE);
-  return file;
-}
 
 // The package runs as another uid in its own namespace, so it inherits nothing useful
 // and everything it needs has to be named here. No AWS variables and no Firebase
@@ -96,7 +80,7 @@ function parentsBetween(root, leaf) {
 }
 
 // Everything the package needs, prepared and owned by the analysis uid.
-export function preparePackage({ workRoot, dataRoot, classHash, classId, packageName, portalHost, token, uid, proxyUrl }) {
+export async function preparePackage({ workRoot, dataRoot, classHash, classId, packageName, portalHost, token, uid, proxyUrl, login }) {
   const paths = packagePaths({ workRoot, dataRoot, classHash, packageName });
 
   fs.rmSync(paths.home, { recursive: true, force: true });
@@ -104,9 +88,13 @@ export function preparePackage({ workRoot, dataRoot, classHash, classId, package
     fs.mkdirSync(dir, { recursive: true });
   }
 
-  const credentialFile = token
-    ? writeCcDataCredential({ home: paths.home, portalHost, token })
-    : null;
+  // The credential is installed by cc-data itself, into the package's own HOME and as
+  // the package's own uid. Its store has a version, a portals map and a backend that
+  // may be a keyring or a file, and none of that is ours to reproduce.
+  if (typeof uid === "number") chownTree(paths.home, uid);
+  if (token && login) {
+    await login({ token, portal: portalHost, home: paths.home, uid });
+  }
 
   // The package runs as `uid`, so it has to own what it is expected to write. The data
   // directory is included because the package pulls into it.
@@ -126,7 +114,7 @@ export function preparePackage({ workRoot, dataRoot, classHash, classId, package
   log.info("package.prepared", {
     package: packageName,
     class_hash: classHash,
-    credential: Boolean(credentialFile),
+    credential: Boolean(token),
     uid: uid ?? null,
     data_dir_mode: (fs.statSync(paths.dataDir).mode & 0o777).toString(8),
     data_dir_uid: fs.statSync(paths.dataDir).uid

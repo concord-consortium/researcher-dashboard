@@ -20,11 +20,16 @@ function notYet(what) {
 
 // `--token -` reads from stdin. The bare `--token <value>` form would put the
 // report-service token in the process list, where the analysis user could read it.
-export function ccDataLogin({ token, portal, spawnFn = spawn }) {
+export function ccDataLogin({ token, portal, home, uid, spawnFn = spawn }) {
   return new Promise((resolve, reject) => {
     const host = portalHost(portal);
+    // `home` and `uid` log the package in as itself, in its own HOME: cc-data owns the
+    // shape of its credential store and it has changed before, so writing that file by
+    // hand is a guess that fails as NOT_AUTHENTICATED with the token sitting right there.
     const child = spawnFn("cc-data", ["login", "--portal", host, "--token", "-"], {
-      stdio: ["pipe", "pipe", "pipe"]
+      stdio: ["pipe", "pipe", "pipe"],
+      ...(home ? { env: { HOME: home, PATH: "/usr/local/bin:/usr/bin:/bin" } } : {}),
+      ...(typeof uid === "number" ? { uid, gid: uid } : {})
     });
     let stderr = "";
     child.stderr?.on("data", (d) => {
@@ -80,6 +85,7 @@ export function makeSteps({ login = ccDataLogin, readClueFn = readClue } = {}) {
     // not reach package code.
     preparePackage: async ({ workRoot, dataRoot, classHash, classId, packageName, portal, reportServerToken, uid, proxyUrl }) =>
       preparePackage({
+        login,
         workRoot,
         dataRoot,
         classHash,
