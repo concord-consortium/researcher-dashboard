@@ -1,7 +1,7 @@
 import { initializeApp, type FirebaseApp } from "firebase/app";
 import { getAuth, signInWithCustomToken } from "firebase/auth";
 import {
-  collection, doc, getFirestore, onSnapshot, type Firestore
+  collection, doc, getFirestore, onSnapshot, query, where, type Firestore, type QueryConstraint
 } from "firebase/firestore";
 
 // The Firebase projects this app reads, and the sign-in that gets it in.
@@ -90,12 +90,23 @@ export function watchDoc<T>(
   );
 }
 
+// `constraints` are not an optimization. Firestore evaluates security rules against the
+// query, not against the documents it would return, so a listener on a collection whose
+// rule permits only some of it is denied outright unless the query says so itself.
+// Filtering the results in the browser cannot stand in for that.
 export function watchCollection<T>(
-  db: Firestore, path: string, onValue: (values: Array<T & { id: string }>) => void
+  db: Firestore, path: string, onValue: (values: Array<T & { id: string }>) => void,
+  ...constraints: QueryConstraint[]
 ): () => void {
   return onSnapshot(
-    collection(db, path),
+    query(collection(db, path), ...constraints),
     (snapshot) => onValue(snapshot.docs.map((d) => ({ id: d.id, ...(d.data() as T) }))),
     (error) => console.error(`listener on ${path} failed`, error)
   );
+}
+
+// The constraint CLUE's rules require of a researcher reading a class's documents:
+// `request.auth.token.class_hash == resource.data.context_id`.
+export function inClass(classHash: string): QueryConstraint {
+  return where("context_id", "==", classHash);
 }

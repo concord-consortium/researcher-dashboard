@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Firestore } from "firebase/firestore";
 import { DisplayView } from "../components/Display";
 import { parseDisplay } from "../shell/display";
-import { paths, signIn, watchCollection, watchDoc } from "../shell/firebase";
+import { inClass, paths, signIn, watchCollection, watchDoc } from "../shell/firebase";
 import type { ClassRef } from "../shell/launch";
 import { Portal, PortalError, type ClassInfo } from "../shell/portal";
 import { describe, isBusy, isUnresponsive, type ResearcherStatus } from "../shell/status";
@@ -221,7 +221,9 @@ function watchClueDocuments(
   db: Firestore, portalOrigin: string, classHash: string, onCount: (n: number) => void
 ): () => void {
   const segment = new URL(portalOrigin).host.replace(/\./g, "_");
-  return watchCollection(db, `authed/${segment}/documents`, (docs) => {
-    onCount(docs.filter((d) => (d as { context_id?: string }).context_id === classHash).length);
-  });
+  // Constrained to this class in the query itself. CLUE's rules allow a researcher the
+  // documents whose `context_id` matches their token's `class_hash`, and Firestore refuses
+  // a listener that does not say so, however the results would be filtered afterwards.
+  return watchCollection(db, `authed/${segment}/documents`,
+    (docs) => onCount(docs.length), inClass(classHash));
 }
