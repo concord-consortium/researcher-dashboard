@@ -1,7 +1,8 @@
 import { initializeApp, type FirebaseApp } from "firebase/app";
-import { getAuth, signInWithCustomToken } from "firebase/auth";
+import { connectAuthEmulator, getAuth, signInWithCustomToken } from "firebase/auth";
 import {
-  collection, doc, getFirestore, onSnapshot, query, where, type Firestore, type QueryConstraint
+  collection, connectFirestoreEmulator, doc, getFirestore, onSnapshot, query, where,
+  type Firestore, type QueryConstraint
 } from "firebase/firestore";
 
 // The Firebase projects this app reads, and the sign-in that gets it in.
@@ -42,15 +43,44 @@ export function firebaseConfig(projectId: string): Record<string, string> {
   return config;
 }
 
+// Where a local Firestore and Auth live, when they do. The web SDK ignores
+// FIRESTORE_EMULATOR_HOST, which only the admin SDK reads, so the connection has to be
+// made explicitly, exactly as the runner does it. Both must be set together: signing in
+// against the real Auth and reading a local Firestore fails in a way that looks like a
+// rules problem.
+export interface Emulators {
+  firestore: string;
+  auth: string;
+}
+
+export function emulatorsFromEnv(env: Record<string, string | undefined>): Emulators | null {
+  const firestore = env.VITE_FIRESTORE_EMULATOR;
+  const auth = env.VITE_AUTH_EMULATOR;
+  if (!firestore || !auth) return null;
+  return { firestore, auth };
+}
+
 const apps = new Map<string, FirebaseApp>();
 
 // Named per project, because initializeApp with no name registers the default app and a
 // second project would then either clash or silently reuse the first.
-export async function signIn(projectId: string, customToken: string): Promise<Firestore> {
+export async function signIn(
+  projectId: string, customToken: string, emulators: Emulators | null = null
+): Promise<Firestore> {
   let app = apps.get(projectId);
   if (!app) {
-    app = initializeApp(firebaseConfig(projectId), projectId);
+    // An emulator accepts any apiKey, so a project it has never heard of still works and
+    // no entry in the config map above is needed for one.
+    app = initializeApp(
+      emulators ? { projectId, apiKey: "unused" } : firebaseConfig(projectId), projectId
+    );
     apps.set(projectId, app);
+
+    if (emulators) {
+      const [host, port] = emulators.firestore.split(":");
+      connectFirestoreEmulator(getFirestore(app), host, Number(port));
+      connectAuthEmulator(getAuth(app), `http://${emulators.auth}`, { disableWarnings: true });
+    }
   }
   await signInWithCustomToken(getAuth(app), customToken);
   return getFirestore(app);

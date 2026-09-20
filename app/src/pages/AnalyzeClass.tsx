@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Firestore } from "firebase/firestore";
 import { DisplayView } from "../components/Display";
 import { parseDisplay } from "../shell/display";
-import { inClass, paths, signIn, watchCollection, watchDoc } from "../shell/firebase";
+import { emulatorsFromEnv, inClass, paths, signIn, watchCollection, watchDoc } from "../shell/firebase";
 import type { ClassRef } from "../shell/launch";
 import { Portal, PortalError, type ClassInfo } from "../shell/portal";
 import { describe, isBusy, isUnresponsive, type ResearcherStatus } from "../shell/status";
@@ -214,7 +214,8 @@ function ExpiredNotice() {
 }
 
 async function signInTo(portal: Portal, project: string, classHash: string): Promise<Firestore> {
-  return signIn(project, await portal.firebaseToken(project, classHash));
+  return signIn(project, await portal.firebaseToken(project, classHash),
+    emulatorsFromEnv(import.meta.env as unknown as Record<string, string | undefined>));
 }
 
 function watchClueDocuments(
