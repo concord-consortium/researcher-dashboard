@@ -19,14 +19,12 @@ export const REQUIRED_PAYLOAD_FIELDS = Object.freeze([
   "report_server_url"
 ]);
 
-// Exactly one report-server credential, and which one it is says which world the VM
-// is running in. `secret_name` is the shared site-admin token read from Secrets
-// Manager; `report_server_token` is the requesting researcher's own, minted per
-// launch (design.md, Per-researcher forwarding). They are mutually exclusive on
-// purpose: the narrowed sandbox that gives an analysis package egress is only safe
-// under forwarding, so whatever grants egress must refuse to do so for a VM that
-// arrived with `secret_name`, and cannot if both may be present.
-export const CREDENTIAL_FIELDS = Object.freeze(["secret_name", "report_server_token"]);
+// The report-server credential is the requesting researcher's own, minted per VM
+// creation and handed down in the payload (design.md, Per-researcher forwarding).
+// It is required rather than optional: an analysis package is given egress on the
+// premise that the credential it can read reaches only its own researcher's data,
+// so a VM with no forwarded credential has no safe world to run a package in.
+export const CREDENTIAL_FIELDS = Object.freeze(["report_server_token"]);
 
 function analysisUid(env) {
   const uid = Number(env.ANALYSIS_UID ?? 1000);
@@ -103,9 +101,9 @@ export function parseRunHookPayload(raw) {
   const credentials = CREDENTIAL_FIELDS.filter(
     (field) => typeof payload[field] === "string" && payload[field] !== ""
   );
-  if (credentials.length !== 1) {
+  if (credentials.length !== CREDENTIAL_FIELDS.length) {
     throw new Error(
-      `runHookPayload must carry exactly one of ${CREDENTIAL_FIELDS.join(", ")}, got ${credentials.length}`
+      `runHookPayload must carry ${CREDENTIAL_FIELDS.join(", ")}`
     );
   }
   return payload;

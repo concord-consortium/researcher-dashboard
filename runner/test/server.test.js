@@ -21,7 +21,7 @@ const PAYLOAD = JSON.stringify({
   firebase_project: "report-service-dev",
   bucket: "researcher-dashboard-runner-staging",
   report_server_url: "https://report-server.example.org",
-  secret_name: "researcher-dashboard-runner-staging/report-service-token"
+  report_server_token: "forwarded-report-server-token"
 });
 
 let work;

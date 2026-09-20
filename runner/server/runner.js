@@ -39,9 +39,9 @@ export class HookError extends Error {
 }
 
 // Orchestrates the VM's lifecycle. Everything that touches the world is injected:
-// the sync backend, the Firestore store, the Secrets Manager read, and the three
-// analysis steps. That is what lets the tests drive the real state sequences
-// without S3, Firestore or cc-data.
+// the sync backend, the Firestore store, the egress setup, and the analysis steps.
+// That is what lets the tests drive the real state sequences without S3, Firestore
+// or cc-data.
 export class Runner {
   #vm = new VmState();
   #analysis = null;
@@ -55,7 +55,7 @@ export class Runner {
   // package backend and syncer are not built yet.
   #ready = false;
 
-  constructor({ env, makeStore, makeSyncer, makePackageBackend, readSecret, steps, unzip, startEgress, netGuard = verifySandbox, revokeReportServerToken = revokeOwnToken, now = () => Date.now() }) {
+  constructor({ env, makeStore, makeSyncer, makePackageBackend, steps, unzip, startEgress, netGuard = verifySandbox, revokeReportServerToken = revokeOwnToken, now = () => Date.now() }) {
     this.env = env;
     // The store and the syncer are built in /run, not here: the Firebase project
     // and the bucket are per-VM values that arrive in runHookPayload, so neither
@@ -71,7 +71,6 @@ export class Runner {
     this.startEgress = startEgress;
     this.store = null;
     this.makeSyncer = makeSyncer;
-    this.readSecret = readSecret;
     this.steps = steps;
     this.netGuard = netGuard;
     // Injected so the tests need no network and DIR mode can decline to revoke.
@@ -156,15 +155,9 @@ export class Runner {
     });
 
     await timed("run.pull_down", {}, () => this.syncer.pullDown());
-    // Forwarding hands the researcher's own token straight down in the payload, so
-    // there is nothing to fetch. The Secrets Manager path is the shared site-admin
-    // token and stays only until that lands; parseRunHookPayload permits exactly one
-    // of the two, so this branch cannot silently take both.
-    const forwarded = this.payload.report_server_token;
-    const token = forwarded
-      ? forwarded
-      : await timed("run.read_secret", {}, () => this.readSecret(this.payload.secret_name));
-    log.info("run.report_server_credential", { forwarded: Boolean(forwarded) });
+    // The researcher's own token, handed down in the payload, so there is nothing to
+    // fetch and no AWS call on this path.
+    const token = this.payload.report_server_token;
     await timed("run.install_credential", {}, () =>
       this.steps.installCredential({
         token,
@@ -443,10 +436,6 @@ export class Runner {
       this.#analysis = null;
     }
 
-    // Only the researcher's own forwarded credential. A VM that arrived with
-    // `secret_name` is holding the shared account's token, which belongs to every VM
-    // and must outlive this one.
-    //
     // Before the sync, because the sync can fail the hook and the credential should
     // stop working whether or not the data made it out. Revocation needs nothing from S3.
     if (this.payload.report_server_token) {

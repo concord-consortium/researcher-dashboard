@@ -30,12 +30,6 @@ const PAYLOAD = JSON.stringify({
   firebase_project: "report-service-dev",
   bucket: "researcher-dashboard-runner-staging",
   report_server_url: "https://report-server.example.org",
-  secret_name: "researcher-dashboard-runner-staging/report-service-token"
-});
-
-const FORWARDED_PAYLOAD = JSON.stringify({
-  ...JSON.parse(PAYLOAD),
-  secret_name: undefined,
   report_server_token: "forwarded-report-server-token"
 });
 
@@ -101,19 +95,33 @@ async function started(opts) {
   return runner;
 }
 
-test("/run reads the secret, pulls down, and reaches ready", async () => {
-  let secretAsked = null;
-  const runner = build();
-  runner.readSecret = async (name) => {
-    secretAsked = name;
-    return "token";
-  };
+test("/run installs the forwarded credential, pulls down, and reaches ready", async () => {
+  let installed = null;
+  const runner = build({ stepOverrides: { installCredential: async (args) => { installed = args; } } });
   await runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
 
   assert.equal(runner.state, "ready");
-  assert.equal(secretAsked, "researcher-dashboard-runner-staging/report-service-token");
+  // Straight from the payload, with no AWS call anywhere on this path, which is what
+  // lets the execution role hold no secretsmanager:GetSecretValue.
+  assert.equal(installed.token, "forwarded-report-server-token");
+  assert.equal(installed.portal, PORTAL);
   assert.deepEqual(store.states(rdoc()), ["starting", "ready"]);
   assert.equal(store.get(rdoc()).microvm_id, "mvm-1");
+});
+
+// The premise the sandbox's egress rests on: a package may read the credential the VM
+// holds, and that is only safe when it is the requesting researcher's own. A VM with
+// none has no safe world to run a package in, so it refuses to start rather than
+// starting without one.
+test("/run refuses a payload carrying no forwarded credential", async () => {
+  const runner = build();
+  const without = JSON.stringify({ ...JSON.parse(PAYLOAD), report_server_token: undefined });
+
+  await assert.rejects(
+    () => runner.run({ microvmId: "mvm-1", runHookPayload: without }),
+    /report_server_token/
+  );
+  assert.equal(runner.state, null);
 });
 
 test("/run refuses a malformed payload rather than serving traffic", async () => {
@@ -608,22 +616,10 @@ test("the result records the package name, version and checksum that ran", async
 // The credential the VM pulled with dies with the VM rather than living until the
 // researcher's next launch. It authenticates the revocation with the token being
 // revoked, so the VM needs no other standing at report-server.
-// A VM launched with the shared account's token rather than the researcher's own must
-// not revoke it: that credential belongs to every VM.
-test("terminate leaves a shared-account credential alone", async () => {
-  const calls = [];
-  const runner = build({ revokeReportServerToken: async (args) => { calls.push(args); return true; } });
-  await runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
-
-  await runner.terminate();
-
-  assert.equal(calls.length, 0);
-});
-
 test("terminate revokes the VM's own report-server credential", async () => {
   const calls = [];
   const runner = build({ revokeReportServerToken: async (args) => { calls.push(args); return true; } });
-  await runner.run({ microvmId: "mvm-1", runHookPayload: FORWARDED_PAYLOAD });
+  await runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
 
   await runner.terminate();
 
@@ -637,7 +633,7 @@ test("terminate revokes the VM's own report-server credential", async () => {
 test("suspend leaves the report-server credential alone", async () => {
   const calls = [];
   const runner = build({ revokeReportServerToken: async (args) => { calls.push(args); return true; } });
-  await runner.run({ microvmId: "mvm-1", runHookPayload: FORWARDED_PAYLOAD });
+  await runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
 
   await runner.suspend();
 
@@ -648,7 +644,7 @@ test("suspend leaves the report-server credential alone", async () => {
 // already accepts: the researcher's next launch revokes it when it mints the next one.
 test("a refused revocation does not fail the terminate hook", async () => {
   const runner = build({ revokeReportServerToken: async () => { throw new Error("report-server down"); } });
-  await runner.run({ microvmId: "mvm-1", runHookPayload: FORWARDED_PAYLOAD });
+  await runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
 
   await assert.doesNotReject(() => runner.terminate());
   assert.equal(runner.state, "terminated");

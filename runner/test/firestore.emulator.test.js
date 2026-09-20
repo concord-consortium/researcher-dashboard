@@ -102,7 +102,7 @@ describe("status writes against the Firestore emulator", { skip: !FIRESTORE || !
         portal: PORTAL,
         firebase_project: PROJECT,
         bucket: "researcher-dashboard-runner-staging",
-        secret_name: "researcher-dashboard-runner-staging/report-service-token"
+        report_server_token: "forwarded-report-server-token"
       })
     });
 

@@ -3,7 +3,6 @@ import { loadEnv } from "./config.js";
 import { FirestoreStore } from "./firestore.js";
 import { log } from "./log.js";
 import { HookError, Runner } from "./runner.js";
-import { makeSecretReader } from "./secrets.js";
 import { LogStore, MemoryStore } from "./status.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -130,7 +129,6 @@ export function buildRunner(env) {
       await new Promise((resolve) => proxy.listen(PROXY_PORT, HOST_ADDR, resolve));
       return proxyUrl;
     },
-    readSecret: dir ? async () => "dir-mode-token" : makeSecretReader(),
     // A DIR-mode run is a laptop using the developer's own report-server token, so
     // retiring it on teardown would revoke a credential they still want.
     revokeReportServerToken: dir ? async () => {} : revokeOwnToken,
