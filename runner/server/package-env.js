@@ -56,11 +56,16 @@ export function packageEnvironment({ paths, portalHost, classHash, classId, prox
 // The home is rebuilt per preparation and belongs entirely to the package, so it is
 // handed over whole. Chowning only the directory and the credential file inside it left
 // the .config/cc-data path root-owned, and cc-data writes its own config.json there.
-function chownTree(dir, uid) {
+// The CLUE corpus is the runner's: the package reads it and must not be able to rewrite
+// it, which is the read-only half of the contract in design.md.
+export const RUNNER_OWNED = "clue-documents";
+
+function chownTree(dir, uid, skip = null) {
   fs.chownSync(dir, uid, uid);
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (skip && entry.name === skip) continue;
     const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) chownTree(full, uid);
+    if (entry.isDirectory()) chownTree(full, uid, skip);
     else fs.chownSync(full, uid, uid);
   }
 }
@@ -100,9 +105,11 @@ export async function preparePackage({ workRoot, dataRoot, classHash, classId, p
   // directory is included because the package pulls into it.
   if (typeof uid === "number") {
     chownTree(paths.home, uid);
-    for (const dir of [paths.outputDir, paths.dataDir]) {
-      fs.chownSync(dir, uid, uid);
-    }
+    fs.chownSync(paths.outputDir, uid, uid);
+    // The whole class directory except the CLUE corpus. Its contents come back from S3
+    // on every cold start, written by the syncer as root, so owning only the directory
+    // leaves the package unable to reopen a file it wrote on a previous run.
+    chownTree(paths.dataDir, uid, RUNNER_OWNED);
     // Owning the leaf is not enough: creating a file in it also needs search permission
     // on every directory above it, and those are made by the syncer and the CLUE reader
     // as root. Without this the package fails with EACCES on a directory it owns.

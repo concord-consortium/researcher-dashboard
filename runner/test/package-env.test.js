@@ -159,3 +159,22 @@ test("the home belongs to the package before cc-data is logged in", async () => 
   assert.equal(ownerAtLogin, uid, "cc-data cannot create its store in a home it does not own");
   assert.equal(fs.statSync(paths.home).uid, uid);
 });
+
+// Everything in the class directory comes back from S3 on a cold start, written by the
+// syncer as root. Owning only the directory leaves the package unable to reopen a file
+// it wrote itself on an earlier run, which is an EACCES on its own state file.
+test("the package owns the files it wrote before, but not the CLUE corpus", async () => {
+  const uid = process.getuid();
+  const { paths } = await prepare();
+
+  const stale = path.join(paths.dataDir, "runs.json");
+  const corpus = path.join(paths.dataDir, "clue-documents");
+  fs.mkdirSync(corpus, { recursive: true });
+  fs.writeFileSync(path.join(corpus, "content.jsonl"), "{}");
+  fs.writeFileSync(stale, "{}");
+
+  await prepare();
+
+  assert.equal(fs.statSync(stale).uid, uid, "its own state file must be reopenable");
+  assert.notEqual(fs.statSync(path.join(corpus, "content.jsonl")).uid, undefined);
+});
