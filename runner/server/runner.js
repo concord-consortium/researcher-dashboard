@@ -141,6 +141,7 @@ export class Runner {
     await this.status.researcher({
       state: STATES.STARTING,
       microvm_id: this.microvmId,
+      image_version: this.env.imageVersion,
       started_at: new Date(this.now()).toISOString(),
       expires_at: new Date(this.#expiresAt).toISOString(),
       current_package: null

@@ -172,6 +172,15 @@ test("a full analysis writes starting, ready, running, ready and the class count
   assert.equal(store.get(`researcher_dashboard/${PORTAL}/classes/${CLASS}`).data.answers, 201);
 });
 
+// Which image a VM is running is the first question about a VM that is behaving oddly,
+// and the page reading this document cannot call get-microvm to ask AWS.
+test("the status doc says which image version the VM is running", async () => {
+  const runner = build({ envOverrides: { imageVersion: "22.0" } });
+  await runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+
+  assert.equal(store.get(rdoc()).image_version, "22.0");
+});
+
 // `classes` is what the status bar answers "which classes can this VM serve" with, and
 // nothing else in the document says it: the result documents live under the class, not
 // under the researcher.

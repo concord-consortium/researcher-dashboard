@@ -51,6 +51,10 @@ export function loadEnv(env = process.env) {
   }
   return {
     port: Number(env.PORT ?? 8080),
+    // Lambda injects this into the VM's environment, and it is the only thing that says
+    // which build of the image is serving: `get-microvm` gives it too, but the page
+    // reading the status document cannot call AWS.
+    imageVersion: env.AWS_LAMBDA_MICROVM_IMAGE_VERSION ?? null,
     dataRoot: env.DATA_ROOT ?? "/data",
     workRoot: env.WORK_ROOT ?? "/work",
     backend,
