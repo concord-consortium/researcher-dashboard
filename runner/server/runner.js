@@ -50,6 +50,10 @@ export class Runner {
   // resumed VM keeps it because memory is preserved.
   #classStores = new Map();
   #expiresAt = null;
+  // Set only when /run has finished. Lambda answers run-microvm before the hook
+  // completes, so a caller can reach /run-package while the payload is parsed but the
+  // package backend and syncer are not built yet.
+  #ready = false;
 
   constructor({ env, makeStore, makeSyncer, makePackageBackend, readSecret, steps, unzip, startEgress, netGuard = verifySandbox, revokeReportServerToken = revokeOwnToken, now = () => Date.now() }) {
     this.env = env;
@@ -92,7 +96,7 @@ export class Runner {
   }
 
   #requireStarted() {
-    if (!this.payload) throw new HookError(409, "VM has not completed /run");
+    if (!this.#ready) throw new HookError(409, "VM has not completed /run");
   }
 
   // Lambda's /run. The payload is the only per-VM configuration, so a bad one fails
@@ -173,6 +177,7 @@ export class Runner {
     this.syncer.start();
 
     this.#vm.to(STATES.READY);
+    this.#ready = true;
     await this.status.researcher({ state: STATES.READY });
     return { state: this.#vm.state };
   }

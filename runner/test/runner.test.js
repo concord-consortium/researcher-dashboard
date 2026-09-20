@@ -719,3 +719,27 @@ test("signs in before the first status document is written", async () => {
   assert.equal(existedAtSignIn, undefined, "signIn ran after the first write");
   assert.ok(store.get(researcherPath(PORTAL, USER)), "no status document was written at all");
 });
+
+// Lambda answers run-microvm before the run hook finishes, so a caller can reach
+// /run-package while the payload is parsed but the package backend is not built. That
+// used to surface as a TypeError and a 500, which reads as a broken VM rather than one
+// that is not up yet.
+test("/run-package is refused until /run has finished", async () => {
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const runner = build({ stepOverrides: { installCredential: () => gate } });
+  const running = runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+  await new Promise((r) => setTimeout(r, 10));
+
+  await assert.rejects(
+    () => runner.startPackage({
+      scope: { kind: "class", class_hash: CLASS, class_id: 111 },
+      package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
+      class_tokens: CLASS_TOKENS
+    }),
+    (err) => err instanceof HookError && err.status === 409
+  );
+
+  release();
+  await running;
+});
