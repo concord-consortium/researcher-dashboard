@@ -363,6 +363,8 @@ export class Runner {
         portal: this.payload.portal,
         reportServerToken: this.payload.report_server_token,
         reportServerUrl: this.payload.report_server_url,
+        bucket: this.payload.bucket,
+        storagePrefix: researcherPrefix(this.payload.platform_user_id),
         uid: this.env.analysisUid,
         proxyUrl: this.proxyUrl
       })

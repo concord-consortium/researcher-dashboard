@@ -47,7 +47,7 @@ export function packagePaths({ workRoot, dataRoot, classHash, packageName }) {
 // The package runs as another uid in its own namespace, so it inherits nothing useful
 // and everything it needs has to be named here. No AWS variables and no Firebase
 // session: it pulls through cc-data as the researcher and nothing else.
-export function packageEnvironment({ paths, portalHost, packageName, classHash, classId, proxyUrl, reportServerUrl }) {
+export function packageEnvironment({ paths, portalHost, packageName, classHash, classId, proxyUrl, reportServerUrl, bucket, storagePrefix }) {
   return {
     HOME: paths.home,
     PATH: "/usr/local/bin:/usr/bin:/bin",
@@ -67,6 +67,12 @@ export function packageEnvironment({ paths, portalHost, packageName, classHash, 
     // what it can reach does, and without it the probe reports nothing rather than
     // reporting that it could not check.
     ...(reportServerUrl ? { RD_REPORT_SERVER_URL: reportServerUrl } : {}),
+    // Where the researcher's data is kept, and under which prefix. Neither is a
+    // credential and neither lets a package act: the sandbox has no AWS credentials and
+    // no way to obtain any, which is exactly what a package measuring its own boundary
+    // has to demonstrate rather than assume. Naming the store is what lets it try.
+    ...(bucket ? { RD_BUCKET: bucket } : {}),
+    ...(storagePrefix ? { RD_STORAGE_PREFIX: storagePrefix } : {}),
     RD_CLASS_HASH: classHash,
     // What report-server filters a run by. The hash identifies the class to Firebase and
     // CLUE; this identifies it to the portal, and neither derives from the other.
@@ -110,7 +116,7 @@ function parentsBetween(root, leaf) {
 // Everything the package needs, prepared and owned by the analysis uid.
 // `chown` is a seam: the effect it has cannot be observed by a test, which runs as the
 // uid it would be chowning to, so what a test can check is that it was asked for.
-export async function preparePackage({ workRoot, dataRoot, classHash, classId, packageName, portalHost, token, uid, proxyUrl, reportServerUrl, login, chown = fs.chownSync }) {
+export async function preparePackage({ workRoot, dataRoot, classHash, classId, packageName, portalHost, token, uid, proxyUrl, reportServerUrl, bucket, storagePrefix, login, chown = fs.chownSync }) {
   if (!DATASET_NAME.test(packageName)) {
     throw new Error(`package name ${packageName} is not a usable cc-data dataset name (${DATASET_NAME})`);
   }
@@ -164,7 +170,7 @@ export async function preparePackage({ workRoot, dataRoot, classHash, classId, p
     cc_data_root_uid: fs.statSync(paths.ccDataRoot).uid
   });
 
-  return { paths, env: packageEnvironment({ paths, portalHost, packageName, classHash, classId, proxyUrl, reportServerUrl }) };
+  return { paths, env: packageEnvironment({ paths, portalHost, packageName, classHash, classId, proxyUrl, reportServerUrl, bucket, storagePrefix }) };
 }
 
 // What the package reports back, because it makes the pulls and the runner writes
