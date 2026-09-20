@@ -6,6 +6,7 @@ import test, { afterEach, beforeEach } from "node:test";
 import { loadEnv } from "../server/config.js";
 import { createServer } from "../server/index.js";
 import { Runner } from "../server/runner.js";
+import { makeSteps } from "../server/steps.js";
 import { MemoryStore } from "../server/status.js";
 import { DirBackend, Syncer } from "../server/sync/index.js";
 
@@ -50,7 +51,9 @@ beforeEach(async () => {
       installCredential: async () => {},
       resolvePackage: async () => ({ expected_duration_seconds: 1 }),
       pullData: async () => ({ answers: 1, logs: 2, clue_documents: 3 }),
-      runPackage: async () => ({ version: 1, summary: "ok", sections: [] })
+      runPackage: async () => ({ version: 1, summary: "ok", sections: [] }),
+      // The real one: it only reads the synced tree, and this suite is about routing.
+      heldClasses: makeSteps().heldClasses
     }
   });
   server = createServer({ runner, env });

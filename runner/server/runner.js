@@ -143,7 +143,6 @@ export class Runner {
       microvm_id: this.microvmId,
       started_at: new Date(this.now()).toISOString(),
       expires_at: new Date(this.#expiresAt).toISOString(),
-      classes: [],
       current_package: null
     });
 
@@ -171,7 +170,7 @@ export class Runner {
 
     this.#vm.to(STATES.READY);
     this.#ready = true;
-    await this.status.researcher({ state: STATES.READY });
+    await this.status.researcher({ state: STATES.READY, classes: await this.#heldClasses() });
     return { state: this.#vm.state };
   }
 
@@ -262,7 +261,11 @@ export class Runner {
       });
 
       this.#vm.to(STATES.RUNNING);
-      await this.status.researcher({ state: STATES.RUNNING, current_package: packageName });
+      await this.status.researcher({
+        state: STATES.RUNNING,
+        current_package: packageName,
+        classes: await this.#heldClasses(classHash)
+      });
 
       record = { packageName, classHash, classId, classTokens, manifest, pkg };
       this.#analysis = record;
@@ -313,6 +316,15 @@ export class Runner {
         await this.status.researcher({ state: STATES.READY, current_package: null });
       }
     }
+  }
+
+  // Which classes the status bar says this VM can answer for. Derived from the synced
+  // tree so there is one account of it, plus a class just accepted, whose directory the
+  // pull has not created yet.
+  async #heldClasses(alsoHolding) {
+    const held = await this.steps.heldClasses({ dataRoot: this.env.dataRoot });
+    const all = alsoHolding ? [...new Set([...held, alsoHolding])] : held;
+    return all.sort();
   }
 
   // The session token carries no class_hash, so it cannot write this class's documents:

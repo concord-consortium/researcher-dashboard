@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test, { afterEach, beforeEach } from "node:test";
 import { loadEnv } from "../server/config.js";
+import { makeSteps } from "../server/steps.js";
 import { HookError, Runner } from "../server/runner.js";
 import { buildRunner } from "../server/index.js";
 import { MemoryStore, resultPath, researcherPath } from "../server/status.js";
@@ -40,14 +42,33 @@ function steps(overrides = {}) {
     resolvePackage: async () => ({ expected_duration_seconds: 60 }),
     pullData: async () => ({ clue_documents: 12 }),
     // The package prepares nothing real in these tests; what matters is that the runner
-    // hands it paths and takes counts back.
-    preparePackage: async ({ workRoot, packageName }) => ({
-      paths: { outputDir: path.join(workRoot, "out", packageName), home: path.join(workRoot, "home", packageName) },
-      env: {}
-    }),
-    runPackage: async () => ({ version: 1, summary: "ok", sections: [] }),
+    // hands it paths and takes counts back. It does create the class's data directory,
+    // because the real one does and because that directory is what the synced tree
+    // carries and what the status doc's class list is read from.
+    preparePackage: async ({ workRoot, dataRoot, classHash, packageName }) => {
+      const dataDir = path.join(dataRoot, "classes", classHash);
+      mkdirSync(dataDir, { recursive: true });
+      return {
+        paths: {
+          outputDir: path.join(workRoot, "out", packageName),
+          home: path.join(workRoot, "home", packageName),
+          dataDir
+        },
+        env: {}
+      };
+    },
+    // Writes into the class's data directory the way the real package does, with its
+    // run-id state file. It matters because an object store has no directories: a class
+    // reaches the next VM only as the files under it.
+    runPackage: async ({ paths }) => {
+      if (paths?.dataDir) writeFileSync(path.join(paths.dataDir, "runs.json"), "{}");
+      return { version: 1, summary: "ok", sections: [] };
+    },
     // The AP and log counts come from the package, which made those pulls.
     readPackageCounts: async () => ({ answers: 201, logs: 490 }),
+    // The real one: it only reads the synced tree, which these tests have on disk, and
+    // a stub would make the classes the status doc reports untestable here.
+    heldClasses: makeSteps().heldClasses,
     ...overrides
   };
 }
@@ -149,6 +170,55 @@ test("a full analysis writes starting, ready, running, ready and the class count
   assert.equal(doc.requested_by, USER);
   assert.deepEqual(doc.package, { name: "demo", version: "1.0.0", checksum: "sha256:abc" });
   assert.equal(store.get(`researcher_dashboard/${PORTAL}/classes/${CLASS}`).data.answers, 201);
+});
+
+// `classes` is what the status bar answers "which classes can this VM serve" with, and
+// nothing else in the document says it: the result documents live under the class, not
+// under the researcher.
+test("the status doc lists a class once a package has been accepted for it", async () => {
+  const runner = await started();
+  await runner.startPackage({
+    scope: { kind: "class", class_hash: CLASS, class_id: 111 },
+    package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
+    class_tokens: CLASS_TOKENS
+  });
+  await runner.currentAnalysis?.done;
+
+  assert.deepEqual(store.get(rdoc()).classes, [CLASS]);
+});
+
+test("the status doc lists every class the VM holds, not only the last one", async () => {
+  const other = "64727df0".repeat(6);
+  const runner = await started();
+  for (const [classHash, name] of [[CLASS, "demo"], [other, "other"]]) {
+    await runner.startPackage({
+      scope: { kind: "class", class_hash: classHash, class_id: 111 },
+      package: { name, version: "1.0.0", checksum: "sha256:abc" },
+      class_tokens: CLASS_TOKENS
+    });
+    await runner.currentAnalysis?.done;
+  }
+
+  assert.deepEqual(store.get(rdoc()).classes, [other, CLASS].sort());
+});
+
+// A resumed VM, and the next VM this researcher launches, inherit the pulled tree from
+// S3 rather than a list in memory, so what is on disk after the sync is the answer.
+test("a VM that syncs down a researcher's classes reports them at ready", async () => {
+  const other = "64727df0".repeat(6);
+  const first = await started();
+  await first.startPackage({
+    scope: { kind: "class", class_hash: other, class_id: 223 },
+    package: { name: "other", version: "1.0.0", checksum: "sha256:abc" },
+    class_tokens: CLASS_TOKENS
+  });
+  await first.currentAnalysis?.done;
+  await first.suspend();
+
+  const next = build({ envOverrides: { dataRoot: path.join(work, "data-2") } });
+  await next.run({ microvmId: "mvm-2", runHookPayload: PAYLOAD });
+
+  assert.deepEqual(store.get(rdoc()).classes, [other]);
 });
 
 test("requested_by comes from the session payload, not the request body", async () => {

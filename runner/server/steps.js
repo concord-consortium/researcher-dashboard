@@ -134,6 +134,23 @@ export function makeSteps({ login = ccDataLogin, readClueFn = readClue } = {}) {
     // its own clue_documents count into the class document's data block.
     readPackageCounts: async ({ outputDir }) => readPackageCounts(outputDir),
 
+    // The classes this VM holds pulled data for, read from the synced tree rather than
+    // remembered: the tree is what `/run` syncs down from the researcher's prefix, so it
+    // already carries every class an earlier VM of theirs opened, which a list built in
+    // memory would lose at each launch.
+    heldClasses: async ({ dataRoot }) => {
+      try {
+        return fs.readdirSync(path.join(dataRoot, "classes"), { withFileTypes: true })
+          .filter((entry) => entry.isDirectory())
+          .map((entry) => entry.name)
+          .sort();
+      } catch {
+        // No classes directory yet is the first launch of a researcher's first VM, which
+        // holds no classes: that is an answer, not a failure.
+        return [];
+      }
+    },
+
     // One sign-in per class per project, kept for the VM's life: the class token is
     // good for an hour but the Firebase session it is exchanged for outlives it.
     pullData: async ({ classHash, classTokens, manifest, portal, dataRoot, makeStore }) => {
