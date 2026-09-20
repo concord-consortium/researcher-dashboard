@@ -91,6 +91,17 @@ export function makeSteps({ login = ccDataLogin, readClueFn = readClue } = {}) {
         proxyUrl
       }),
 
+    // Run as the analysis uid, through the sandbox, so what it reports is what the
+    // package will see rather than what the runner sees. A package that cannot write
+    // its own data directory fails deep inside its own code with an errno.
+    probeWritable: async ({ uid, dir, exec }) =>
+      runSandboxed({
+        uid,
+        command: "/bin/sh",
+        args: ["-c", `id -u; stat -c '%u %g %a' ${dir} ${dir}/.. ${dir}/../..; : > ${dir}/.rd-probe && echo WRITABLE && rm -f ${dir}/.rd-probe`],
+        ...(exec ? { exec } : {})
+      }),
+
     // The package pulled the data, so it knows the answer and log counts, and it cannot
     // write Firestore. It leaves them in counts.json and the runner merges them with
     // its own clue_documents count into the class document's data block.

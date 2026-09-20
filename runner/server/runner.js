@@ -374,6 +374,18 @@ export class Runner {
       })
     );
 
+    // Diagnostic, not a gate: it says what the package's own uid sees of its data
+    // directory, which is otherwise only visible as an errno from inside the package.
+    try {
+      const probe = await this.steps.probeWritable({
+        uid: this.env.analysisUid,
+        dir: prepared.paths.dataDir
+      });
+      log.info("package.write_probe", { output: String(probe?.stdout ?? probe ?? "").trim() });
+    } catch (err) {
+      log.warn("package.write_probe_failed", { error: err.message });
+    }
+
     const display = await stage("run_package", () =>
       this.steps.runPackage({
         manifest,
