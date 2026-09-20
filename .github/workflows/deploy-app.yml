@@ -1,19 +1,72 @@
-# Placeholder for the app's S3 deploy.
+# Builds `app/` and publishes it to the shared SPA bucket.
 #
-# The real workflow builds `app/` and syncs the result to the dashboard bucket under a versioned path,
-# following the portal-report deploy pattern: `/version/<tag>/` for a tag, `/branch/<name>/` for a
-# branch, and the root for a release. It is manual-only until that is implemented, so it cannot fire
-# on a push and silently do nothing.
+# `models-resources` is where Concord's SPAs live, one prefix each, served from
+# https://models-resources.concord.org/<prefix>/. The s3-deploy-action puts a tag at
+# version/<tag>/ and a branch at branch/<name>/, and copies a top branch to the prefix root.
+#
+# Credentials are assumed, not stored: the `researcher-dashboard` role trusts this
+# repository through GitHub's OIDC provider, and the shared `S3-deploy-by-role-tag` policy
+# scopes it to this prefix by way of the role's own RepoName tag. There is no access key in
+# this repository's secrets. portal-report stores a key pair instead; that is the older
+# pattern and not the one to copy here.
 
 name: Deploy app
 
 on:
-  workflow_dispatch:
+  push:
+    paths:
+      - "app/**"
+      - ".github/workflows/deploy-app.yml"
+
+# Required for the OIDC token exchange; without it the role assumption fails with a
+# permissions error rather than a credentials one.
+permissions:
+  id-token: write
+  contents: read
 
 jobs:
-  deploy:
+  build_test:
+    name: Build and test the app
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci
+      - run: npm run test
+      - run: npm run build
+
+  s3_deploy:
+    name: S3 Deploy
+    needs: build_test
     runs-on: ubuntu-latest
     steps:
-      - run: |
-          echo "Not implemented yet. See the repository README for the intended deploy." >&2
-          exit 1
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::612297603577:role/researcher-dashboard
+          aws-region: us-east-1
+      # The action runs the build itself in workingDirectory and deploys its `dist`, which
+      # are both its defaults, so the app is built once here rather than built and copied.
+      - uses: concord-consortium/s3-deploy-action@v1
+        with:
+          bucket: models-resources
+          prefix: researcher-dashboard
+          workingDirectory: app
+          githubToken: ${{ secrets.GITHUB_TOKEN }}
+          deployRunUrl: https://models-resources.concord.org/researcher-dashboard/__deployPath__/index.html
+          # Parameters to GHActions have to be strings, so a regular yaml array cannot
+          # be used. Instead the `|` turns the following lines into a string
+          topBranches: |
+            ["main"]

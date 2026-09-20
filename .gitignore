@@ -10,3 +10,7 @@ build/
 firebase-debug.log
 firestore-debug.log
 ui-debug.log
+
+# The app's build output and its dependencies
+app/dist/
+app/node_modules/
