@@ -927,12 +927,11 @@ echo probe > /tmp/probe
   aws s3api list-objects-v2 --bucket $B --prefix packages/ )                           # AccessDenied
 ```
 
-**As the function.** Take OpenID Token Creator on the function's account for the check, and give it back afterward (report-service's `functions/scripts/`):
+**As the function.** Take OpenID Token Creator on the function's account for the check, and give it back afterward (report-service's `functions/scripts/`). Mint its tokens with the script's `id-token`, not `gcloud auth print-identity-token --impersonate-service-account`, which mints an access token first and so needs Token Creator:
 
 ```sh
 setup-researcher-dashboard-iam.sh grant-operator report-service-dev user:<you>@concord.org
-SA=researcher-dashboard@report-service-dev.iam.gserviceaccount.com
-TOKEN=$(gcloud auth print-identity-token --impersonate-service-account=$SA --audiences=$STACK)
+TOKEN=$(setup-researcher-dashboard-iam.sh id-token report-service-dev $STACK)
 assume() {  # assume <role arn> [session policy]: prints the exports for that session
   aws sts assume-role-with-web-identity --role-arn "$1" --role-session-name probe \
     --web-identity-token "$TOKEN" --duration-seconds 3600 ${2:+--policy "$2"} \
@@ -947,7 +946,7 @@ The launcher can read the image, and a token minted for any other audience is re
 ```sh
 ( eval "$(assume $LAUNCHER)"; unset AWS_PROFILE
   aws lambda-microvms get-microvm-image --image-identifier $IMAGE --query latestActiveImageVersion )   # succeeds
-TOKEN=$(gcloud auth print-identity-token --impersonate-service-account=$SA --audiences=not-$STACK) \
+TOKEN=$(setup-researcher-dashboard-iam.sh id-token report-service-dev not-$STACK) \
   assume $LAUNCHER                                                                                     # AccessDenied
 ```
 
