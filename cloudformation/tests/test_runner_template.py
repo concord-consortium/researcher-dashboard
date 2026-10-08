@@ -64,14 +64,15 @@ class RunnerTemplate(unittest.TestCase):
         return [k for k, r in self.resources.items() if r["Type"] == resource_type]
 
     def attached_policies(self, kind, logical_id):
-        """Statements in separate policy resources that name the role or user."""
+        """Statements in separate policy resources that name the role or user, by Ref or by its name."""
         key, plural = ("RoleName", "Roles") if kind == "role" else ("UserName", "Users")
+        names = [{"Ref": logical_id}, self.props(logical_id)[key]]
         found = []
         for r in self.resources.values():
             if r["Type"] in ("AWS::IAM::Policy", "AWS::IAM::RolePolicy", "AWS::IAM::UserPolicy",
                              "AWS::IAM::ManagedPolicy"):
                 p = r["Properties"]
-                if {"Ref": logical_id} in as_list(p.get(key, p.get(plural, []))):
+                if any(n in names for n in as_list(p.get(key, p.get(plural, [])))):
                     found += p["PolicyDocument"]["Statement"]
         return found
 

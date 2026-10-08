@@ -66,6 +66,13 @@ git show origin/main:cloudformation/researcher-dashboard-runner.yml > /tmp/expec
 diff -B <(sed 's/[[:space:]]*$//' /tmp/deployed.yml) <(sed 's/[[:space:]]*$//' /tmp/expected.yml)
 ```
 
+When both look right, apply it:
+
+```sh
+aws cloudformation execute-change-set --stack-name "$STACK" --change-set-name "git-$SHA"
+aws cloudformation wait stack-update-complete --stack-name "$STACK"
+```
+
 A `MicrovmImage` change starts an image build. VMs already running keep their version, and the function relaunches a VM that is not on the latest one at its next run request.
 
 ## What goes where after a create or update
