@@ -14,6 +14,8 @@ runner writes and the app renders. They are deployed and versioned independently
   and the tooling the analysis packages need. No analysis script is baked into the image; packages are
   fetched from S3 at analysis time.
 - `runner/scripts/`: operational scripts for the runner, including package publishing.
+- `cloudformation/`: the runner stack's template, one stack per environment, applied by hand as its README
+  describes, with tests of what it grants.
 
 ## Release lines
 
