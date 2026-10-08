@@ -43,9 +43,11 @@ Creating the stack builds the image, which waits on the runner's `/ready` hook. 
 
 ## Updating a stack
 
-A change set from the head of the pull request's branch before it merges, named for that commit, every existing parameter keeping its value:
+A change set from the head of the pull request's branch before it merges, named for that commit, every existing parameter keeping its value. `STACK` is the stack being updated:
 
 ```sh
+STACK=researcher-dashboard-runner-staging
+SHA=$(git rev-parse --short HEAD)
 PARAMS=$(aws cloudformation describe-stacks --stack-name "$STACK" \
   --query 'Stacks[0].Parameters[].ParameterKey' --output text \
   | tr '\t' '\n' | sed 's/.*/ParameterKey=&,UsePreviousValue=true/' | tr '\n' ' ')
