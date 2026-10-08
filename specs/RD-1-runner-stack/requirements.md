@@ -43,7 +43,7 @@ How each clause of RD-1's Jira description is met. The description still describ
 
 | RD-1 clause | Where | Note |
 |---|---|---|
-| The template lives here at `cloudformation/researcher-dashboard-runner.yml`, written fresh, applied by hand as a reviewed change set from a commit on `main` | R1, R22 | |
+| The template lives here at `cloudformation/researcher-dashboard-runner.yml`, written fresh, applied by hand as a change set from the head of its pull request's branch, before the merge | R1, R22 | |
 | One stack per environment in its report-server's account; staging anew in QA, the spike's retired | R2, R22 | |
 | Launcher: add `ResumeMicrovm`, drop `CreateMicrovmAuthToken`, no `SHELL_INGRESS` | R8 | On `LauncherRole` |
 | "The launcher's keys stay stack outputs" | **void** | There is no launcher key (R9) |
@@ -135,7 +135,7 @@ How each clause of RD-1's Jira description is met. The description still describ
 
 ### Deployment and documentation
 
-- **R22.** `cloudformation/README.md` documents: creating a stack and updating one by a reviewed change set from a commit on `main` named `git-<sha>`, after diffing the deployed template; the prerequisites of a new account; what each output feeds; rotating the writer's key; the broker's session policy (R12); the live checks (R20); and the one-time rollout, in order:
+- **R22.** `cloudformation/README.md` documents: creating a stack and updating one by a change set from the head of the pull request's branch, before it merges, named `git-<sha>`, after diffing the deployed template against `main`'s; the prerequisites of a new account; what each output feeds; rotating the writer's key; the broker's session policy (R12); the live checks (R20); and the one-time rollout, in order:
   1. Retire the spike's stack in 612297603577 and empty and delete its retained bucket, so the QA bucket can take its name. This also deletes the spike's launcher user and key, which only the spike's `api` on report-service-dev uses; `researcherDashboard` is not deployed there (`gcloud functions list`, 2026-10-07), so nothing else stops working.
   2. In QA, publish the runner artifact to `concordqa-devops`.
   3. Create the QA stack with `CodeArtifactBucket`, `CodeArtifactKey` and `FunctionServiceAccountUniqueId`. The unique ID is what report-service's `setup-researcher-dashboard-iam.sh check <project>` prints: `101230238764588293065` for report-service-dev (staging) and `114768968256413137012` for report-service-pro (production) on 2026-10-07. Retry if S3 has not yet released the bucket name.
@@ -177,7 +177,7 @@ How each clause of RD-1's Jira description is met. The description still describ
 
 From the 2026-09-25 specs, unchanged (Doug, 2026-09-25, unless noted):
 
-- Applied by hand as a reviewed change set from a commit on `main`, not by a workflow with IAM rights or cloud-formation's `create-stack` (pass 1 Q5).
+- Applied by hand as a change set, not by a workflow with IAM rights or cloud-formation's `create-stack` (pass 1 Q5). It is applied from the pull request's branch before the merge, as Concord's infrastructure changes are, so a problem the live stack shows is fixed in the same pull request (Doug, 2026-10-08).
 - Staging moves to QA as a new stack, the spike's is retired and its bucket deleted, and the QA bucket keeps the name (pass 1 Q6).
 - The app stays on `models-resources`, with no bucket or CloudFront of its own (pass 1 Q2).
 - The writer's key is a stack output, following `token-service.yml`; no Secrets Manager (pass 1 Q3).

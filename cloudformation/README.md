@@ -21,7 +21,7 @@ Each environment's runner is in the same account as that environment's report-se
 
 ## Creating a stack
 
-With a change set, from this directory, at a commit on `main`, so the resources are read before anything is made:
+With a change set, from this directory, at the head of the pull request's branch before it merges, so the resources are read before anything is made and a problem the stack shows is fixed in the same pull request:
 
 ```sh
 STACK=researcher-dashboard-runner-staging
@@ -43,7 +43,7 @@ Creating the stack builds the image, which waits on the runner's `/ready` hook. 
 
 ## Updating a stack
 
-A change set from a commit on `main`, named for it, every existing parameter keeping its value:
+A change set from the head of the pull request's branch before it merges, named for that commit, every existing parameter keeping its value:
 
 ```sh
 PARAMS=$(aws cloudformation describe-stacks --stack-name "$STACK" \
@@ -56,12 +56,13 @@ aws cloudformation describe-change-set --stack-name "$STACK" --change-set-name "
   --query 'Changes[].ResourceChange.[Action,LogicalResourceId,Replacement]' --output table
 ```
 
-A parameter the template adds has no previous value, so give it one in `$PARAMS`. Stop on any `Remove`, or any `Replacement` other than `False`, that the change does not mean. First diff what is deployed against the commit last applied (the last change set's name says which), and stop on a difference nobody can explain: an update from here would silently revert it.
+A parameter the template adds has no previous value, so give it one in `$PARAMS`. Stop on any `Remove`, or any `Replacement` other than `False`, that the change does not mean. First diff what is deployed against `main`'s template, and stop on a difference nobody can explain: an update from here would silently revert it. The two differ legitimately only while another branch's change is applied and waiting to merge.
 
 ```sh
 aws cloudformation get-template --stack-name "$STACK" --template-stage Original \
   --query TemplateBody --output text > /tmp/deployed.yml
-git show <last applied sha>:cloudformation/researcher-dashboard-runner.yml > /tmp/expected.yml
+git fetch origin main
+git show origin/main:cloudformation/researcher-dashboard-runner.yml > /tmp/expected.yml
 diff -B <(sed 's/[[:space:]]*$//' /tmp/deployed.yml) <(sed 's/[[:space:]]*$//' /tmp/expected.yml)
 ```
 

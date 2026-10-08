@@ -838,7 +838,7 @@ Each environment's runner is in the same account as that environment's report-se
 
 ## Creating a stack
 
-With a change set, from this directory, at a commit on `main`, so the resources are read before anything is made:
+With a change set, from this directory, at the head of the pull request's branch before it merges, so the resources are read before anything is made and a problem the stack shows is fixed in the same pull request:
 
 ```sh
 STACK=researcher-dashboard-runner-staging
@@ -860,7 +860,7 @@ Creating the stack builds the image, which waits on the runner's `/ready` hook. 
 
 ## Updating a stack
 
-A change set from a commit on `main`, named for it, every existing parameter keeping its value:
+A change set from the head of the pull request's branch before it merges, named for that commit, every existing parameter keeping its value:
 
 ```sh
 PARAMS=$(aws cloudformation describe-stacks --stack-name "$STACK" \
@@ -873,12 +873,13 @@ aws cloudformation describe-change-set --stack-name "$STACK" --change-set-name "
   --query 'Changes[].ResourceChange.[Action,LogicalResourceId,Replacement]' --output table
 ```
 
-A parameter the template adds has no previous value, so give it one in `$PARAMS`. Stop on any `Remove`, or any `Replacement` other than `False`, that the change does not mean. First diff what is deployed against the commit last applied (the last change set's name says which), and stop on a difference nobody can explain: an update from here would silently revert it.
+A parameter the template adds has no previous value, so give it one in `$PARAMS`. Stop on any `Remove`, or any `Replacement` other than `False`, that the change does not mean. First diff what is deployed against `main`'s template, and stop on a difference nobody can explain: an update from here would silently revert it. The two differ legitimately only while another branch's change is applied and waiting to merge.
 
 ```sh
 aws cloudformation get-template --stack-name "$STACK" --template-stage Original \
   --query TemplateBody --output text > /tmp/deployed.yml
-git show <last applied sha>:cloudformation/researcher-dashboard-runner.yml > /tmp/expected.yml
+git fetch origin main
+git show origin/main:cloudformation/researcher-dashboard-runner.yml > /tmp/expected.yml
 diff -B <(sed 's/[[:space:]]*$//' /tmp/deployed.yml) <(sed 's/[[:space:]]*$//' /tmp/expected.yml)
 ```
 
@@ -1032,7 +1033,7 @@ The spike created `researcher-dashboard-runner-staging` in the production accoun
 
 ## Rollout
 
-After the merge, by the operator, in the README's order ("Moving staging to the QA account"), with credentials for 612297603577 and 816253370536 and the OpenID Token Creator grant for the live checks. The report-service pull request that repoints the function can be the same one that sets its `PORTAL_PUBLIC_KEYS` (`plan.md`, sprint 27 ops steps), if that has not merged first. The results are recorded against this spec. The endpoint check waits for the stack's first VM on RD-4 pass 2's runner. Production is created on the RD-1 production line from the same README, with `FunctionServiceAccountUniqueId` from report-service-pro.
+Before the merge, from the head of this branch, by the operator, in the README's order ("Moving staging to the QA account"), with credentials for 612297603577 and 816253370536 and the OpenID Token Creator grant for the live checks. The report-service pull request that repoints the function can be the same one that sets its `PORTAL_PUBLIC_KEYS` (`plan.md`, sprint 27 ops steps), if that has not merged first. A problem the rollout finds is fixed on this branch and applied again before the merge (Doug, 2026-10-08). The results are recorded against this spec. The endpoint check waits for the stack's first VM on RD-4 pass 2's runner. Production is created on the RD-1 production line from the same README, with `FunctionServiceAccountUniqueId` from report-service-pro.
 
 ## Open Questions
 
