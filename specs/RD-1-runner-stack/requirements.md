@@ -212,6 +212,15 @@ From the 2026-09-25 specs, unchanged (Doug, 2026-09-25, unless noted):
 **Options considered**: launch a VM by hand as the launcher during the rollout to check the endpoint; check it when RD-4 pass 2's runner first runs on the stack.
 **Decision**: Wait. A VM from today's runner fails its `/run` hook at the first pull on this execution role, and what the platform then does with the VM is not recorded, so a hand launch may not leave a VM to probe. The template test already proves nothing in the stack holds an auth-token action; the live check confirms the endpoint's answer when a VM exists.
 
+### RESOLVED: When does the branch merge, given that some live checks cannot run yet?
+**Context**: The stack is applied from the branch before the merge (Doug, 2026-10-08). R20's checks as the function need REPORT-143's `id-token`, which waits on REPORT-167's merge, and the endpoint check needs RD-4 pass 2's runner.
+**Options considered**:
+- A) Merge once the stack exists and the writer and execution-role checks pass; the rest run after the merge, and a problem they find gets a follow-up pull request applied the same way.
+- B) Hold the branch until the checks as the function pass.
+- C) Hold it until every check passes, the endpoint's included.
+
+**Decision**: A (Doug, 2026-10-08). The create and the checks that can run catch replacements, malformed grants and a failed build. The trust conditions the deferred checks exercise are pinned by the template tests, nothing uses the roles until REPORT-143 is deployed, and holding the branch would hold RD-4 behind REPORT-167.
+
 ### RESOLVED: Judgment call: the Done-when about a VM surviving the change is void, not reworded into a check
 **Options considered**: keep it by launching a VM and changing the role under it; record it as void.
 **Decision**: Void. The clause existed to prove the pass 3 update safe for running VMs. With the role created without S3 there is no update, and staging gets one before any VM exists. RD-4 pass 2's first staging run on broker credentials is where syncing is shown.
