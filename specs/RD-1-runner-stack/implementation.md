@@ -1035,6 +1035,21 @@ The spike created `researcher-dashboard-runner-staging` in the production accoun
 
 Before the merge, from the head of this branch, by the operator, in the README's order ("Moving staging to the QA account"), with credentials for 612297603577 and 816253370536 and the OpenID Token Creator grant for the live checks. The report-service pull request that repoints the function can be the same one that sets its `PORTAL_PUBLIC_KEYS` (`plan.md`, sprint 27 ops steps), if that has not merged first. A problem the rollout finds is fixed on this branch and applied again before the merge (Doug, 2026-10-08). The branch merges once the stack exists, the spike's is retired, report-server holds the writer's key, and the writer and execution-role checks pass. The checks as the function wait for REPORT-143's `id-token`, and the endpoint check for the stack's first VM on RD-4 pass 2's runner; both run after the merge, and a problem they find is fixed by a follow-up pull request applied the same way. The results are recorded against this spec. Production is created on the RD-1 production line from the same README, with `FunctionServiceAccountUniqueId` from report-service-pro.
 
+### Rollout results
+
+Staging, 2026-10-08, from this branch:
+
+| Step | Result |
+|---|---|
+| 1. Retire the spike's stack (612297603577) | Stack, bucket (184 objects of staging-portal test data and the spike's `scripts/`), roles, launcher user and key, image and log group deleted, and each checked gone |
+| 2. Publish the artifact | `s3://concordqa-devops/researcher-dashboard-runner/runner-0.1.0.zip`, from `runner/` identical to `main`'s |
+| 3. Create the QA stack (816253370536) | `git-4d12a26` rolled back on `DataBucket` (409, the name not yet released by S3, though `head-bucket` already answered 404); `git-742f98f` an hour later is `CREATE_COMPLETE`, image version 1.0 |
+| 4. Repoint report-service-dev | report-service #433, merged as `688819a`; nothing deployed, since `researcherDashboard` is not deployed there |
+| 5. report-server's writer key | `report-service-qa` parameter-only update: `PackageBuckets` `{"learn.portal.staging.concord.org": "researcher-dashboard-runner-staging"}` and the two `PackagesAws*` values; task definition `report-server:100` rolled out, the server answers 200 |
+| The packages writer | put `packages/_probe/0.0.0.txt` succeeds; put under `researchers/`, get of the probe and list of `packages/` are `AccessDenied` |
+| The execution role | one inline policy, `runtime`, with `logs:CreateLogStream` and `logs:PutLogEvents` on its own log group's streams; no attached policies |
+| As the function, and a VM's endpoint | Not yet run: they wait for REPORT-143's `id-token` and RD-4 pass 2's runner, after the merge |
+
 ## Open Questions
 
 ### RESOLVED: Judgment call: grants land in the template step, and their tests in the next
