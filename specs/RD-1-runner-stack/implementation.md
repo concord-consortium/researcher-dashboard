@@ -856,7 +856,7 @@ aws cloudformation execute-change-set --stack-name "$STACK" --change-set-name "g
 aws cloudformation wait stack-create-complete --stack-name "$STACK"
 ```
 
-Creating the stack builds the image, which waits on the runner's `/ready` hook. A build that fails takes the create down with it, and the bucket, which is retained, is then left behind holding the name.
+Creating the stack builds the image, which waits on the runner's `/ready` hook. A build that fails takes the create down with it, and the bucket, which is retained, is then left behind holding the name. A create that fails for any reason leaves the stack in `ROLLBACK_COMPLETE`, holding nothing but its name: delete it with `aws cloudformation delete-stack` before creating it again.
 
 ## Updating a stack
 
@@ -1021,7 +1021,7 @@ The spike created `researcher-dashboard-runner-staging` in the production accoun
    ```
 
 2. **In 816253370536, meet the prerequisites above**: publish the runner artifact to `concordqa-devops`.
-3. **Create the stack** as above, with `FunctionServiceAccountUniqueId` from `setup-researcher-dashboard-iam.sh check report-service-dev`. If the bucket name is refused as taken, S3 has not yet released it from step 1; wait and retry.
+3. **Create the stack** as above, with `FunctionServiceAccountUniqueId` from `setup-researcher-dashboard-iam.sh check report-service-dev`. S3 can take most of an hour to release a deleted bucket's name to another account, and answers `head-bucket` with 404 before it has, so a create soon after step 1 can fail on `DataBucket` with a 409, "A conflicting conditional operation is currently in progress". Delete the rolled-back stack, wait, and create it again with a new change set.
 4. **Point report-service-dev's function at it** (above), by a report-service pull request, then deploy.
 5. **Give report-server staging the packages writer's key** (above).
 6. **Run the live checks** above and record the results against RD-1's spec. Then audit who can act as the function in GCP IAM, in report-service-dev and report-service-pro: who holds OpenID Token Creator or Token Creator on the `researcher-dashboard` account, and who may deploy functions that run as it.
