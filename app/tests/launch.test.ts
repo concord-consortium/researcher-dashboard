@@ -1,79 +1,73 @@
 import { describe, expect, it } from "vitest";
-import { ANALYZE_CLASS, classRef, pageFor, parseLaunch } from "../src/shell/launch";
+import { launchQuery, parseCallback, parseLaunch } from "../src/shell/launch";
+import { devPortal, portalFor } from "../src/shell/portals";
 
-const CLASS_URL = "https://learn.portal.staging.concord.org/api/v1/classes/111";
-
-function launch(search: string) {
-  return parseLaunch(search);
-}
+const STAGING = "https://learn.portal.staging.concord.org";
+// The link external report 79 launches on staging, as found on 2026-10-09.
+const LINK = `?authDomain=${encodeURIComponent(`${STAGING}/`)}&classId=223&loginHint=200`;
 
 describe("parseLaunch", () => {
-  it("reads what the portal puts in the url", () => {
-    const l = launch(`?page=analyze-class&class=${encodeURIComponent(CLASS_URL)}&token=abc&researcher=true`);
-    expect(l.page).toBe(ANALYZE_CLASS);
-    expect(l.classUrl).toBe(CLASS_URL);
-    expect(l.token).toBe("abc");
-    expect(l.researcher).toBe(true);
+  it("reads the three parameters the portal sends", () => {
+    expect(parseLaunch(LINK)).toEqual({ authDomain: `${STAGING}/`, classId: "223", loginHint: "200" });
   });
 
-  it("treats a missing researcher flag as not a researcher", () => {
-    expect(launch("?page=analyze-class").researcher).toBe(false);
-  });
-});
-
-describe("classRef", () => {
-  it("finds the portal and the class id in the api url", () => {
-    expect(classRef(CLASS_URL)).toEqual({
-      portalOrigin: "https://learn.portal.staging.concord.org",
-      classId: "111"
-    });
+  it("needs a portal and a class id", () => {
+    expect(parseLaunch("?classId=223")).toBeNull();
+    expect(parseLaunch(`?authDomain=${STAGING}`)).toBeNull();
+    expect(parseLaunch(`?authDomain=${STAGING}&classId=0`)).toBeNull();
+    expect(parseLaunch(`?authDomain=${STAGING}&classId=22a`)).toBeNull();
   });
 
-  // This value decides where the bearer is sent, and anything can put a query on this
-  // page, so a url that is not a portal class url has to be refused rather than trusted.
-  it("refuses a url that is not a class api url", () => {
-    expect(classRef("https://evil.test/api/v1/classes/111/../../secrets")).toBeNull();
-    expect(classRef("https://learn.portal.staging.concord.org/api/v1/offerings/111")).toBeNull();
-    expect(classRef("https://learn.portal.staging.concord.org/api/v1/classes/abc")).toBeNull();
+  // The spike's link: no compatibility shim, so it is simply not a launch.
+  it("ignores the spike's launch grammar", () => {
+    expect(parseLaunch("?page=analyze-class&class=https%3A%2F%2Fp%2Fapi%2Fv1%2Fclasses%2F1&token=t&researcher=true")).toBeNull();
   });
 
-  it("refuses a scheme that is not http or https", () => {
-    expect(classRef("javascript:alert(1)//api/v1/classes/1")).toBeNull();
-    expect(classRef("file:///api/v1/classes/1")).toBeNull();
+  it("drops a login hint that is not a user id", () => {
+    expect(parseLaunch(`?authDomain=${STAGING}&classId=1&loginHint=x`)?.loginHint).toBeNull();
   });
 
-  it("refuses nonsense rather than throwing", () => {
-    expect(classRef("not a url")).toBeNull();
-    expect(classRef(null)).toBeNull();
+  it("round-trips through launchQuery", () => {
+    expect(parseLaunch(launchQuery(parseLaunch(LINK)!))).toEqual(parseLaunch(LINK));
   });
 });
 
-describe("pageFor", () => {
-  const good = `?page=analyze-class&class=${encodeURIComponent(CLASS_URL)}&token=abc`;
+describe("parseCallback", () => {
+  it("reads a code or an error, each with its state", () => {
+    expect(parseCallback("?code=c&response_type=code&state=s")).toEqual({ state: "s", code: "c" });
+    expect(parseCallback("?error=access_denied&state=s")).toEqual({ state: "s", error: "access_denied" });
+    expect(parseCallback("?code=c")).toBeNull();
+    expect(parseCallback(LINK)).toBeNull();
+  });
+});
 
-  it("selects analyze-class when the launch carries what it needs", () => {
-    expect(pageFor(launch(good))).toBe(ANALYZE_CLASS);
+describe("portalFor", () => {
+  it("matches the allowlisted origin, trailing slash or not", () => {
+    expect(portalFor(`${STAGING}/`)?.reportServer).toBe("https://report-server.concordqa.org");
+    expect(portalFor(STAGING)?.firebaseProject).toBe("report-service-dev");
   });
 
-  // The root info page is what a bookmarked launch url lands on once its grant expires,
-  // which is the common case rather than an edge one.
-  it("falls back to the info page with no token", () => {
-    expect(pageFor(launch(`?page=analyze-class&class=${encodeURIComponent(CLASS_URL)}`))).toBeNull();
+  // This decides where a credential is sent, so near misses are refusals.
+  it("refuses anything but the exact origin", () => {
+    expect(portalFor("https://learn.portal.staging.concord.org.evil.test/")).toBeNull();
+    expect(portalFor("http://learn.portal.staging.concord.org/")).toBeNull();
+    expect(portalFor("https://learn.portal.staging.concord.org:8443/")).toBeNull();
+    expect(portalFor("https://learn.concord.org/")).toBeNull();
+    expect(portalFor("not a url")).toBeNull();
   });
 
-  it("falls back to the info page with no page", () => {
-    expect(pageFor(launch(`?class=${encodeURIComponent(CLASS_URL)}&token=abc`))).toBeNull();
+  it("adds a local portal only on a dev server", () => {
+    const env = { VITE_DEV_PORTAL: "http://localhost:3000/", VITE_DEV_REPORT_SERVER: "http://localhost:4000", VITE_DEV_FIREBASE_PROJECT: "demo" };
+    expect(devPortal({ ...env, DEV: false })).toBeNull();
+    const local = devPortal({ ...env, DEV: true });
+    expect(portalFor("http://localhost:3000/", local)?.reportServer).toBe("http://localhost:4000");
+    expect(portalFor("http://localhost:3000/")).toBeNull();
   });
 
-  it("falls back to the info page for a page it does not know", () => {
-    expect(pageFor(launch(`?page=analyze-cohort&class=${encodeURIComponent(CLASS_URL)}&token=abc`))).toBeNull();
-  });
-
-  it("falls back to the info page when the class url is not one", () => {
-    expect(pageFor(launch("?page=analyze-class&class=https://evil.test/&token=abc"))).toBeNull();
-  });
-
-  it("falls back to the info page on an empty query" , () => {
-    expect(pageFor(launch(""))).toBeNull();
+  it("takes no local portal from a setting that is not a URL, and keeps only origins", () => {
+    const env = { DEV: true, VITE_DEV_REPORT_SERVER: "http://localhost:4000/", VITE_DEV_FIREBASE_PROJECT: "demo" };
+    expect(devPortal({ ...env, VITE_DEV_PORTAL: "localhost:3000" })).toBeNull();
+    expect(devPortal({ ...env, VITE_DEV_PORTAL: "127.0.0.1:3000" })).toBeNull();
+    expect(devPortal({ ...env, VITE_DEV_PORTAL: "http://localhost:3000/" })?.reportServer).toBe("http://localhost:4000");
   });
 });

@@ -1,63 +1,41 @@
-// What the portal puts in the launch URL, and what the app makes of it.
-//
-// One index.html serves every feature and the query selects it, the way portal-report
-// selects its dashboard with `?portal-dashboard=true`. So parsing the query is the first
-// thing the app does and the only thing that decides which page renders.
-
-export const ANALYZE_CLASS = "analyze-class";
+// The launch link carries where to authenticate, which class to ask for, and who is asking.
+// `classId` is only ever a request: it becomes the authorize request's `context`, and the
+// class the app shows afterwards is the one the issued token is bound to.
 
 export interface Launch {
-  page: string | null;
-  // The portal's API url for the class, e.g. https://portal/api/v1/classes/111. The portal
-  // sends the url rather than the id, so the app learns which portal it was launched from
-  // without being configured per deployment.
-  classUrl: string | null;
-  token: string | null;
-  researcher: boolean;
-}
-
-export interface ClassRef {
-  portalOrigin: string;
+  authDomain: string;
   classId: string;
+  loginHint: string | null;
 }
 
-export function parseLaunch(search: string): Launch {
+// What the portal's redirect back carries: a code to redeem, or the error it refused with.
+export type Callback =
+  | { state: string; code: string }
+  | { state: string; error: string };
+
+const ID = /^[1-9][0-9]*$/;
+
+export function parseLaunch(search: string): Launch | null {
   const params = new URLSearchParams(search);
-  return {
-    page: params.get("page"),
-    classUrl: params.get("class"),
-    token: params.get("token"),
-    researcher: params.get("researcher") === "true"
-  };
+  const authDomain = params.get("authDomain");
+  const classId = params.get("classId");
+  if (!authDomain || !classId || !ID.test(classId)) return null;
+  const loginHint = params.get("loginHint");
+  return { authDomain, classId, loginHint: loginHint && ID.test(loginHint) ? loginHint : null };
 }
 
-// The portal to talk to and the class to ask about, or null when the url is not one.
-//
-// Only https and http are accepted, and the id must be the last segment of an
-// /api/v1/classes/ path. A launch url is attacker-supplied in the sense that anything can
-// put a query on this page, and this value decides where the bearer token is sent.
-export function classRef(classUrl: string | null): ClassRef | null {
-  if (!classUrl) return null;
-  let url: URL;
-  try {
-    url = new URL(classUrl);
-  } catch {
-    return null;
-  }
-  if (url.protocol !== "https:" && url.protocol !== "http:") return null;
-
-  const match = url.pathname.match(/^\/api\/v1\/classes\/(\d+)$/);
-  if (!match) return null;
-
-  return { portalOrigin: url.origin, classId: match[1] };
+export function parseCallback(search: string): Callback | null {
+  const params = new URLSearchParams(search);
+  const state = params.get("state");
+  if (!state) return null;
+  const code = params.get("code");
+  if (code) return { state, code };
+  const error = params.get("error");
+  return error ? { state, error } : null;
 }
 
-// Which page to render. Anything the app does not recognize, and anything missing what a
-// page needs, lands on the info page rather than on a broken feature: a bookmarked launch
-// url whose grant has expired is the common case, and it should explain itself.
-export function pageFor(launch: Launch): string | null {
-  if (launch.page !== ANALYZE_CLASS) return null;
-  if (!launch.token) return null;
-  if (!classRef(launch.classUrl)) return null;
-  return ANALYZE_CLASS;
+export function launchQuery(launch: Launch): string {
+  const params = new URLSearchParams({ authDomain: launch.authDomain, classId: launch.classId });
+  if (launch.loginHint) params.set("loginHint", launch.loginHint);
+  return `?${params}`;
 }

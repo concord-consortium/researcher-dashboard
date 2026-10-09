@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { emulatorsFromEnv, paths, portalSegment } from "../src/shell/firebase";
+import { classPath, emulatorsFromEnv, portalSegment } from "../src/shell/firebase";
 
 describe("portalSegment", () => {
   // The convention CLUE and report-service already use for portal-keyed collections.
@@ -9,19 +9,15 @@ describe("portalSegment", () => {
       .toBe("learn_portal_staging_concord_org");
   });
 
-  it("drops the port, which is not part of the segment CLUE writes", () => {
+  it("keeps the port, as report-service's own segment does", () => {
     expect(portalSegment("http://localhost:3000")).toBe("localhost:3000");
   });
 });
 
-describe("paths", () => {
-  const at = paths("https://learn.portal.staging.concord.org");
-
-  it("puts every document under the portal's own segment", () => {
-    expect(at.researcher("200"))
-      .toBe("researcher_dashboard/learn_portal_staging_concord_org/researchers/200");
-    expect(at.results("abc"))
-      .toBe("researcher_dashboard/learn_portal_staging_concord_org/classes/abc/results");
+describe("classPath", () => {
+  it("puts the class document under the portal's own segment", () => {
+    expect(classPath("https://learn.portal.staging.concord.org", "abc"))
+      .toBe("researcher_dashboard/learn_portal_staging_concord_org/classes/abc");
   });
 });
 

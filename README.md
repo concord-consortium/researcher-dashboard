@@ -1,6 +1,6 @@
 # researcher-dashboard
 
-The Analyze Class researcher dashboard: a browser app and the runner that performs an analysis for it.
+The Researcher Dashboard: a browser app a researcher opens from the portal, and the runner that runs packages for it on a per-researcher Lambda MicroVM.
 
 One repository holds both halves because they share the `display.json` contract, the projection the
 runner writes and the app renders. They are deployed and versioned independently.

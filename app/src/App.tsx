@@ -1,16 +1,20 @@
-import { ANALYZE_CLASS, classRef, pageFor, parseLaunch } from "./shell/launch";
-import { AnalyzeClass } from "./pages/AnalyzeClass";
+import { useMemo } from "react";
+import { ClassDashboard } from "./pages/ClassDashboard";
 import { Info } from "./pages/Info";
+import { makeServices, type DashboardServices } from "./shell/services";
+import type { Start } from "./shell/start";
 
-// One index.html, the feature selected by `page`. A page the app does not know, or a launch
-// missing what its page needs, renders the info page rather than a broken feature: a
-// bookmarked launch url whose grant has expired is the ordinary way to arrive here.
-export function App({ search }: { search: string }) {
-  const launch = parseLaunch(search);
-  const page = pageFor(launch);
+export function App({ start, reauthorize, services }: {
+  start: Start;
+  reauthorize: () => void;
+  services?: DashboardServices;
+}) {
+  const ready = start.kind === "ready" ? start : null;
+  const built = useMemo(
+    () => services ?? (ready ? makeServices(ready.portal, ready.token) : null), [services, ready]
+  );
 
-  if (page === ANALYZE_CLASS) {
-    return <AnalyzeClass ref_={classRef(launch.classUrl)!} token={launch.token!} />;
-  }
-  return <Info reason={launch.page && launch.token ? "bad-token" : "no-launch"} />;
+  if (start.kind === "info") return <Info reason={start.reason} detail={start.detail} />;
+  if (start.kind === "redirecting" || !built) return <main className="loading">Signing in…</main>;
+  return <ClassDashboard services={built} onExpired={reauthorize} />;
 }

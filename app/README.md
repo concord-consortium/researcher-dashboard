@@ -1,7 +1,7 @@
 # Researcher Dashboard app
 
-The page a researcher lands on from the portal's Research Classes table. One `index.html`;
-the feature is selected by `?page=`, the way portal-report selects its dashboard by query.
+The page a researcher lands on from the "Researcher Dashboard" link on a project's Research
+Classes page: the class, and the packages that apply to it.
 
 ```sh
 npm ci
@@ -12,36 +12,49 @@ npm run build    # tsc --noEmit && vite build
 
 ## How it is launched
 
-The portal builds the launch URL, so the app is never configured with a portal: it learns
-which one it belongs to from the `class` parameter.
+The portal's link names where to sign in, which class to ask for, and who is asking:
 
 ```
-index.html?page=analyze-class
-          &class=https://<portal>/api/v1/classes/<id>
-          &token=<short-lived OAuth grant>
-          &researcher=true
+index.html?authDomain=<portal>&classId=<id>&loginHint=<user id>
 ```
 
-Anything the app cannot serve, an unknown `page`, a missing or rejected token, or a `class`
-that is not a portal class API URL, renders the info page rather than a broken feature. A
-bookmarked launch URL whose grant has expired is the ordinary way to arrive there.
+`authDomain` must be a portal in the allowlist compiled into the build
+(`src/shell/portals.ts`), which also names the report-server and Firebase project the app
+uses with it; anything else renders the info page and requests nothing. The app is an OAuth2
+public client: it sends the browser to the portal's authorize endpoint with a PKCE challenge
+and `context=class:<classId>`, redeems the code it is sent back with at `/oauth/token`, and
+holds the access token in memory only. The class it shows is the one the token is bound to.
+A token about to expire, or refused with a 401, sends the browser through the authorization
+again, unless the refused token is under a minute old, which renders the info page instead.
 
 ## Running against a local portal
 
-Set `RESEARCHER_DASHBOARD_URL` in the portal's environment to this dev server's
-`index.html` and launch from the portal as usual:
+The local rigse needs:
+
+- `PORTAL_SIGNING_KEY`, `PORTAL_SIGNING_KEY_ID` and `REPORT_SERVER_URL`, or the authorize request
+  comes back with `error=server_error`;
+- `RESEARCHER_DASHBOARD_FUNCTION_URL` naming a report-service functions deployment, or the
+  profile refresh answers 503 and no class gets a profile to list from;
+- a `Client` with app id `researcher-dashboard`, type `public`, scopes
+  `class:researcher-read class:researcher-run packages:read`, and the dev server's
+  `http://localhost:5173/index.html` among its redirect URIs, which the portal matches exactly;
+- an `ExternalReport` for classes, supporting researchers, whose URL is that page and whose
+  client is that `Client`.
+
+The local report-server needs `http://localhost:5173` in `PACKAGES_CORS_ORIGINS`, or it
+refuses the package list's bearer from the dev server.
+
+Then name the local portal for the dev server. A production build never reads these:
 
 ```sh
-# in the rigse checkout
-RESEARCHER_DASHBOARD_URL=http://localhost:5173/index.html docker compose up
+VITE_DEV_PORTAL=http://localhost:3000 \
+VITE_DEV_REPORT_SERVER=http://localhost:4000 \
+VITE_DEV_FIREBASE_PROJECT=report-service-dev \
+npm run dev
 ```
 
-Nothing needs configuring on this side. The portal's own CORS allowlist already covers
-`/api/v1/researcher_dashboard/*` for any origin, so the dev server can call it.
-
-The portal also needs a `Client` record whose `app_id` is `researcher-dashboard`
-(`ResearcherDashboard::Launch::CLIENT_APP_ID`), or the launch refuses with `NotConfigured`
-rather than sending you to a page that cannot authenticate.
+The Firebase project needs an entry in `src/shell/firebase.ts`'s config map unless the
+emulator below is used.
 
 ## Running against the Firestore emulator
 
@@ -65,15 +78,16 @@ emulator that is fine, because an emulator accepts any signature.
 
 | | |
 |---|---|
-| the portal | class metadata, a Firebase token per project, and the call that starts a run |
-| `report-service-dev` | the researcher status document and the class's results |
-| `collaborative-learning-staging` | the live CLUE document count |
-
-Two Firebase projects means two sign-ins: a custom token is signed by one project's service
-account and cannot be exchanged in another.
+| the portal | the class's scope, a Firebase token for the class, and a profile refresh when the profile is missing or stale |
+| report-server | the package list, each package marked as applying to the class or not |
+| the portal's report-service Firebase project | the class's authored URL profile document, read and never written |
 
 ## Deploy
 
 `.github/workflows/deploy-app.yml` publishes to `models-resources/researcher-dashboard/` on
 every push that touches `app/`, assuming an AWS role through OIDC rather than storing a key.
-A branch lands at `branch/<name>/`, a tag at `version/<tag>/`.
+A branch lands at `branch/<name>/`, less a leading ticket key such as `RD-3-`, and a tag at `version/<tag>/`.
+
+A branch build can be launched on staging only once its URL is among the staging
+`researcher-dashboard` `Client`'s redirect URIs; an unregistered redirect URI is a portal
+error, not a redirect.

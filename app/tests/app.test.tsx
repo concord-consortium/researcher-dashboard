@@ -1,48 +1,36 @@
 import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
-
-// AnalyzeClass talks to the portal and to Firebase the moment it mounts, neither of which
-// this test is about: what is under test is which page the launch url selects.
-vi.mock("../src/pages/AnalyzeClass", () => ({
-  AnalyzeClass: ({ token }: { token: string }) => <div>analyze-class for {token}</div>
-}));
-
-const CLASS_URL = "https://learn.portal.staging.concord.org/api/v1/classes/111";
+import type { Portal, ReportServer } from "../src/shell/portal";
+import { SCOPE } from "./fixtures";
 
 afterEach(cleanup);
 
+const none = () => {};
+
 describe("App", () => {
-  it("renders analyze-class for a complete launch", () => {
-    render(<App search={`?page=analyze-class&class=${encodeURIComponent(CLASS_URL)}&token=grant-1`} />);
-    expect(screen.getByText(/analyze-class for grant-1/)).toBeDefined();
-  });
-
-  it("renders the info page at the root", () => {
-    render(<App search="" />);
+  it("renders the info page, naming the portal's link as it is labeled", () => {
+    render(<App start={{ kind: "info", reason: "no-launch" }} reauthorize={none} />);
     expect(screen.getByRole("heading", { name: "Researcher Dashboard" })).toBeDefined();
-    expect(screen.getByText(/launched one class at a time from the portal/i)).toBeDefined();
+    expect(screen.getByText(/use the Researcher Dashboard link/)).toBeDefined();
+    expect(document.body.textContent).not.toMatch(/Analy[sz]/);
   });
 
-  // The bookmark case: the launch url is intact but the grant is not, and the researcher
-  // needs telling to go back to the portal rather than being shown a generic page.
-  it("tells a researcher with a stale launch url to relaunch", () => {
-    render(<App search="?page=analyze-class&token=expired" />);
-    expect(screen.getByText(/this link has expired/i)).toBeDefined();
+  it("says why it is not showing a class, with the portal's error where it sent one", () => {
+    render(<App start={{ kind: "info", reason: "authorize-error", detail: "server_error" }} reauthorize={none} />);
+    expect(screen.getByRole("status").textContent).toMatch(/could not sign you in.*server_error/);
   });
 
-  it("renders the info page for a page it does not know", () => {
-    render(<App search={`?page=analyze-cohort&class=${encodeURIComponent(CLASS_URL)}&token=grant-1`} />);
-    expect(screen.queryByText(/analyze-class for/)).toBeNull();
+  it("says it is signing in while the browser leaves for the portal", () => {
+    render(<App start={{ kind: "redirecting" }} reauthorize={none} />);
+    expect(screen.getByText(/signing in/i)).toBeDefined();
   });
 
-  // portal-report has a fake-data demo mode. Copying it would put invented analyses in
-  // front of a researcher, which read as real results. The page may describe what the
-  // dashboard can show; what it must not do is render a result.
-  it("renders no analysis result on the info page", () => {
-    const { container } = render(<App search="" />);
-    expect(screen.queryByRole("table")).toBeNull();
-    expect(container.querySelector(".display")).toBeNull();
-    expect(container.querySelector(".summary")).toBeNull();
+  it("renders the class once signed in", async () => {
+    const token = { accessToken: "at", issuedAt: 0, expiresAt: 1 };
+    const portal = { origin: "https://p.test", reportServer: "https://r.test", firebaseProject: "f" };
+    const services = { portal: { scope: async () => SCOPE } as unknown as Portal, reportServer: {} as ReportServer, watchProfile: async () => () => {}, now: () => 0 };
+    render(<App start={{ kind: "ready", portal, launch: { authDomain: "https://p.test", classId: "1", loginHint: null }, token }} reauthorize={none} services={services} />);
+    expect(await screen.findByRole("heading", { level: 1, name: SCOPE.name })).toBeDefined();
   });
 });
