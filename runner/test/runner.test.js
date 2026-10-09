@@ -823,8 +823,7 @@ test("/run-package is refused until /run has finished", async () => {
   await running;
 });
 
-// report-server publishes under packages/, and a VM's storage credentials grant read
-// there and nowhere else, so a fetch from any other prefix is refused in the VM.
+// report-server publishes under packages/, the only prefix a package is fetched from.
 test("packages are fetched from the packages/ prefix of the bucket", async () => {
   const runner = buildRunner(loadEnv({ SYNC_BACKEND: "S3" }));
   const backend = runner.makePackageBackend({ bucket: "researcher-dashboard-runner-staging" });
