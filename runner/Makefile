@@ -71,15 +71,19 @@ artifact:
 artifact-key:
 	@echo $(ARTIFACT_KEY)
 
-# Refuses a VERSION already published: overwriting it changes no key, so no image is built
-# now and the next build takes the replaced code unreviewed. Only a 404 counts as unpublished.
+# A conditional write, so a VERSION already published is refused even to a racing publisher:
+# overwriting it changes no key, so no image is built now and the next build takes it unreviewed.
 publish-artifact: artifact
-	@if out=$$(aws s3api head-object --bucket $(ARTIFACT_BUCKET) --key $(ARTIFACT_KEY) 2>&1); then \
-	  echo "$(ARTIFACT_URI) is already published; a release takes a VERSION never published before" >&2; exit 1; \
-	elif ! echo "$$out" | grep -q '(404)'; then \
-	  echo "$$out" >&2; exit 1; \
+	@if ! out=$$(aws s3api put-object --bucket $(ARTIFACT_BUCKET) --key $(ARTIFACT_KEY) \
+	    --body $(ARTIFACT) --if-none-match '*' 2>&1); then \
+	  if echo "$$out" | grep -q PreconditionFailed; then \
+	    echo "$(ARTIFACT_URI) is already published; a release takes a VERSION never published before" >&2; \
+	  else \
+	    echo "$$out" >&2; \
+	  fi; \
+	  exit 1; \
 	fi
-	aws s3 cp $(ARTIFACT) $(ARTIFACT_URI)
+	@echo "published $(ARTIFACT_URI)"
 
 clean:
 	docker image rm $(IMAGE) || true
