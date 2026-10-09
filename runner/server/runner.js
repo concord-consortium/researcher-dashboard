@@ -1,6 +1,6 @@
 import path from "node:path";
 import { log, redact, setContext, timed } from "./log.js";
-import { parseRunHookPayload, researcherPrefix } from "./config.js";
+import { defaultChainState, parseRunHookPayload, researcherPrefix } from "./config.js";
 import { verifySandbox } from "./sandbox.js";
 import { PROXY_PORT, setupNamespace } from "./netns.js";
 import { STATES, VmState } from "./state.js";
@@ -55,12 +55,15 @@ export class Runner {
   // package backend and syncer are not built yet.
   #ready = false;
 
-  constructor({ env, makeStore, makeSyncer, makePackageBackend, steps, unzip, startEgress, netGuard = verifySandbox, revokeReportServerToken = revokeOwnToken, now = () => Date.now() }) {
+  constructor({ env, makeStore, makeSyncer, makePackageBackend, makeStorage = () => null, makeFunctionClient, steps, unzip, startEgress, netGuard = verifySandbox, revokeReportServerToken = revokeOwnToken, now = () => Date.now(), processEnv = process.env }) {
     this.env = env;
+    this.processEnv = processEnv;
     // The store and the syncer are built in /run, not here: the Firebase project
     // and the bucket are per-VM values that arrive in runHookPayload, so neither
     // can be constructed before that payload exists.
     this.makeStore = makeStore;
+    this.makeStorage = makeStorage;
+    this.makeFunctionClient = makeFunctionClient;
     // Packages live under their own prefix of the same bucket the researcher's data
     // syncs to, so the backend is built per run like the syncer's; unzip is injected so
     // the tests need neither S3 nor a real archive.
@@ -104,6 +107,12 @@ export class Runner {
     this.microvmId = microvmId ?? null;
     this.payload = parseRunHookPayload(runHookPayload);
     setContext({ researcher: this.payload.platform_user_id, microvm_id: this.microvmId });
+    // The switch is made when the process starts, which is the image build, before the
+    // snapshot; this is each VM's own record that it still holds.
+    const chain = defaultChainState(this.processEnv);
+    if (chain.disabled) log.info("aws.default_chain_disabled", {});
+    else log.error("aws.default_chain_enabled", { present: chain.present });
+    this.callFunction = this.makeFunctionClient({ baseUrl: this.payload.function_url });
 
     this.store = this.makeStore({ projectId: this.payload.firebase_project });
     this.status = new StatusWriter({
@@ -147,12 +156,21 @@ export class Runner {
       current_package: null
     });
 
-    this.packageBackend = this.makePackageBackend?.({ bucket: this.payload.bucket });
+    // Every S3 call from here on, the pull-down first, goes through the broker's
+    // credentials, fetched with this session's ID token (final-design.md section 11.3).
+    this.storage = this.makeStorage({
+      bucket: this.payload.bucket,
+      prefix: researcherPrefix(this.payload.platform_user_id),
+      fetchCredentials: async () => this.callFunction("storage-credentials", { idToken: await this.store.idToken(), body: {} })
+    });
+    this.packageBackend = this.makePackageBackend?.({ bucket: this.payload.bucket, storage: this.storage });
     this.syncer = this.makeSyncer({
       bucket: this.payload.bucket,
       prefix: researcherPrefix(this.payload.platform_user_id),
-      root: this.env.dataRoot
+      root: this.env.dataRoot,
+      storage: this.storage
     });
+    if (this.storage) await timed("run.storage_credentials", {}, () => this.storage.client());
 
     await timed("run.pull_down", {}, () => this.syncer.pullDown());
     // The researcher's own token, handed down in the payload, so there is nothing to
@@ -435,6 +453,9 @@ export class Runner {
 
   async resume() {
     this.#requireStarted();
+    // A suspended VM's clock cannot be trusted to have moved, so the first S3 call after
+    // a resume fetches new credentials.
+    this.storage?.markStale();
     this.#vm.to(STATES.READY);
     this.syncer.start();
     await this.status.researcher({ state: STATES.READY });

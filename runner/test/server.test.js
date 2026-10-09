@@ -22,7 +22,8 @@ const PAYLOAD = JSON.stringify({
   firebase_project: "report-service-dev",
   bucket: "researcher-dashboard-runner-staging",
   report_server_url: "https://report-server.example.org",
-  report_server_token: "forwarded-report-server-token"
+  report_server_token: "forwarded-report-server-token",
+  function_url: "https://functions.example.org/researcherDashboard"
 });
 
 let work;
@@ -42,6 +43,7 @@ beforeEach(async () => {
   const runner = new Runner({
     env,
     makeStore: () => store,
+    makeFunctionClient: () => async () => { throw new Error("no function in this test"); },
     makeSyncer: ({ root }) =>
       new Syncer({ backend: new DirBackend(path.join(work, "remote")), root }),
     readSecret: async () => "token",

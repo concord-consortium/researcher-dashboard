@@ -4,7 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test, { afterEach, beforeEach } from "node:test";
-import { loadEnv } from "../server/config.js";
+import { disableDefaultCredentialChain, loadEnv } from "../server/config.js";
 import { makeSteps } from "../server/steps.js";
 import { HookError, Runner } from "../server/runner.js";
 import { buildRunner } from "../server/index.js";
@@ -33,7 +33,8 @@ const PAYLOAD = JSON.stringify({
   firebase_project: "report-service-dev",
   bucket: "researcher-dashboard-runner-staging",
   report_server_url: "https://report-server.example.org",
-  report_server_token: "forwarded-report-server-token"
+  report_server_token: "forwarded-report-server-token",
+  function_url: "https://functions.example.org/researcherDashboard"
 });
 
 function steps(overrides = {}) {
@@ -91,6 +92,7 @@ function build({ stepOverrides = {}, now, envOverrides = {}, makeStore, makePack
     makeStore: makeStore ?? (() => store),
     makePackageBackend: makePackageBackend ?? (() => ({ async get() {} })),
     unzip: async () => {},
+    makeFunctionClient: () => async () => { throw new Error("no function in this test"); },
     makeSyncer: ({ root }) =>
       new Syncer({ backend: new DirBackend(path.join(work, "remote")), root }),
     readSecret: async () => "report-service-token-value",
@@ -841,9 +843,9 @@ test("a package run fetches from the payload's bucket at the package's key", asy
 
 test("packages are fetched from the packages/ prefix of the bucket", async () => {
   const runner = buildRunner(loadEnv({ SYNC_BACKEND: "S3" }));
-  const backend = runner.makePackageBackend({ bucket: "researcher-dashboard-runner-staging" });
   const sent = [];
-  backend.client = { send: async (cmd) => { sent.push(cmd.input); throw new Error("stop"); } };
+  const storage = { client: async () => ({ send: async (cmd) => { sent.push(cmd.input); throw new Error("stop"); } }) };
+  const backend = runner.makePackageBackend({ bucket: "researcher-dashboard-runner-staging", storage });
 
   await assert.rejects(() => backend.get(packageKey("class-counts", "1.0.6"), path.join(work, "a.zip")), /stop/);
   assert.deepEqual(sent, [{ Bucket: "researcher-dashboard-runner-staging", Key: "packages/class-counts/1.0.6.zip" }]);
@@ -860,4 +862,41 @@ test("DIR mode fetches packages from <SYNC_DIR>/packages", async () => {
   const dest = path.join(work, "fetched.zip");
   await runner.makePackageBackend({ bucket: "local" }).get(packageKey("class-counts", "1.0.6"), dest);
   assert.equal(readFileSync(dest, "utf8"), "archive-bytes");
+});
+
+// The pull-down is the first S3 call, and it goes through credentials fetched from the
+// function with the session's ID token.
+test("in S3 mode /run fetches the broker's credentials before its first S3 call", async () => {
+  const { StorageCredentials } = await import("../server/storage.js");
+  const { S3Backend } = await import("../server/sync/index.js");
+  const events = [];
+  const env = { ...loadEnv({ SYNC_BACKEND: "S3" }), dataRoot: path.join(work, "data"), workRoot: path.join(work, "work") };
+  store = new MemoryStore();
+  const runner = new Runner({
+    env,
+    makeStore: () => store,
+    makeFunctionClient: () => async (route, { idToken }) => {
+      events.push(`${route}:${idToken ? "with-id-token" : "none"}`);
+      return { success: true, access_key_id: "ASIAX", secret_access_key: "s", session_token: "t", expiration: new Date(Date.now() + 3600e3).toISOString(), bucket: "researcher-dashboard-runner-staging", prefix: `researchers/${USER}/`, region: "us-east-1" };
+    },
+    makeStorage: ({ bucket, prefix, fetchCredentials }) => new StorageCredentials({ bucket, prefix, fetchCredentials, makeClient: (creds) => { events.push(`client:${creds.accessKeyId}`); return { send: async (command) => { events.push(command.constructor.name); return { Contents: [] }; } }; } }),
+    makeSyncer: ({ bucket, prefix, root, storage }) => new Syncer({ root, backend: new S3Backend({ bucket, prefix, client: () => storage.client() }) }),
+    makePackageBackend: () => ({ async get() {} }),
+    netGuard: async () => ({}),
+    steps: steps({ signIn: async ({ store: s, sessionToken }) => s.signIn(sessionToken) }),
+    processEnv: disableDefaultCredentialChain({ AWS_ACCESS_KEY_ID: "AKIA-EXECUTION-ROLE" })
+  });
+  const lines = [];
+  const write = process.stdout.write;
+  process.stdout.write = (chunk) => { lines.push(String(chunk)); return true; };
+  try {
+    await runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+  } finally {
+    process.stdout.write = write;
+  }
+  runner.syncer.stop();
+  assert.deepEqual(events, ["storage-credentials:with-id-token", "client:ASIAX", "ListObjectsV2Command"]);
+  // Each VM's log says the default chain is off, with the VM's id on the line.
+  const disabled = lines.map((l) => JSON.parse(l)).find((l) => l.event === "aws.default_chain_disabled");
+  assert.equal(disabled?.microvm_id, "mvm-1");
 });

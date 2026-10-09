@@ -130,6 +130,10 @@ export class LogStore {
     return null;
   }
 
+  async idToken() {
+    throw new Error("the log store signs nothing in, so it has no ID token");
+  }
+
   async set(path, doc) {
     log.info("status.write", { op: "set", path, doc });
   }
@@ -154,6 +158,11 @@ export class MemoryStore {
   async signIn(customToken) {
     this.signedInWith.push(customToken);
     return { user: { uid: "memory" } };
+  }
+
+  async idToken() {
+    if (!this.signedInWith.length) throw new Error("this store has not signed in");
+    return `id-token-for:${this.signedInWith.at(-1)}`;
   }
 
   async set(path, doc) {

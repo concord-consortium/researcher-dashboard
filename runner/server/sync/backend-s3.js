@@ -6,27 +6,35 @@ import {
   DeleteObjectCommand,
   GetObjectCommand,
   ListObjectsV2Command,
-  PutObjectCommand,
-  S3Client
+  PutObjectCommand
 } from "@aws-sdk/client-s3";
 
-// Credentials come from the MicroVM execution role, which Lambda injects, so no
-// key material is configured here or carried in runHookPayload.
+// Credentials come from the storage broker, never from the execution role: `client` is
+// a function returning the S3 client for the current broker credentials
+// (storage.js StorageCredentials.client), asked before every call so each use is
+// checked against the wall clock. There is no default.
 export class S3Backend {
   constructor({ bucket, prefix, client }) {
+    if (typeof client !== "function") {
+      throw new Error("S3Backend needs the broker's client provider; it has no default credentials");
+    }
     this.bucket = bucket;
     // Normalized to exactly one trailing slash so key building cannot produce
     // `researchers//439` or `researchers439`.
     this.prefix = prefix.replace(/\/+$/, "") + "/";
-    this.client = client ?? new S3Client({});
+    this.client = client;
   }
 
   #key(relPath) {
     return `${this.prefix}${relPath}`;
   }
 
+  async #send(command) {
+    return (await this.client()).send(command);
+  }
+
   async put(relPath, sourcePath) {
-    await this.client.send(
+    await this.#send(
       new PutObjectCommand({
         Bucket: this.bucket,
         Key: this.#key(relPath),
@@ -36,7 +44,7 @@ export class S3Backend {
   }
 
   async get(relPath, destPath) {
-    const res = await this.client.send(
+    const res = await this.#send(
       new GetObjectCommand({ Bucket: this.bucket, Key: this.#key(relPath) })
     );
     await mkdir(path.dirname(destPath), { recursive: true });
@@ -44,7 +52,7 @@ export class S3Backend {
   }
 
   async remove(relPath) {
-    await this.client.send(
+    await this.#send(
       new DeleteObjectCommand({ Bucket: this.bucket, Key: this.#key(relPath) })
     );
   }
@@ -53,7 +61,7 @@ export class S3Backend {
     const out = [];
     let token;
     do {
-      const res = await this.client.send(
+      const res = await this.#send(
         new ListObjectsV2Command({
           Bucket: this.bucket,
           Prefix: this.prefix,

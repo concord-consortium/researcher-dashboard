@@ -16,7 +16,10 @@ export const REQUIRED_PAYLOAD_FIELDS = Object.freeze([
   // Where the VM retires its own report-server credential when it is torn down. It
   // comes from the caller rather than a map here because whatever launches the VM has
   // already had to reach report-server to obtain the credential in the first place.
-  "report_server_url"
+  "report_server_url",
+  // Where /work, /idle and /storage-credentials live. Nothing calls into the VM, so
+  // this is the only way it learns what to do (final-design.md section 10).
+  "function_url"
 ]);
 
 // The report-server credential is the requesting researcher's own, minted per VM
@@ -80,6 +83,39 @@ export function loadEnv(env = process.env) {
       .map((entry) => entry.trim())
       .filter(Boolean)
   };
+}
+
+// Every variable the SDK's default credential provider reads to find a credential.
+export const DEFAULT_CHAIN_VARIABLES = Object.freeze([
+  "AWS_ACCESS_KEY_ID",
+  "AWS_SECRET_ACCESS_KEY",
+  "AWS_SESSION_TOKEN",
+  "AWS_PROFILE",
+  "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+  "AWS_CONTAINER_CREDENTIALS_FULL_URI",
+  "AWS_WEB_IDENTITY_TOKEN_FILE",
+  "AWS_ROLE_ARN"
+]);
+
+// The runner makes no AWS call on the execution role: every S3 client is built from the
+// broker's credentials (final-design.md section 11.3). Switching the default chain off
+// in-process makes a client built any other way fail at once with a
+// CredentialsProviderError that names its cause, rather than with an AccessDenied from
+// the execution role, which holds no S3.
+export function disableDefaultCredentialChain(env = process.env) {
+  for (const name of DEFAULT_CHAIN_VARIABLES) delete env[name];
+  env.AWS_EC2_METADATA_DISABLED = "true";
+  env.AWS_SHARED_CREDENTIALS_FILE = "/dev/null";
+  env.AWS_CONFIG_FILE = "/dev/null";
+  return env;
+}
+
+// Whether the switch holds in `env`, and which credential variables are set if it does not.
+export function defaultChainState(env = process.env) {
+  const present = DEFAULT_CHAIN_VARIABLES.filter((name) => env[name] !== undefined);
+  const disabled = present.length === 0 && env.AWS_EC2_METADATA_DISABLED === "true"
+    && env.AWS_SHARED_CREDENTIALS_FILE === "/dev/null" && env.AWS_CONFIG_FILE === "/dev/null";
+  return { disabled, present };
 }
 
 // Lambda delivers runHookPayload as a string, so this parses and validates rather

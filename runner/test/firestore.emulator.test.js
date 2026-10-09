@@ -68,7 +68,8 @@ describe("status writes against the Firestore emulator", { skip: !FIRESTORE || !
     runner = new Runner({
       env,
       makeStore: () => store,
-      makeSyncer: ({ root }) =>
+      makeFunctionClient: () => async () => { throw new Error("no function in this test"); },
+    makeSyncer: ({ root }) =>
         new Syncer({ backend: new DirBackend(path.join(work, "remote")), root }),
       readSecret: async () => "report-service-token",
       netGuard: async () => ({ uid: 1000, binary: "stub" }),
@@ -102,7 +103,10 @@ describe("status writes against the Firestore emulator", { skip: !FIRESTORE || !
         portal: PORTAL,
         firebase_project: PROJECT,
         bucket: "researcher-dashboard-runner-staging",
-        report_server_token: "forwarded-report-server-token"
+        report_server_token: "forwarded-report-server-token",
+        report_server_url: "https://report-server.example.org",
+        platform_id: "https://learn.portal.staging.concord.org",
+        function_url: "https://functions.example.org/researcherDashboard"
       })
     });
 

@@ -59,6 +59,12 @@ export class FirestoreStore {
     return this.#signedIn;
   }
 
+  // The ID token the function's routes authenticate with.
+  async idToken(force = false) {
+    if (!this.auth.currentUser) throw new Error("this store has not signed in");
+    return this.auth.currentUser.getIdToken(force);
+  }
+
   async set(path, fields) {
     await setDoc(doc(this.db, path), fields);
   }

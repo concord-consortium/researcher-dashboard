@@ -1,5 +1,5 @@
 import http from "node:http";
-import { loadEnv } from "./config.js";
+import { disableDefaultCredentialChain, loadEnv } from "./config.js";
 import { FirestoreStore } from "./firestore.js";
 import { log } from "./log.js";
 import { HookError, Runner } from "./runner.js";
@@ -11,6 +11,8 @@ import { HOST_ADDR, PROXY_PORT, setupNamespace } from "./netns.js";
 import { makeSteps } from "./steps.js";
 import { PACKAGES_PREFIX } from "./package-fetch.js";
 import { revokeOwnToken } from "./report-server.js";
+import { makeFunctionClient } from "./function-client.js";
+import { StorageCredentials } from "./storage.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -107,20 +109,24 @@ export function buildRunner(env) {
       if (env.statusBackend === "MEMORY" || dir) return new MemoryStore();
       return new FirestoreStore({ projectId });
     },
-    makeSyncer: ({ bucket, prefix, root }) =>
+    makeFunctionClient: ({ baseUrl }) => makeFunctionClient({ baseUrl }),
+    // The broker's credentials, for every S3 call the runner makes. DIR mode has no S3.
+    makeStorage: ({ bucket, prefix, fetchCredentials }) =>
+      dir ? null : new StorageCredentials({ bucket, prefix, fetchCredentials }),
+    makeSyncer: ({ bucket, prefix, root, storage }) =>
       new Syncer({
         root,
         intervalMs: env.syncIntervalMs,
         backend: dir
           ? new DirBackend(`${env.syncDir}/${prefix}`)
-          : new S3Backend({ bucket, prefix })
+          : new S3Backend({ bucket, prefix, client: () => storage.client() })
       }),
     // Packages are fetched from the same bucket the data syncs to, under packages/,
     // which is where report-server publishes them.
-    makePackageBackend: ({ bucket }) =>
+    makePackageBackend: ({ bucket, storage }) =>
       dir
         ? new DirBackend(`${env.syncDir}/${PACKAGES_PREFIX}`)
-        : new S3Backend({ bucket, prefix: PACKAGES_PREFIX }),
+        : new S3Backend({ bucket, prefix: PACKAGES_PREFIX, client: () => storage.client() }),
     unzip: unzipArchive,
     // Skipped in DIR mode, which runs on a laptop with no namespaces and no need for
     // one: there is no execution role there to protect.
@@ -138,6 +144,9 @@ export function buildRunner(env) {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
+  // Before anything else: the runner makes no AWS call on the execution role, and a
+  // client that tries fails here, loudly, naming its cause.
+  disableDefaultCredentialChain();
   const env = loadEnv();
   const runner = buildRunner(env);
   createServer({ runner, env }).listen(env.port, () =>
