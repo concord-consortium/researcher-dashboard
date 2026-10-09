@@ -367,7 +367,7 @@ Requirements Q11 was answered A at stage 8 (Doug, 2026-09-26); it shapes only th
 - B) Commit the hand-built copy now and replace it when REPORT-167 merges.
 
 **Decision**: A (stage 6). The release runs from the branch and waits on REPORT-167 deployed (requirements R58), which follows its merge, so A delays nothing that matters, while B commits a second, hand-made source of the contract that a later copy has to remember to replace. Step 3 can be written and tested against the throwaway copy and committed with the file `npm run contract:sync` writes once REPORT-167 has merged (requirements Q14).
-**Changed at implementation** (Doug, 2026-10-09): B. Step 3 is committed with the hand-built copy, and the copy is replaced by `npm run contract:sync`'s output, amending step 3, once REPORT-167 merges. Nothing reaches `main` first: the release runs from the branch before the merge, and R58 makes `contract:check` passing one of its gates.
+**Changed at implementation** (Doug, 2026-10-09): B. Step 3 is committed with the hand-built copy, and the copy is replaced by `npm run contract:sync`'s output, amending step 3, once REPORT-167 merges. Nothing reaches `main` first: the release runs from the branch before the merge, and R58 makes `contract:check` passing one of its gates. *(Done 2026-10-09: REPORT-167 merged as report-service `9793e8f`, and step 3's copy is now `contract:sync`'s output. It differs from the hand-built copy only in `about` and the order of the two `limits` keys; every case and limit value is the same, and `contract:check` passes.)*
 
 ### RESOLVED: Judgment call: local paths keyed by the package key, not by nested identity directories
 **Options considered**: `<workRoot>/home/<origin kind>/<origin id>/<name>`; `<workRoot>/home/<package_key>`.
