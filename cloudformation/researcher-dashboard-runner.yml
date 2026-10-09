@@ -71,16 +71,25 @@ Resources:
         BlockPublicPolicy: true
         IgnorePublicAcls: true
         RestrictPublicBuckets: true
+      # A delete or an overwrite keeps the old version, and removing a version takes
+      # s3:DeleteObjectVersion, which nothing here holds, so no session can destroy a file.
+      VersioningConfiguration:
+        Status: Enabled
       LifecycleConfiguration:
-        # Retention is indefinite by decision (final-design.md section 12): researchers
-        # return to a class a year later, and an object-age rule would expire an active
-        # researcher's older files. The one rule only discards the parts of multipart
-        # uploads that never completed, which are billed and unreadable.
+        # Current objects never expire (final-design.md section 12): researchers return to
+        # a class a year later. Old versions are recoverable for 180 days, Concord's usual
+        # window; the rules also drop delete markers with nothing behind them and the parts
+        # of multipart uploads that never completed.
         Rules:
           - Id: AbortIncompleteUploads
             Status: Enabled
             AbortIncompleteMultipartUpload:
               DaysAfterInitiation: 7
+          - Id: ExpireOldVersions
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 180
+            ExpiredObjectDeleteMarker: true
       Tags:
         - Key: Contact
           Value: !Ref Contact
@@ -165,7 +174,7 @@ Resources:
                 Action:
                   - logs:CreateLogStream
                   - logs:PutLogEvents
-                Resource: !Sub "${LogGroup.Arn}:*"
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:${LogGroup}:log-stream:*"
       Tags:
         - Key: Contact
           Value: !Ref Contact
@@ -354,7 +363,8 @@ Resources:
         - MinimumMemoryInMiB: !Ref BaselineMemoryInMiB
       # CAP_SYS_ADMIN: the runner gives each package its own empty network namespace,
       # without which the package could read the execution role's credentials from the
-      # instance metadata service.
+      # instance metadata service. ALL is the only value accepted, so the VM holds every
+      # capability; the package itself runs with none (sandbox.js, --bounding-set -all).
       AdditionalOsCapabilities: ["ALL"]
       EgressNetworkConnectors:
         - !Sub "arn:aws:lambda:${AWS::Region}:aws:network-connector:aws-network-connector:INTERNET_EGRESS"

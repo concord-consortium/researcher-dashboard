@@ -39,7 +39,13 @@ aws cloudformation execute-change-set --stack-name "$STACK" --change-set-name "g
 aws cloudformation wait stack-create-complete --stack-name "$STACK"
 ```
 
-Creating the stack builds the image, which waits on the runner's `/ready` hook. A build that fails takes the create down with it, and the bucket, which is retained, is then left behind holding the name. A create that fails for any reason leaves the stack in `ROLLBACK_COMPLETE`, holding nothing but its name: delete it with `aws cloudformation delete-stack` before creating it again.
+Creating the stack builds the image, which waits on the runner's `/ready` hook. A build that fails takes the create down with it, and the bucket, which is retained, is then left behind holding the name. A create that fails for any reason leaves the stack in `ROLLBACK_COMPLETE`: delete it, and delete the bucket if the create got as far as making it (nothing writes to it during a create, so it is empty, but versioned), before creating it again:
+
+```sh
+aws cloudformation delete-stack --stack-name "$STACK"
+aws cloudformation wait stack-delete-complete --stack-name "$STACK"
+aws s3api head-bucket --bucket "$STACK" 2>/dev/null && aws s3api delete-bucket --bucket "$STACK"
+```
 
 ## Updating a stack
 
@@ -84,6 +90,8 @@ A `MicrovmImage` change starts an image build. VMs already running keep their ve
 - **To rotate the writer's key**, bump `PackagesWriterKey`'s `Serial` and apply: CloudFormation creates the new key, updates the outputs and deletes the old one, so update report-server straight away. The tests pin `Serial`, so this is a deliberate edit.
 
 ## The storage broker's session policy
+
+The bucket is versioned: a delete or an overwrite keeps the old version, which can be restored for 180 days, and no role in the stack can remove a version.
 
 `BrokerRole`'s own policies are only a ceiling: list under `researchers/`, read, write and delete on `researchers/*`, and read on `packages/*`. A session assumed without a session policy holds all of it, which is every researcher's data. So report-service's function (REPORT-143) calls `AssumeRoleWithWebIdentity` on `BrokerRoleArn` with its own token, `DurationSeconds` 3600, and passes this as `Policy`, with `<bucket>` the `DataBucketName` output and `<id>` the `platform_user_id` from the VM's verified token:
 
@@ -186,11 +194,11 @@ aws iam get-role-policy --role-name $R --policy-name runtime   # the one logs st
 aws iam list-attached-role-policies --role-name $R             # []
 ```
 
-**A VM's endpoint**, once the stack has a running VM (the first is a run on a runner that syncs with the broker's credentials). Nothing holds `CreateMicrovmAuthToken`, so nothing can open it. As the launcher:
+**A VM's endpoint**, once the stack has a running VM (the first is a run on a runner that syncs with the broker's credentials). Nothing holds `CreateMicrovmAuthToken`, so nothing can open it. Find the VM with your own credentials, since the launcher cannot list VMs, then check it as the launcher:
 
 ```sh
+VM=$(aws lambda-microvms list-microvms --image-identifier $IMAGE --query 'items[0].microvmId' --output text)
 ( eval "$(assume $LAUNCHER)"; unset AWS_PROFILE
-  VM=$(aws lambda-microvms list-microvms --image-identifier $IMAGE --query 'items[0].microvmId' --output text)
   aws lambda-microvms create-microvm-auth-token --microvm-identifier $VM \
     --expiration-in-minutes 5 --allowed-ports port=8080                              # AccessDenied
   ENDPOINT=$(aws lambda-microvms get-microvm --microvm-identifier $VM --query endpoint --output text)

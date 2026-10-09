@@ -19,7 +19,7 @@ RD-1 was first spec'd (2026-09-25) as three passes, so that no running VM would 
 - **R3.** The logical ids are `DataBucket`, `LogGroup`, `BuildRole`, `ExecutionRole`, `LauncherRole`, `BrokerRole`, `PackagesWriterUser`, `PackagesWriterKey` and `MicrovmImage`. Every create-only value is fixed so a later update replaces nothing: `BucketName` `researcher-dashboard-runner-${Environment}`, `LogGroupName`, the four `RoleName`s (`-build`, `-execution`, `-launcher`, `-broker`), the writer's `UserName` (`-packages-writer`), `PackagesWriterKey`'s `UserName` and `Serial: 1`, and `MicrovmImage`'s `Name`. No role has a `Path`. `DataBucket` keeps `DeletionPolicy` and `UpdateReplacePolicy` `Retain`.
 - **R4.** The parameters are the spike's except `StatusBackend`, with the same names, types, defaults and allowed values, plus `FunctionServiceAccountUniqueId` (digits only, no default). The token audience is derived as `researcher-dashboard-runner-${Environment}`, the stack's name, not a parameter.
 - **R5.** `MicrovmImage` resolves to the spike's values except `Description`, "Researcher Dashboard package runner (${Environment})", and `STATUS_BACKEND`, the literal `FIRESTORE`. The stack's description names what the stack holds.
-- **R6.** The bucket has exactly one lifecycle rule, aborting incomplete multipart uploads after 7 days, and no expiration rule (`final-design.md` 12).
+- **R6.** The bucket is versioned, and has exactly two lifecycle rules: `AbortIncompleteUploads`, aborting incomplete multipart uploads after 7 days, and `ExpireOldVersions`, expiring noncurrent versions after 180 days and removing delete markers with nothing behind them. No rule expires a current object (`final-design.md` 12). *(Versioning and the second rule added in review, Doug, 2026-10-09.)*
 - **R7.** The template lints clean with `cfn-lint` in `python:3.12-slim`.
 
 ### The function's identity
@@ -45,7 +45,7 @@ RD-1 was first spec'd (2026-09-25) as three passes, so that no running VM would 
 
 ### The execution role
 
-- **R13.** `ExecutionRole`'s one inline policy, `runtime`, holds exactly one statement: `logs:CreateLogStream` and `logs:PutLogEvents` on `${LogGroup.Arn}:*`. No S3, no `lambda:`, no managed policy, no boundary, no policy attached from another resource. Its trust is the spike's.
+- **R13.** `ExecutionRole`'s one inline policy, `runtime`, holds exactly one statement: `logs:CreateLogStream` and `logs:PutLogEvents` on the log group's streams, `arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:${LogGroup}:log-stream:*`. No S3, no `lambda:`, no managed policy, no boundary, no policy attached from another resource. Its trust is the spike's.
 
 ### The packages writer
 
@@ -59,7 +59,7 @@ RD-1 was first spec'd (2026-09-25) as three passes, so that no running VM would 
 
 ### Tests
 
-- **R18.** A Python `unittest` over cfn-lint's decoder (`cloudformation/tests/test_runner_template.py`), run by `cloudformation/check.sh` and by `.github/workflows/cloudformation.yml` on every change under `cloudformation/`, asserts R3, R6, R8 to R11, R13 to R15 and R17 with exact comparisons, so a widened grant fails as surely as a lost one. Thirty-eight mutations (trust, launcher, launcher key, broker, execution role, writer, create-only values, an expiry rule) each fail exactly the test aimed at them, and all but one lint clean, so the tests and not cfn-lint catch the grants.
+- **R18.** A Python `unittest` over cfn-lint's decoder (`cloudformation/tests/test_runner_template.py`), run by `cloudformation/check.sh` and by `.github/workflows/cloudformation.yml` on every change under `cloudformation/`, asserts R3, R6, R8 to R11, R13 to R15 and R17, and `BuildRole`'s grants (the artifact read and its logs), with exact comparisons, so a widened grant fails as surely as a lost one. Thirty-eight mutations (trust, launcher, launcher key, broker, execution role, writer, create-only values, an expiry rule), and seven more added in review (versioning, the two lifecycle rules, `BuildRole`, the execution role's log ARN), each fail exactly the test aimed at them, and all but one lint clean, so the tests and not cfn-lint catch the grants.
 - **R19.** No runner, app or report-service code changes.
 
 ### Verification on staging
@@ -89,7 +89,7 @@ RD-1 was first spec'd (2026-09-25) as three passes, so that no running VM would 
 - **A literal name, not a `Ref`, for a resource an update may modify.** A change set can list a property that `Ref`s a resource the same update modifies as `Replacement: Conditional`. The README stops on any replacement, and a replaced key breaks report-server, so `PackagesWriterKey` names its user literally.
 - **Google's claims and AWS's condition keys.** A service account's ID token carries its numeric unique ID in `azp` and `sub`, and the requested audience in `aud`. AWS maps `azp` to `accounts.google.com:aud` and `aud` to `accounts.google.com:oaud`, and does not enforce a `sub` condition for Google, so the template must. The account must never be recreated: a new one gets a new unique ID, which both roles refuse until the stack is updated.
 - **IAM action names**: the MicroVM actions authorize against the `microvm-image` resource type; the spike's `microvm:*` ARN stays beside it because the spike proved the pair with real calls. `PassNetworkConnector` lists no resource type.
-- **`${LogGroup.Arn}:*` resolves to `…:log-group:<name>:*:*`**, since the attribute already ends in `:*`. It matches every stream in the group, the spike used it, and the tests pin it.
+- **`AdditionalOsCapabilities` accepts only `ALL`** (cfn-lint's schema enumerates nothing else), so the VM holds every capability. The runner needs `CAP_SYS_ADMIN` for the packages' network namespaces, and the package itself runs with none (`runner/server/sandbox.js`, `--bounding-set -all`).
 - **What a leaked writer key can do**: overwrite a published archive, but not change what runs, since the runner checks every archive against the catalog's checksum.
 - **What an escaped package can reach**: the execution role's credentials write lines to the runner's own log group and nothing else, so the sandbox check (`verifySandbox`) stays.
 - **`packages/` read is not per researcher** (Doug, 2026-09-25): any VM on a stack can read every published archive. A missing archive reads as `AccessDenied`, since nothing lists `packages/`.
@@ -112,6 +112,7 @@ These run after the merge (Doug, 2026-10-08, "When does the branch merge"), with
 - **R20, the checks as the function** (the launcher: `GetMicrovmImage` succeeds and a token for another audience is refused; the broker: the whole-ceiling session and the session under R12's policy): waiting for report-service's `setup-researcher-dashboard-iam.sh id-token`, added by REPORT-143's step 3, which waits for REPORT-167 to merge. The writer's probe object `packages/_probe/0.0.0.txt` was left in the bucket for these checks; remove `packages/_probe/`, `researchers/_probe/` and `researchers/999999999/` afterward.
 - **R20, a VM's endpoint** (`create-microvm-auth-token` refused as the launcher, and the endpoint answering `403, Request missing authentication`): waiting for the stack's first VM, which RD-4 pass 2's runner brings when it is released to the QA stack.
 - **R21, the GCP IAM audit** of who can act as the function in report-service-dev and report-service-pro: not run during the rollout; it needs a current `gcloud` login.
+- **`BuildRole`'s logs grant narrowed** from `/aws/lambda-microvms/*` to this stack's log group: deferred from review (Doug, 2026-10-09). QA shows only the stack's own group, but only an image build proves the build writes nowhere else, and a wrong guess fails the next runner release.
 - **The production stack** (R2): deferred to the RD-1 production line, from the same README with `FunctionServiceAccountUniqueId` from report-service-pro (`114768968256413137012` on 2026-10-07).
 
 ## Decisions
@@ -172,6 +173,17 @@ These run after the merge (Doug, 2026-10-08, "When does the branch merge"), with
 - B) Drop it and rely on the template test.
 
 **Decision**: A. The test proves what the policy says, not what AWS does with it, and the check costs one command.
+
+---
+
+#### Ethan McElroy's review of the pull request (2026-10-09)
+**Context**: An approving review with ten findings, several of which the spec had already decided the other way.
+**Decision** (Doug, 2026-10-09):
+- Fixed: the README's endpoint check lists the VM with the operator's own credentials, since the launcher cannot list VMs; the failed-create recovery deletes the kept bucket; `BuildRole` gets an exact test; the capabilities comment says `ALL` grants every capability; the execution role names its log streams' ARN directly.
+- Added: versioning on the data bucket, with noncurrent versions expiring after 180 days, the window 26 of the 28 Concord buckets with a rule for old versions use (surveyed 2026-10-09), and no Glacier step, which costs more than it saves on small files and delays a restore. A broker session can no longer destroy a researcher's file, since nothing holds `s3:DeleteObjectVersion`.
+- Kept as decided: the writer's key stays a stack output (pass 1 Q3; report-server's task definition is its own template's concern); one audience for both roles (stage 8; the function reads one `RD_AWS_AUDIENCE`); CI on `push` only, as `deploy-app.yml` runs.
+- Deferred: narrowing `BuildRole`'s logs grant (see "Not Yet Implemented").
+- Declined: retaining the log group, which would leave a second fixed name to block a retried create.
 
 ---
 

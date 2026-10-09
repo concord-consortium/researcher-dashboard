@@ -100,13 +100,40 @@ class RunnerTemplate(unittest.TestCase):
         self.assertEqual(self.resources["DataBucket"]["DeletionPolicy"], "Retain")
         self.assertEqual(self.resources["DataBucket"]["UpdateReplacePolicy"], "Retain")
 
-    def test_the_bucket_keeps_one_lifecycle_rule_and_no_expiry(self):
-        rules = self.props("DataBucket")["LifecycleConfiguration"]["Rules"]
-        self.assertEqual(rules, [{
-            "Id": "AbortIncompleteUploads",
-            "Status": "Enabled",
-            "AbortIncompleteMultipartUpload": {"DaysAfterInitiation": 7},
-        }])
+    def test_the_bucket_is_versioned_and_never_expires_a_current_object(self):
+        bucket = self.props("DataBucket")
+        self.assertEqual(bucket["VersioningConfiguration"], {"Status": "Enabled"})
+        self.assertEqual(bucket["LifecycleConfiguration"]["Rules"], [
+            {
+                "Id": "AbortIncompleteUploads",
+                "Status": "Enabled",
+                "AbortIncompleteMultipartUpload": {"DaysAfterInitiation": 7},
+            },
+            {
+                "Id": "ExpireOldVersions",
+                "Status": "Enabled",
+                "NoncurrentVersionExpiration": {"NoncurrentDays": 180},
+                "ExpiredObjectDeleteMarker": True,
+            },
+        ])
+
+    def test_the_build_role_reads_the_artifact_and_writes_build_logs(self):
+        role = self.props("BuildRole")
+        for absent in ("ManagedPolicyArns", "PermissionsBoundary"):
+            self.assertNotIn(absent, role)
+        self.assertEqual(self.attached_policies("role", "BuildRole"), [])
+        self.assertEqual(statements(role["Policies"]), [
+            {
+                "Effect": "Allow",
+                "Action": "s3:GetObject",
+                "Resource": sub("arn:aws:s3:::${CodeArtifactBucket}/${CodeArtifactKey}"),
+            },
+            {
+                "Effect": "Allow",
+                "Action": ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"],
+                "Resource": sub("arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda-microvms/*"),
+            },
+        ])
 
     # AWS does not require a sub condition for Google, so without it any Google service
     # account whose token names the audience could assume these roles.
@@ -182,7 +209,7 @@ class RunnerTemplate(unittest.TestCase):
         self.assertEqual(statements(role["Policies"]), [{
             "Effect": "Allow",
             "Action": ["logs:CreateLogStream", "logs:PutLogEvents"],
-            "Resource": sub("${LogGroup.Arn}:*"),
+            "Resource": sub("arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:${LogGroup}:log-stream:*"),
         }])
         for absent in ("ManagedPolicyArns", "PermissionsBoundary"):
             self.assertNotIn(absent, role)
