@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { start, type StartDeps } from "../src/shell/start";
+import { reauthorizer, start, type StartDeps } from "../src/shell/start";
 
 const STAGING = "https://learn.portal.staging.concord.org";
 const PAGE = { origin: "https://models-resources.concord.org", pathname: "/researcher-dashboard/branch/main/index.html" };
@@ -86,5 +86,29 @@ describe("start", () => {
     const state = await launch();
     expect(await start(deps(`?code=c1&state=${state}`, { body: { error: "invalid_grant" }, ok: false })))
       .toEqual({ kind: "info", reason: "sign-in-failed", detail: "invalid_grant" });
+  });
+});
+
+describe("reauthorizer", () => {
+  const PORTAL = { origin: STAGING, reportServer: "https://report-server.concordqa.org", firebaseProject: "report-service-dev" };
+  const LAUNCH = { authDomain: `${STAGING}/`, classId: "223", loginHint: null };
+
+  it("starts one authorization however often it is called, so the stored state is the one sent", async () => {
+    const out = deps("");
+    const again = reauthorizer(out, PORTAL, LAUNCH, vi.fn());
+    again();
+    again();
+    await vi.waitFor(() => expect(out.navigated.length).toBeGreaterThan(0));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(out.navigated).toHaveLength(1);
+    const pending = JSON.parse(sessionStorage.getItem("researcher-dashboard:pending-launch")!);
+    expect(new URL(out.navigated[0]).searchParams.get("state")).toBe(pending.state);
+  });
+
+  it("reports an authorization that cannot start", async () => {
+    const refusing = { setItem() { throw new DOMException("denied", "SecurityError"); } } as unknown as Storage;
+    const onFailure = vi.fn();
+    reauthorizer(deps("", { storage: refusing }), PORTAL, LAUNCH, onFailure)();
+    await vi.waitFor(() => expect(onFailure).toHaveBeenCalledTimes(1));
   });
 });

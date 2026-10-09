@@ -2,7 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { devPortal } from "./shell/portals";
-import { reauthorize, start, type StartDeps } from "./shell/start";
+import { reauthorizer, start, type Start, type StartDeps } from "./shell/start";
 import "./styles.css";
 
 const deps: StartDeps = {
@@ -17,13 +17,16 @@ const deps: StartDeps = {
 };
 
 const root = createRoot(document.getElementById("root")!);
-start(deps).then((started) => {
-  const again = () => {
-    if (started.kind === "ready") void reauthorize(deps, started.portal, started.launch);
-  };
+function render(started: Start, reauthorize: () => void = () => {}) {
   root.render(
     <StrictMode>
-      <App start={started} reauthorize={again} />
+      <App start={started} reauthorize={reauthorize} />
     </StrictMode>
   );
+}
+
+start(deps).then((started) => {
+  if (started.kind !== "ready") return render(started);
+  render(started, reauthorizer(deps, started.portal, started.launch,
+    () => render({ kind: "info", reason: "sign-in-failed" })));
 });

@@ -131,7 +131,7 @@ export function ClassDashboard({ services, onExpired }: {
           )}
           {listProblem && <p className="error">{listProblem}</p>}
         </div>
-        {profile && rows && !listProblem && <PackageList rows={rows} scope={scope} />}
+        {profile && rows && !listProblem && !profileProblem && <PackageList rows={rows} scope={scope} />}
       </section>
     </main>
   );

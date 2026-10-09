@@ -30,6 +30,20 @@ export async function reauthorize(deps: StartDeps, portal: PortalConfig, launch:
   await startAuthorization(portal.origin, launch, redirectUriFor(deps.location), deps.storage, deps.navigate);
 }
 
+// The page's way back to the portal. Only the first call starts an authorization: two calls
+// refused at once would each store a pending launch, and the browser could leave with the state
+// the second one overwrote. A failure to start goes to `onFailure` rather than nowhere.
+export function reauthorizer(
+  deps: StartDeps, portal: PortalConfig, launch: Launch, onFailure: () => void
+): () => void {
+  let started = false;
+  return () => {
+    if (started) return;
+    started = true;
+    reauthorize(deps, portal, launch).catch(onFailure);
+  };
+}
+
 // Whatever the launch throws (storage that refuses a write, no WebCrypto) is the sign-in page,
 // never a blank one.
 export function start(deps: StartDeps): Promise<Start> {

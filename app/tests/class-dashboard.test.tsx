@@ -230,4 +230,14 @@ describe("ClassDashboard", () => {
     await s.snapshot(CURRENT);
     await vi.waitFor(() => expect(onExpired).toHaveBeenCalledTimes(1));
   });
+
+  it("takes the list away when the listener fails after it rendered", async () => {
+    const s = services();
+    await mounted(s);
+    await s.snapshot(CURRENT);
+    await screen.findByText("Wildfire open responses");
+    await s.refuse();
+    expect(screen.getByText("This class's profile could not be read.")).toBeDefined();
+    expect(screen.queryByText("Wildfire open responses")).toBeNull();
+  });
 });
