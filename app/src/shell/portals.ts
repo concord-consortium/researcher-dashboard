@@ -17,6 +17,11 @@ const DEPLOYED: PortalConfig[] = [
   }
 ];
 
+// How old an authored URL profile may be before the page asks for it to be derived again. A
+// changed assignment set is caught by the fingerprint at once; this bound is for activity
+// content re-authored in place.
+export const PROFILE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
 // A dev server may add one local portal, so the app can run against a local rigse and
 // report-server. A production build never reads these.
 export function devPortal(env: Record<string, string | boolean | undefined>): PortalConfig | null {

@@ -29,7 +29,7 @@ describe("App", () => {
   it("renders the class once signed in", async () => {
     const token = { accessToken: "at", issuedAt: 0, expiresAt: 1 };
     const portal = { origin: "https://p.test", reportServer: "https://r.test", firebaseProject: "f" };
-    const services = { portal: { scope: async () => SCOPE } as unknown as Portal };
+    const services = { portal: { scope: async () => SCOPE } as unknown as Portal, watchProfile: async () => () => {}, now: () => 0 };
     render(<App start={{ kind: "ready", portal, launch: { authDomain: "https://p.test", classId: "1", loginHint: null }, token }} reauthorize={none} services={services} />);
     expect(await screen.findByRole("heading", { level: 1, name: SCOPE.name })).toBeDefined();
   });

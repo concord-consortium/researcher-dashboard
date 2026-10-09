@@ -338,7 +338,7 @@ async request<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 ```
 
-`ClassDashboard` in this step holds the scope effect and `refused(error, show)`, the one place a refusal is turned into page state; with the portal its only caller here, every non-`ApiError` shows "The portal could not be reached.", and the profile step adds the third argument. In its final form, `refused(error, show, from)`, `from` is `"portal"`, `"report-server"` or `"firebase"` (the Firebase token, the sign-in and the listener): `SessionExpired` that is young sets the `expired` info reason, otherwise calls `onExpired`; an `ApiError` 403 from the portal sets `withdrawn` (R8: the researcher check failed), while one from anywhere else shows its message like any other refusal (R21); another `ApiError` shows its message; anything else shows the line `from` names, "The portal could not be reached.", "The package catalog could not be reached." or "This class's profile could not be read.", one map whose last entry the listener's `onError` also shows. A 404 from the scope endpoint sets `class-gone`, and a `kind` other than `class` sets `unsupported-scope`. The line shown while the scope loads, and a failure in its place, is a `role="status"` paragraph inside the loading `<main>` (R26).
+`ClassDashboard` in this step holds the scope effect and `refused(error, show)`, the one place a refusal is turned into page state; with the portal its only caller here, every non-`ApiError` shows "The portal could not be reached.". The profile step adds the third argument with `"portal"` and `"firebase"`, and the package list step adds `"report-server"`. In its final form, `refused(error, show, from)`, `from` is `"portal"`, `"report-server"` or `"firebase"` (the Firebase token, the sign-in and the listener): `SessionExpired` that is young sets the `expired` info reason, otherwise calls `onExpired`; an `ApiError` 403 from the portal sets `withdrawn` (R8: the researcher check failed), while one from anywhere else shows its message like any other refusal (R21); another `ApiError` shows its message; anything else shows the line `from` names, "The portal could not be reached.", "The package catalog could not be reached." or "This class's profile could not be read.", one map whose last entry the listener's `onError` also shows. A 404 from the scope endpoint sets `class-gone`, and a `kind` other than `class` sets `unsupported-scope`. The line shown while the scope loads, and a failure in its place, is a `role="status"` paragraph inside the loading `<main>` (R26).
 
 Tests, each named for what it catches: `start.test.ts` launches with `classId=223` and checks the authorize URL's origin, `redirect_uri` and `context`; redeems a callback and checks `replaceUrl`'s argument; checks `sessionStorage.length` and `localStorage.length` are 0 after a full launch (catches storing the token); refuses a forged state without calling `fetch`; maps `access_denied`; reports `invalid_grant`; renders `sign-in-failed` when the storage throws on write (catches deleting `start`'s `catch`). `oauth.test.ts` asserts RFC 7636 appendix B's challenge, the verifier against rigse's `PKCE_VALUE`, every authorize parameter, `login_hint` omitted when absent, `redirectUriFor` for a file and a directory path, `takePending` used once and cleared on a forged state, and the form body of the exchange. `launch.test.ts` covers R1 and R2, including the spike's link, a lookalike host, `http:`, a port and the dev portal only when `DEV` is true. `portal.test.ts` covers the bearer, a token inside the margin never sent, young and old 401s, and the server's message kept. `class-dashboard.test.tsx` renders the scope's name, teachers and assignments, the withdrawn and expired pages, and a `TypeError` from the scope call as "The portal could not be reached." in a status region (catches the fallback naming the catalog, which the throwaway build did). The throwaway build's "shows the class the token's scope names" case passes a scope whose `id` differs from any launch, which the page never sees, so it is kept as a rendering test only and not claimed for R4.
 
@@ -351,10 +351,10 @@ Tests, each named for what it catches: `start.test.ts` launches with `classId=22
 **Files affected**:
 - `app/src/shell/firebase.ts`: `signIn` creates the app's auth with `initializeAuth(app, { persistence: inMemoryPersistence })` before any `getAuth`, and passes that instance to `connectAuthEmulator`. `watchDoc` takes an `onError` callback beside its logging, so a refused listener reaches the page instead of only the console.
 - `app/src/shell/portal.ts`: `Portal.firebaseToken` (the existing call, on `Api`) and `Portal.refreshProfile()` (`POST`, no body).
-- `app/src/shell/packages.ts`: new, with `Profile` and `needsRefresh` in this step.
+- `app/src/shell/packages.ts`: new, with `needsRefresh` and the `Profile` fields it reads (`assignment_fingerprint`, `derived_at`) in this step; the package list step adds the URL arrays and `truncated`.
 - `app/src/shell/portals.ts`: `PROFILE_MAX_AGE_MS`.
 - `app/src/shell/services.ts`: `watchProfile(scope, onValue)`.
-- `app/src/pages/ClassDashboard.tsx`: the profile and refresh effects, and the status region's "Reading this class's activities…", refresh-refused and profile-unreadable lines.
+- `app/src/pages/ClassDashboard.tsx`: `refused`'s `from` and its `UNREACHABLE` map, the profile and refresh effects, and a "Packages" section whose status region holds "Reading this class's activities…", the refresh-refused line and the profile-unreadable line (`profileProblem`, set by the listener's `onError` and by a failed Firebase token or sign-in).
 - Tests: `firebase-sign-in.test.ts` (new), `packages.test.ts` (`needsRefresh`), `portal.test.ts` (`firebaseToken`, `refreshProfile`), `class-dashboard.test.tsx` (refresh cases).
 
 **Estimated diff size**: ~+250 including tests
@@ -400,7 +400,7 @@ async watchProfile(scope, onValue) {
 }
 ```
 
-`watchProfile` takes `(scope, onValue, onError)`; the page passes an `onError` that sets `profileProblem` to "This class's profile could not be read.", shown in the status region in place of "Reading this class's activities…", and the list stays hidden. The throwaway build's `watchDoc` only logged, so this is the one behavior here the patch does not have.
+`watchProfile` takes `(scope, onValue, onError)`; the page passes an `onError` that sets `profileProblem` to "This class's profile could not be read.", shown in the status region in place of "Reading this class's activities…", and the list stays hidden. A refused listener never sends a snapshot, so it never triggers a refresh. The throwaway build's `watchDoc` only logged, so this is one behavior here the patch does not have.
 
 ```tsx
 // ClassDashboard.tsx
@@ -411,9 +411,9 @@ useEffect(() => {
   if (!scope) return;
   let stop: (() => void) | null = null;
   let canceled = false;
-  services.watchProfile(scope, setProfile)
+  services.watchProfile(scope, setProfile, () => setProfileProblem(UNREACHABLE.firebase))
     .then((unsubscribe) => { if (canceled) unsubscribe(); else stop = unsubscribe; })
-    .catch((error) => { if (!canceled) refused(error, setFailure, "firebase"); });
+    .catch((error) => { if (!canceled) refused(error, setProfileProblem, "firebase"); });
   return () => { canceled = true; stop?.(); };
 }, [scope, services]);
 
@@ -427,7 +427,7 @@ useEffect(() => {
 
 The `refreshed` ref is set on the first snapshot whatever it decides, so a later snapshot can never trigger a refresh. A Firestore `Timestamp` has `toMillis()`, which is all `Profile` asks of `derived_at`.
 
-Tests: the sign-in test mocks `firebase/auth` and asserts `initializeAuth` received `{ persistence: inMemoryPersistence }` (catches reverting to `getAuth`'s default). `needsRefresh` for missing, changed, undated, old and current. In the page: a missing profile refreshes once; two stale snapshots, each a new object with an older fingerprint as `snapshot.data()` gives, refresh once (catches deleting the ref; a second `null` snapshot cannot, since React skips a state update to the same value and the effect does not run again, checked against the throwaway build); a changed fingerprint refreshes once; a failed sign-in shows "This class's profile could not be read."; a current profile on two snapshots never refreshes; a 422 with no profile shows rigse's message; a listener whose `onError` fires shows the unreadable line and no reading line (catches dropping the callback).
+Tests: the sign-in test mocks `firebase/auth` and asserts `initializeAuth` received `{ persistence: inMemoryPersistence }` (catches reverting to `getAuth`'s default). `needsRefresh` for missing, changed, undated, old and current. In the page: a missing profile refreshes once; two stale snapshots, each a new object with an older fingerprint as `snapshot.data()` gives, refresh once (catches deleting the ref; a second `null` snapshot cannot, since React skips a state update to the same value and the effect does not run again, checked against the throwaway build); an old `derived_at` refreshes once; a failed sign-in shows "This class's profile could not be read.", and a Firebase-token 403 shows its message rather than the withdrawn page (catches routing every 403 to `withdrawn`); a current profile on two snapshots never refreshes; a 422 with no profile shows rigse's message; a listener whose `onError` fires shows the unreadable line and no refresh (catches dropping the callback in the page); `firebase-sign-in.test.ts` also checks `watchDoc` hands a listener's error to `onError` (catches dropping it in `watchDoc`).
 
 ---
 

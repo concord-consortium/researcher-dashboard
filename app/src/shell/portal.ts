@@ -77,6 +77,10 @@ export class Portal {
     return this.api.request<Scope>("/api/v1/researcher_dashboard/scope");
   }
 
+  refreshProfile(): Promise<unknown> {
+    return this.api.request("/api/v1/researcher_dashboard/refresh_profile", { method: "POST" });
+  }
+
   // `researcher=true` is what makes the portal apply the class check and stamp the claims
   // the dashboard tree's rules key on.
   async firebaseToken(firebaseApp: string, classHash: string): Promise<string> {

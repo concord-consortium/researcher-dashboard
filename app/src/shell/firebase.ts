@@ -1,5 +1,5 @@
 import { initializeApp, type FirebaseApp } from "firebase/app";
-import { connectAuthEmulator, getAuth, signInWithCustomToken } from "firebase/auth";
+import { connectAuthEmulator, getAuth, inMemoryPersistence, initializeAuth, signInWithCustomToken } from "firebase/auth";
 import { connectFirestoreEmulator, doc, getFirestore, onSnapshot, type Firestore } from "firebase/firestore";
 
 // The Firebase project this app reads, and the sign-in that gets it in: report-service's,
@@ -60,10 +60,14 @@ export async function signIn(
     );
     apps.set(projectId, app);
 
+    // Not Firebase's default IndexedDB, which every tab and every app on this origin shares:
+    // a second tab on another class would replace this one's sign-in, and the session would
+    // outlive the page.
+    const auth = initializeAuth(app, { persistence: inMemoryPersistence });
     if (emulators) {
       const [host, port] = emulators.firestore.split(":");
       connectFirestoreEmulator(getFirestore(app), host, Number(port));
-      connectAuthEmulator(getAuth(app), `http://${emulators.auth}`, { disableWarnings: true });
+      connectAuthEmulator(auth, `http://${emulators.auth}`, { disableWarnings: true });
     }
   }
   await signInWithCustomToken(getAuth(app), customToken);
@@ -82,13 +86,14 @@ export function classPath(portalOrigin: string, classHash: string): string {
 }
 
 export function watchDoc<T>(
-  db: Firestore, path: string, onValue: (value: T | null) => void
+  db: Firestore, path: string, onValue: (value: T | null) => void, onError: (error: Error) => void
 ): () => void {
   return onSnapshot(
     doc(db, path),
     (snapshot) => onValue(snapshot.exists() ? (snapshot.data() as T) : null),
-    // A listener that dies silently leaves the page frozen on its last value with no sign
-    // that it stopped, which reads as "nothing is happening" rather than as an error.
-    (error) => console.error(`listener on ${path} failed`, error)
+    (error) => {
+      console.error(`listener on ${path} failed`, error);
+      onError(error);
+    }
   );
 }

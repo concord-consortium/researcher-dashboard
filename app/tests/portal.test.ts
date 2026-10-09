@@ -54,6 +54,14 @@ describe("Portal", () => {
     expect(url.pathname).toBe("/api/v1/jwt/firebase");
     expect(Object.fromEntries(url.searchParams)).toEqual({ firebase_app: "report-service-dev", class_hash: "hash1", researcher: "true" });
   });
+
+  it("refreshes the profile with no body", async () => {
+    const { api, fetchImpl } = apiWith(respond({ queued: true }, 202));
+    await new Portal(api).refreshProfile();
+    expect(call(fetchImpl)[0]).toBe("https://portal.test/api/v1/researcher_dashboard/refresh_profile");
+    expect(call(fetchImpl)[1]).toMatchObject({ method: "POST" });
+    expect(call(fetchImpl)[1].body).toBeUndefined();
+  });
 });
 
 // Every other test injects a stub. Calling a bare `fetch` reference as a method of the Api is

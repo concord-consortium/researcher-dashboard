@@ -1,8 +1,18 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { needsRefresh, type Profile } from "../shell/packages";
 import { ApiError, SessionExpired, type Scope } from "../shell/portal";
+import { PROFILE_MAX_AGE_MS } from "../shell/portals";
 import type { DashboardServices } from "../shell/services";
 import type { InfoReason } from "../shell/start";
 import { Info } from "./Info";
+
+type Source = "portal" | "firebase";
+
+// What to say when a source fails without answering.
+const UNREACHABLE: Record<Source, string> = {
+  portal: "The portal could not be reached.",
+  firebase: "This class's profile could not be read."
+};
 
 // The dashboard for the class the token is bound to, never the one the launch link asked for.
 export function ClassDashboard({ services, onExpired }: {
@@ -12,13 +22,19 @@ export function ClassDashboard({ services, onExpired }: {
   const [scope, setScope] = useState<Scope | null>(null);
   const [info, setInfo] = useState<InfoReason | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
+  // undefined until the first snapshot; null while the document does not exist.
+  const [profile, setProfile] = useState<Profile | null | undefined>(undefined);
+  const [profileProblem, setProfileProblem] = useState<string | null>(null);
+  const [refreshProblem, setRefreshProblem] = useState<string | null>(null);
+  const refreshed = useRef(false);
 
-  // The one place a refusal becomes page state.
-  function refused(error: unknown, show: (message: string) => void) {
+  // The one place a refusal becomes page state. Only the portal's 403 means the researcher
+  // check failed.
+  function refused(error: unknown, show: (message: string) => void, from: Source) {
     if (error instanceof SessionExpired) return error.young ? setInfo("expired") : onExpired();
-    if (error instanceof ApiError && error.status === 403) return setInfo("withdrawn");
+    if (error instanceof ApiError && error.status === 403 && from === "portal") return setInfo("withdrawn");
     if (error instanceof ApiError) return show(error.message);
-    show("The portal could not be reached.");
+    show(UNREACHABLE[from]);
   }
 
   useEffect(() => {
@@ -32,10 +48,28 @@ export function ClassDashboard({ services, onExpired }: {
       .catch((error) => {
         if (canceled) return;
         if (error instanceof ApiError && error.status === 404) setInfo("class-gone");
-        else refused(error, setFailure);
+        else refused(error, setFailure, "portal");
       });
     return () => { canceled = true; };
   }, [services]);
+
+  useEffect(() => {
+    if (!scope) return;
+    let stop: (() => void) | null = null;
+    let canceled = false;
+    services.watchProfile(scope, setProfile, () => setProfileProblem(UNREACHABLE.firebase))
+      .then((unsubscribe) => { if (canceled) unsubscribe(); else stop = unsubscribe; })
+      .catch((error) => { if (!canceled) refused(error, setProfileProblem, "firebase"); });
+    return () => { canceled = true; stop?.(); };
+  }, [scope, services]);
+
+  // Decided on the first snapshot only, so a derivation that keeps failing cannot loop.
+  useEffect(() => {
+    if (!scope || profile === undefined || refreshed.current) return;
+    refreshed.current = true;
+    if (!needsRefresh(profile, scope, services.now(), PROFILE_MAX_AGE_MS)) return;
+    services.portal.refreshProfile().catch((error) => refused(error, setRefreshProblem, "portal"));
+  }, [scope, profile, services]);
 
   if (info) return <Info reason={info} />;
   if (!scope) {
@@ -66,6 +100,15 @@ export function ClassDashboard({ services, onExpired }: {
             </li>
           ))}
         </ul>
+      </section>
+
+      <section aria-labelledby="packages-heading">
+        <h2 id="packages-heading">Packages</h2>
+        <div className="status" aria-live="polite">
+          {profileProblem && <p className="error">{profileProblem}</p>}
+          {!profileProblem && profile === null && !refreshProblem && <p>Reading this class's activities…</p>}
+          {refreshProblem && <p className="error">{refreshProblem}</p>}
+        </div>
       </section>
     </main>
   );
