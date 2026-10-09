@@ -441,7 +441,7 @@ Tests: the sign-in test mocks `firebase/auth` and asserts `initializeAuth` recei
 - `app/src/shell/services.ts`: `reportServer`.
 - `app/src/components/PackageList.tsx`: new.
 - `app/src/pages/ClassDashboard.tsx`: the list effect, the truncated and list-failure lines, `PackageList`.
-- `app/src/styles.css`: `.package-rows`, `.description`, `.identity`, `.community`, `.disclosure`.
+- `app/src/styles.css`: `.package-rows`, `.version`, `.description`, `.identity`, `.community`, `.disclosure`.
 - Tests: `packages.test.ts` (grouping, order, `scopeUrls`), `portal.test.ts` (the list request), `class-dashboard.test.tsx` (list cases).
 
 **Estimated diff size**: ~+300 including tests

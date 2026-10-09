@@ -1,13 +1,14 @@
 import { classPath, emulatorsFromEnv, signIn, watchDoc } from "./firebase";
 import type { Token } from "./oauth";
 import type { Profile } from "./packages";
-import { Api, Portal, type Scope } from "./portal";
+import { Api, Portal, ReportServer, type Scope } from "./portal";
 import type { PortalConfig } from "./portals";
 
 // Everything the dashboard page calls out to, gathered so a test can hand it fakes. The page
 // gets these and never the launch, so nothing after the redirect can read `classId`.
 export interface DashboardServices {
   portal: Portal;
+  reportServer: ReportServer;
   // Signs in to the portal's report-service project for the scope's class and listens to the
   // class's profile document, the one Firestore read the page makes.
   watchProfile: (
@@ -20,6 +21,7 @@ export function makeServices(config: PortalConfig, token: Token): DashboardServi
   const portal = new Portal(new Api(config.origin, token));
   return {
     portal,
+    reportServer: new ReportServer(new Api(config.reportServer, token)),
     async watchProfile(scope, onValue, onError) {
       const customToken = await portal.firebaseToken(config.firebaseProject, scope.class_hash);
       const db = await signIn(config.firebaseProject, customToken,

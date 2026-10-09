@@ -1,16 +1,18 @@
 import { useEffect, useRef, useState } from "react";
-import { needsRefresh, type Profile } from "../shell/packages";
-import { ApiError, SessionExpired, type Scope } from "../shell/portal";
+import { PackageList } from "../components/PackageList";
+import { needsRefresh, scopeUrls, type Profile } from "../shell/packages";
+import { ApiError, SessionExpired, type PackageRow, type Scope } from "../shell/portal";
 import { PROFILE_MAX_AGE_MS } from "../shell/portals";
 import type { DashboardServices } from "../shell/services";
 import type { InfoReason } from "../shell/start";
 import { Info } from "./Info";
 
-type Source = "portal" | "firebase";
+type Source = "portal" | "report-server" | "firebase";
 
 // What to say when a source fails without answering.
 const UNREACHABLE: Record<Source, string> = {
   portal: "The portal could not be reached.",
+  "report-server": "The package catalog could not be reached.",
   firebase: "This class's profile could not be read."
 };
 
@@ -26,6 +28,8 @@ export function ClassDashboard({ services, onExpired }: {
   const [profile, setProfile] = useState<Profile | null | undefined>(undefined);
   const [profileProblem, setProfileProblem] = useState<string | null>(null);
   const [refreshProblem, setRefreshProblem] = useState<string | null>(null);
+  const [rows, setRows] = useState<PackageRow[] | null>(null);
+  const [listProblem, setListProblem] = useState<string | null>(null);
   const refreshed = useRef(false);
 
   // The one place a refusal becomes page state. Only the portal's 403 means the researcher
@@ -71,6 +75,18 @@ export function ClassDashboard({ services, onExpired }: {
     services.portal.refreshProfile().catch((error) => refused(error, setRefreshProblem, "portal"));
   }, [scope, profile, services]);
 
+  // Keyed on the URLs rather than the profile, so a snapshot changing only derived_at does not
+  // list again; the cleanup discards an answer that arrives after a newer call.
+  const urlsKey = profile ? JSON.stringify(scopeUrls(profile)) : null;
+  useEffect(() => {
+    if (!urlsKey) return;
+    let current = true;
+    services.reportServer.listPackages(JSON.parse(urlsKey) as string[])
+      .then((listed) => { if (current) { setRows(listed); setListProblem(null); } })
+      .catch((error) => { if (current) refused(error, setListProblem, "report-server"); });
+    return () => { current = false; };
+  }, [urlsKey, services]);
+
   if (info) return <Info reason={info} />;
   if (!scope) {
     return (
@@ -108,7 +124,14 @@ export function ClassDashboard({ services, onExpired }: {
           {profileProblem && <p className="error">{profileProblem}</p>}
           {!profileProblem && profile === null && !refreshProblem && <p>Reading this class's activities…</p>}
           {refreshProblem && <p className="error">{refreshProblem}</p>}
+          {profile?.truncated && (
+            <p className="notice">
+              This class's content was too large to read completely, so a package may be missing from this list.
+            </p>
+          )}
+          {listProblem && <p className="error">{listProblem}</p>}
         </div>
+        {profile && rows && !listProblem && <PackageList rows={rows} scope={scope} />}
       </section>
     </main>
   );

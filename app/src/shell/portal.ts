@@ -24,6 +24,19 @@ export interface Scope {
   assignments: Assignment[];
 }
 
+// A package as report-server lists it, with the fields this page reads.
+export interface PackageRow {
+  catalog_id: number;
+  identity: string;
+  name: string;
+  visibility: "private" | "project" | "public";
+  official: boolean;
+  mine: boolean;
+  project: { id: number; name: string | null } | null;
+  current_version: { version: string; title: string | null; description: string | null };
+  applies: boolean;
+}
+
 export class ApiError extends Error {
   constructor(message: string, readonly status: number) {
     super(message);
@@ -87,5 +100,18 @@ export class Portal {
     const query = new URLSearchParams({ firebase_app: firebaseApp, class_hash: classHash, researcher: "true" });
     const body = await this.api.request<{ token: string }>(`/api/v1/jwt/firebase?${query}`);
     return body.token;
+  }
+}
+
+export class ReportServer {
+  constructor(private readonly api: Api) {}
+
+  async listPackages(scopeUrls: string[]): Promise<PackageRow[]> {
+    const body = await this.api.request<{ packages: PackageRow[] }>("/api/v1/packages/list", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scope_urls: scopeUrls })
+    });
+    return body.packages;
   }
 }

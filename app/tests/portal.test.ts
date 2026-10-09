@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { Api, ApiError, Portal, SessionExpired } from "../src/shell/portal";
+import { Api, ApiError, Portal, ReportServer, SessionExpired } from "../src/shell/portal";
 
 const TOKEN = { accessToken: "at-1", issuedAt: 0, expiresAt: 8 * 3600 * 1000 };
 
@@ -7,9 +7,9 @@ function respond(body: unknown, status = 200) {
   return { ok: status >= 200 && status < 300, status, json: async () => body } as unknown as Response;
 }
 
-function apiWith(response: Response, now = 10 * 60 * 1000) {
+function apiWith(response: Response, now = 10 * 60 * 1000, origin = "https://portal.test") {
   const fetchImpl = vi.fn(async () => response);
-  return { api: new Api("https://portal.test", TOKEN, fetchImpl as unknown as typeof fetch, () => now), fetchImpl };
+  return { api: new Api(origin, TOKEN, fetchImpl as unknown as typeof fetch, () => now), fetchImpl };
 }
 
 function call(fetchImpl: ReturnType<typeof vi.fn>) {
@@ -61,6 +61,17 @@ describe("Portal", () => {
     expect(call(fetchImpl)[0]).toBe("https://portal.test/api/v1/researcher_dashboard/refresh_profile");
     expect(call(fetchImpl)[1]).toMatchObject({ method: "POST" });
     expect(call(fetchImpl)[1].body).toBeUndefined();
+  });
+});
+
+describe("ReportServer", () => {
+  it("lists with the scope's URLs as a JSON body", async () => {
+    const { api, fetchImpl } = apiWith(respond({ packages: [] }), undefined, "https://rs.test");
+    expect(await new ReportServer(api).listPackages(["a", "b"])).toEqual([]);
+    expect(call(fetchImpl)[0]).toBe("https://rs.test/api/v1/packages/list");
+    expect(call(fetchImpl)[1]).toMatchObject({ method: "POST" });
+    expect(JSON.parse(call(fetchImpl)[1].body as string)).toEqual({ scope_urls: ["a", "b"] });
+    expect((call(fetchImpl)[1].headers as Record<string, string>)["Content-Type"]).toBe("application/json");
   });
 });
 
