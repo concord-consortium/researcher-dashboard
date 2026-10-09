@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Keeps fixtures/package-contract.json a byte-identical copy of report-service's, which is
-// the one source of the catalog's grammar and limits (REPORT-167). The runner's tests read
+// the one source of the catalog's grammar and limits. The runner's tests read
 // the copy, so they stay offline; this is what keeps the copy honest.
 //
 //   sync   [--ref <ref>]   fetch report-service's file and write the copy

@@ -183,7 +183,7 @@ test("a manifest without a positive integer duration is refused", () => {
   }
 });
 
-// A misspelt `any` would make a package apply everywhere (REPORT-142, "As built").
+// A misspelled `any` would make a package apply everywhere.
 test("a manifest's urls must be all, any and none lists", () => {
   assert.throws(() => readManifest(writeManifest("u1", { ...MANIFEST, urls: { anyy: ["*"] } })), /unknown key, anyy/);
   assert.throws(() => readManifest(writeManifest("u2", { ...MANIFEST, urls: { any: "*" } })), /not a list of patterns/);

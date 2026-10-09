@@ -1,6 +1,5 @@
 #!/usr/bin/env node
-// The runner's smoke gate (final-design.md section 16; runner/README.md says when to run
-// each command). Node's own fetch and child_process, and nothing else, so it runs from a
+// The runner's smoke gate (runner/README.md says when to run each command). Node's own fetch and child_process, and nothing else, so it runs from a
 // fresh checkout with `node smoke/smoke.mjs <command>` in runner/.
 //
 //   build  [--any <pattern>]...   the smoke package's zip, reproducibly, and its checksum

@@ -60,7 +60,7 @@ test("installCredential installs the report-service token and nothing else", asy
   assert.deepEqual(seen, [{ token: "report-token", portal: "learn_concord_org" }]);
 });
 
-test("the CLUE source is the runner's pre-pull until RD-5", () => {
+test("the CLUE source is the runner's pre-pull", () => {
   assert.equal(CLUE_SOURCE, "firebase");
 });
 
@@ -232,7 +232,7 @@ test("on production the CLUE token is looked up by its portal row", () => {
 });
 
 // rigse minted it at the request; work queued behind an hour of other packages finds it
-// expired (REPORT-143 Q1).
+// expired.
 test("an expired CLUE token fails the pre-pull with a reason saying to run again", async () => {
   const expired = token(rsClaims, nowS() - 600);
   assert.throws(() => clueToken({ classTokens: { "collaborative-learning-staging": expired }, firebaseProject: "report-service-dev" }), (err) => err instanceof ClueTokenExpired && /70 minutes ago, and has expired.*Run the package again/.test(err.message));

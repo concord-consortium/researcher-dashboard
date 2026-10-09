@@ -92,7 +92,7 @@ export class FirestoreStore {
   }
 
   // The server's time, which the rules require on every runner write to runners/ and to
-  // a result (REPORT-143 R22a): no clock inside the VM is real after a suspend.
+  // a result: no clock inside the VM is real after a suspend.
   serverTimestamp() {
     return serverTimestamp();
   }

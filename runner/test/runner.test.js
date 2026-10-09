@@ -53,7 +53,7 @@ const scopeBlock = (classHash, classId = 111) => ({
 });
 
 // Stands in for report-service's researcherDashboard function: /work hands out the
-// entries whose result says queued (or has none), as REPORT-143 R5 defines it, and mints
+// entries whose result says queued (or has none), and mints
 // a session token each time; /idle answers work_queued while anything is queued and
 // suspends otherwise, unless a test queues its own answer.
 function fakeFunction(docs) {
@@ -75,7 +75,7 @@ function fakeFunction(docs) {
         firebase_project: PROJECT
       };
     }
-    // As REPORT-143's /idle: never suspends while anything is still queued.
+    // Never suspends while anything is still queued.
     if (route === "idle") {
       if (state.idle.length) return state.idle.shift();
       const queued = state.entries.some((e) => !["running", "done", "failed"].includes(statusOf(e)));
@@ -401,7 +401,7 @@ test("report-server unavailable for three attempts fails the package so the VM c
     await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
     await built.runner.loop;
   });
-  // Each failed check is logged under R50's stable name, saying which call failed.
+  // Each failed check is logged under its stable name, saying which call failed.
   const refused = lines.filter((l) => l.event === "report_server.refused");
   assert.equal(refused.length, 3);
   for (const line of refused) {
@@ -534,7 +534,6 @@ test("every /work answer signs in new stores, per class, and the last request's 
   assert.ok(classStores.length >= 3, "a class store per class per request, never one kept for the VM");
   const open = built.record.stores.filter((s) => !s.closed);
   assert.ok(open.length <= 3, `only the current request's stores stay open, found ${open.length}`);
-  for (const store of classStores.filter((s) => s.closed)) assert.ok(store.writes.length >= 0);
 });
 
 test("a /work answer whose session token names another researcher is not adopted", async () => {
@@ -625,7 +624,7 @@ test("a drained VM asks for work through its idle period, flushes, then asks to 
   assert.deepEqual(built.fn.state.calls.at(-1).body, { microvm_id: "mvm-1" });
 });
 
-// REPORT-141's recordLaunch writes starting after RunMicrovm returns, unordered against
+// The function's launch record writes starting after RunMicrovm returns, unordered against
 // /run. /work refuses the VM until that record exists, and the first answer it takes
 // writes ready again.
 test("a launch record that lands after /run's ready is corrected by the first /work", async () => {
@@ -693,7 +692,7 @@ function stopAfter(built, polls) {
   built.runner.sleep = async (ms) => { n += 1; if (n === polls) built.runner.terminate().catch(() => {}); await sleep(ms); };
 }
 
-// REPORT-143 re-appends a finished package with a fresh queued result when it is run again.
+// The function re-appends a finished package with a fresh queued result when it is run again.
 const requeue = (built, identity) =>
   built.docs.set(resultPath(PORTAL, CLASS, USER, packageDocId(identity)), { status: "queued", platform_id: PLATFORM_ID });
 
@@ -948,7 +947,7 @@ test("a refused revocation does not fail the terminate hook", async () => {
   assert.equal(runner.state, "terminated");
 });
 
-// Losing the VM is strictly worse than a status document that lags (final-design 7.1(a)).
+// Losing the VM is strictly worse than a status document that lags.
 test("a status write that fails does not fail the hook, and the next write reports it redacted", async () => {
   const docs = new Map();
   let fail = false;
@@ -1055,7 +1054,7 @@ test("DIR mode fetches packages from <SYNC_DIR>/packages/<identity>", async () =
   assert.equal(readFileSync(dest, "utf8"), "archive-bytes");
 });
 
-// ---- the logs (R49, R50) -------------------------------------------------------
+// ---- the logs --------------------------------------------------------------------
 
 async function captured(fn) {
   const lines = [];
@@ -1092,8 +1091,8 @@ test("every line of a run names the researcher, the VM, the scope and the packag
   assert.equal(after[0].researcher, USER);
 });
 
-// The names a log-based metric would count, one per fact final-design.md section 16 names.
-test("each failure section 16 names is logged under its stable event name", async () => {
+// The names a log-based metric would count, one per failure the runner reports.
+test("each failure the runner reports is logged under its stable event name", async () => {
   // The stores share the document tree the fake function reads, set once it exists.
   let docs;
   let failWrites = false;

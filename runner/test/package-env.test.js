@@ -86,7 +86,7 @@ test("HOME and the output directory start empty on every run, the corpus does no
   assert.ok(fs.existsSync(path.join(second.paths.dataDir, "corpus")), "the pulled corpus survives");
 });
 
-// final-design.md section 10's scope.json, from the scope block /work returned.
+// scope.json, from the scope block /work returned.
 test("scope.json carries the seven fields, and names the package's dataset and output", async () => {
   const { paths, env } = await prepare();
   const file = path.join(paths.inputDir, "scope.json");
@@ -152,8 +152,7 @@ test("summary.txt is optional, display.md is not", async () => {
   assert.equal(readPackageResult(paths.outputDir).summary, null);
 });
 
-// The cap lives in final-design.md section 10. An oversized display is refused with its
-// size and the limit, never truncated.
+// An oversized display is refused with its size and the limit, never truncated.
 test("a display.md over 64 KiB is refused with its size and the limit", async () => {
   const { paths } = await prepare();
   fs.writeFileSync(path.join(paths.outputDir, "display.md"), "x".repeat(DISPLAY_LIMIT_BYTES));

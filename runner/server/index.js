@@ -40,7 +40,7 @@ async function readJson(req) {
 }
 
 // Only Lambda's hooks and a status page for a human. Nothing calls into the VM for work:
-// it asks report-service for its own (final-design.md section 10).
+// it asks report-service for its own.
 export function createServer({ runner, env }) {
   const routes = {
     // The image build hook. It answers before /run has happened, because at build

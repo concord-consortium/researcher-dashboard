@@ -82,13 +82,13 @@ export function firebaseConfig(projectId) {
 }
 
 // The portal `firebase_apps` row whose tokens this project accepts. rigse keys
-// class_tokens by it (RIGSE-368), so it is what the runner looks a token up by.
+// class_tokens by it, so it is what the runner looks a token up by.
 export function portalFirebaseApp(projectId) {
   return entry(projectId).portalFirebaseApp;
 }
 
 // Which project holds CLUE for the environment a report-service project serves. Runner
-// configuration per environment, not a caller parameter (final-design.md section 13):
+// configuration per environment, not a caller parameter:
 // the payload's firebase_project says which environment this VM is in.
 export function clueProjectFor(reportServiceProject) {
   const clue = entry(reportServiceProject).clueProject;

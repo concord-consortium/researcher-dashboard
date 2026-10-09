@@ -7,7 +7,7 @@ import { clueProjectFor, portalFirebaseApp } from "./firebase-projects.js";
 import { preparePackage, readPackageCounts, readPackageResult } from "./package-env.js";
 import { fetchPackage } from "./package-fetch.js";
 import { killPackageProcesses, runSandboxed } from "./sandbox.js";
-import { customTokenClaims } from "./status.js";
+import { customTokenClaims, customTokenPayload } from "./status.js";
 import { log } from "./log.js";
 
 // The things a package run does, kept behind one interface so the lifecycle, the pull
@@ -45,8 +45,7 @@ export function ccDataLogin({ token, portal, home, uid, spawnFn = spawn }) {
   });
 }
 
-// Who fetched the CLUE corpus, which a package branches on (final-design.md section 13):
-// the runner's pre-pull until RD-5 flips it to cc-data.
+// Who fetched the CLUE corpus, which a package branches on: the runner's pre-pull.
 export const CLUE_SOURCE = "firebase";
 
 // A CLUE token this close to its expiry is not worth a sign-in that will fail.
@@ -70,8 +69,8 @@ function logPackageOutput(identity, result, level) {
 }
 
 // The CLUE class token for this environment, refused before a sign-in when it cannot
-// work. rigse mints it at the request and the function passes it through (REPORT-143
-// Q1), so work queued behind an hour of other packages finds it expired.
+// work. rigse mints it at the request and the function passes it through unchanged, so
+// work queued behind an hour of other packages finds it expired.
 export function clueToken({ classTokens, firebaseProject, now = Date.now() }) {
   const project = clueProjectFor(firebaseProject);
   const row = portalFirebaseApp(project);
@@ -92,13 +91,8 @@ export class ClueTokenExpired extends Error {
 }
 
 function customTokenExpiry(token) {
-  try {
-    const [, payload] = String(token).split(".");
-    const exp = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")).exp;
-    return Number.isFinite(exp) ? exp * 1000 : null;
-  } catch {
-    return null;
-  }
+  const exp = customTokenPayload(token)?.exp;
+  return Number.isFinite(exp) ? exp * 1000 : null;
 }
 
 export function makeSteps({ login = ccDataLogin, readClueFn = readClue } = {}) {

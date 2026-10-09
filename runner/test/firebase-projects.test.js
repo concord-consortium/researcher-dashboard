@@ -37,7 +37,7 @@ test("each project is paired with the portal firebase_apps row that signs its to
   assert.equal(portalFirebaseApp("collaborative-learning-ec215"), "collaborative-learning");
 });
 
-// Runner configuration per environment, not a caller parameter (final-design.md 13).
+// Runner configuration per environment, not a caller parameter.
 test("each report-service project names the CLUE project of its environment", () => {
   assert.equal(clueProjectFor("report-service-dev"), "collaborative-learning-staging");
   assert.equal(clueProjectFor("report-service-pro"), "collaborative-learning-ec215");

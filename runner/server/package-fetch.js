@@ -20,8 +20,8 @@ export const IDENTITY = /^(users|projects)\/[1-9][0-9]{0,17}\/[a-z0-9][a-z0-9-]{
 export const VERSION = /^(?=.{1,64}$)(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$/;
 export const CHECKSUM = /^sha256:[0-9a-f]{64}$/;
 
-// What report-server accepts as a whole archive's declared size (REPORT-142 R6). The
-// runner, which unpacks everything, bounds the bytes actually produced.
+// The most report-server accepts as an archive's declared unpacked size. The runner,
+// which unpacks everything, bounds the bytes actually produced.
 export const MAX_UNPACKED_BYTES = 50 * 1024 * 1024;
 
 export async function sha256File(file) {
@@ -43,7 +43,7 @@ export function checksumsMatch(a, b) {
 export const PACKAGES_PREFIX = "packages";
 
 // The key under PACKAGES_PREFIX, which is report-server's layout: the identity, then the
-// version (final-design.md section 5.3).
+// version.
 export function packageKey(identity, version) {
   return `${identity}/${version}.zip`;
 }
@@ -186,7 +186,7 @@ export function readManifest(dir) {
     }
   }
   // Checked here as well as by report-server at publish, because it sets the window the
-  // runner schedules against (final-design.md section 6.1).
+  // runner schedules against.
   const declared = manifest.expected_duration_seconds;
   if (!Number.isInteger(declared) || declared < 1) {
     throw new Error("manifest.json's expected_duration_seconds is not a positive integer");

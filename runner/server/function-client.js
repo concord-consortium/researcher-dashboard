@@ -1,5 +1,5 @@
-// The three calls the VM makes to report-service's researcherDashboard function
-// (final-design.md section 10): POST /work, /idle and /storage-credentials. Each
+// The three calls the VM makes to report-service's researcherDashboard function:
+// POST /work, /idle and /storage-credentials. Each
 // authenticates with the VM's own Firebase ID token; the function takes the researcher
 // from that token and never from the body.
 

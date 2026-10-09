@@ -6,7 +6,7 @@ import { ClassDocuments, RunnerStatus, resultPath, runnerPath, scopePath } from 
 
 // Skipped unless the emulators are up, so the default `npm test` stays hermetic.
 // `make test-emulator` starts them and sets these. Run against report-service's rules
-// (REPORT-143) as well, it shows the writes are the ones those rules accept.
+// as well, it shows the writes are the ones those rules accept.
 const FIRESTORE = process.env.FIRESTORE_EMULATOR_HOST;
 const AUTH = process.env.FIREBASE_AUTH_EMULATOR_HOST;
 const PROJECT = process.env.GCLOUD_PROJECT ?? "demo-researcher-dashboard";

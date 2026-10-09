@@ -18,12 +18,12 @@ export const REQUIRED_PAYLOAD_FIELDS = Object.freeze([
   // already had to reach report-server to obtain the credential in the first place.
   "report_server_url",
   // Where /work, /idle and /storage-credentials live. Nothing calls into the VM, so
-  // this is the only way it learns what to do (final-design.md section 10).
+  // this is the only way it learns what to do.
   "function_url"
 ]);
 
 // The report-server credential is the requesting researcher's own, minted per VM
-// creation and handed down in the payload (final-design.md section 11.2).
+// creation and handed down in the payload.
 // It is required rather than optional: a package is given egress on the premise that
 // the credential it can read reaches only its own researcher's data, so a VM with no
 // forwarded credential has no safe world to run a package in.
@@ -84,8 +84,7 @@ export function loadEnv(env = process.env) {
     syncDir: env.SYNC_DIR ?? null,
     syncIntervalMs: Number(env.SYNC_INTERVAL_MS ?? 30_000),
     // The runner's own ceiling on a declared duration: a manifest declaring more is
-    // refused, because the duration is data the runner trusts from fetched code
-    // (final-design.md section 6.1).
+    // refused, because the duration is data the runner trusts from fetched code.
     packageMaxDurationSeconds: maxDuration,
     // Unset, a package's process is bounded at its declared duration plus the
     // watchdog's ten-minute margin. Set, it replaces that bound for every package.
@@ -125,7 +124,7 @@ export const DEFAULT_CHAIN_VARIABLES = Object.freeze([
 ]);
 
 // The runner makes no AWS call on the execution role: every S3 client is built from the
-// broker's credentials (final-design.md section 11.3). Switching the default chain off
+// broker's credentials. Switching the default chain off
 // in-process makes a client built any other way fail at once with a
 // CredentialsProviderError that names its cause, rather than with an AccessDenied from
 // the execution role, which holds no S3.

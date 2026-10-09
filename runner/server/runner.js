@@ -10,10 +10,10 @@ import { CLUE_SOURCE } from "./steps.js";
 const EIGHT_HOURS_MS = 8 * 60 * 60 * 1000;
 // Kept back from the window for the last flush and the /terminate hook at the VM's cap.
 export const WINDOW_RESERVE_MS = 5 * 60_000;
-// The watchdog's margin on a declared duration (REPORT-143 R17), and the in-VM timeout's.
+// The watchdog's margin on a declared duration, and the in-VM timeout's.
 export const PACKAGE_TIMEOUT_MARGIN_MS = 10 * 60_000;
 // /work refuses the VM until the function has recorded its launch, one transaction after
-// RunMicrovm returns (REPORT-143 R6a), so a 409 this soon after /run is retried.
+// RunMicrovm returns, so a 409 this soon after /run is retried.
 export const LAUNCH_RECORD_WINDOW_MS = 60_000;
 export const LAUNCH_RETRY_MS = 5_000;
 export const CLAIM_ATTEMPTS = 3;
@@ -31,8 +31,7 @@ export class HookError extends Error {
 
 const sleepFor = (ms) => new Promise((resolve) => setTimeout(resolve, ms).unref?.());
 
-// Orchestrates the VM's lifecycle and its pull loop (final-design.md sections 6, 7 and
-// 10). Everything that touches the world is injected: the stores, the function, the
+// Orchestrates the VM's lifecycle and its pull loop. Everything that touches the world is injected: the stores, the function, the
 // storage credentials, the sync and package backends, the egress setup and the package
 // steps. That is what lets the tests drive the real sequences without S3, Firestore,
 // report-service or cc-data.
@@ -52,7 +51,7 @@ export class Runner {
   #ready = false;
   #suspendSeen = false;
   // Failed claim attempts per queued entry, for this awake period: cleared when the
-  // entry's result is written and on every resume (R9).
+  // entry's result is written and on every resume.
   #claimFailures = new Map();
   // Verified manifests by identity, version and checksum, which never change for the
   // VM's life, so a re-plan does not fetch and unpack the archive again.
@@ -116,7 +115,7 @@ export class Runner {
   // Lambda's /run. The payload is the only per-VM configuration, so a bad one fails
   // here rather than letting the VM serve traffic it cannot attribute.
   async run({ microvmId, runHookPayload }) {
-    // /work, /idle and a claimed result all need the VM's own id (REPORT-143 R6a, R22a).
+    // /work, /idle and a claimed result all need the VM's own id.
     // A VM that cannot take work is stopped now rather than left awake.
     if (typeof microvmId !== "string" || microvmId === "") {
       throw new Error("/run's body carries no microvmId, so this VM could take no work");
@@ -162,7 +161,7 @@ export class Runner {
     });
 
     // Every S3 call from here on, the pull-down first, goes through the broker's
-    // credentials, fetched with this session's ID token (final-design.md section 11.3).
+    // credentials, fetched with this session's ID token.
     const prefix = researcherPrefix(this.payload.platform_user_id);
     this.storage = this.makeStorage({
       bucket: this.payload.bucket,
@@ -217,7 +216,6 @@ export class Runner {
     }
   }
 
-  // One call to the function, authenticated as this request's session.
   async #call(route, body, { force = false } = {}) {
     const idToken = await bounded(this.#session.idToken(force), TOKEN_TIMEOUT_MS, "an ID token");
     return this.callFunction(route, { idToken, body });
@@ -241,7 +239,7 @@ export class Runner {
 
   // Asks for work, runs it one package at a time, asking again after each, and once
   // nothing is left, keeps asking through the idle period before asking to be
-  // suspended (final-design.md 7.2(b)). Every answer from an earlier epoch is ignored.
+  // suspended. Every answer from an earlier epoch is ignored.
   async #workLoop(epoch, afterResume) {
     let force = afterResume;
     let idleSince = null;
@@ -306,7 +304,7 @@ export class Runner {
       }
 
       // The flush the /suspend hook would make, made first, so no suspend depends on the
-      // hook being delivered (REPORT-143 R1).
+      // hook being delivered.
       const flushed = await this.syncer.flushAndVerify("idle");
       if (!this.#current(epoch)) return;
       if (!flushed.ok) {
@@ -393,7 +391,7 @@ export class Runner {
       const refuse = async (error) => {
         log.warn("package.refused", { scope: entry.class_hash, package: entry.identity, error });
         try {
-          await docs.failed(IDENTITY.test(entry.identity) ? packageDocId(entry.identity) : entry.package_key, { pkg, error });
+          await docs.failed(docIdOf(entry), { pkg, error });
           this.#resolved(entry, resolved);
         } catch (err) {
           this.#noteClaimFailure(entry, err);
@@ -499,7 +497,7 @@ export class Runner {
   }
 
   // The entry's result is written, so it starts again from no failed attempts if it is
-  // queued again (REPORT-143 re-appends a finished package).
+  // queued again.
   #resolved(entry, resolved) {
     this.#claimFailures.delete(this.#claimKey(entry));
     resolved?.add(this.#claimKey(entry));
@@ -527,10 +525,10 @@ export class Runner {
       }
       this.#resolved(entry);
       if (this.#vm.state !== STATES.RUNNING) this.#vm.to(STATES.RUNNING);
-      // R8: what is still queued, so neither the claimed entry nor one this plan failed.
+      // What is still queued: not the claimed entry, nor one this plan failed.
       const queue = request.packages
         .filter((p) => this.#claimKey(p) !== this.#claimKey(entry) && !resolved.has(this.#claimKey(p)))
-        .map((p) => ({ class_hash: p.class_hash, package_key: IDENTITY.test(p.identity ?? "") ? packageDocId(p.identity) : p.package_key }));
+        .map((p) => ({ class_hash: p.class_hash, package_key: docIdOf(p) }));
       this.#lastWritten = STATES.RUNNING;
       await this.status.writeFromHook("work", {
         state: STATES.RUNNING,
@@ -652,7 +650,7 @@ export class Runner {
     this.syncer.stop();
 
     // The one hook result that is allowed to fail: a suspend on a sync that cannot be
-    // proven is exactly what this contract exists to refuse (final-design.md 7.1(a)).
+    // proven is exactly what this contract exists to refuse.
     const result = await this.syncer.flushAndVerify("suspend");
     if (!result.ok) {
       this.#vm.to(STATES.FAILED);
@@ -662,12 +660,12 @@ export class Runner {
     }
     this.#vm.to(STATES.SUSPENDED);
     // current_package and queue are kept by not being written: they are what tells
-    // "paused while idle" from "suspended mid-run" (final-design.md 7.2(d)).
+    // "paused while idle" from "suspended mid-run".
     await this.status.writeFromHook("suspend", { state: STATES.SUSPENDED });
     return { state: this.#vm.state, ...result };
   }
 
-  // Writes nothing and awaits nothing (final-design.md 7.1(a)): the session is stale, and
+  // Writes nothing and awaits nothing: the session is stale, and
   // a write on it could hang past the hook's 60 seconds. The loop that follows asks for
   // work with a fresh ID token, adopts new stores and fetches new credentials.
   resume() {
@@ -710,7 +708,7 @@ export class Runner {
       log.info("terminate.revoked", {});
     } catch (err) {
       // An unrevoked token is a residual the design accepts: it expires after nine hours
-      // and the researcher's next launch revokes it (final-design.md 11.2).
+      // and the researcher's next launch revokes it.
       log.warn("report_server.refused", { call: "revoke", error: err.message });
     }
 
@@ -726,6 +724,12 @@ export class Runner {
     await this.status.writeFromHook("terminate", { state: STATES.TERMINATED });
     return { state: this.#vm.state, ...result };
   }
+}
+
+// An entry's result document id: derived from its identity, or the one /work named when
+// the identity is unusable.
+function docIdOf(entry) {
+  return IDENTITY.test(entry.identity ?? "") ? packageDocId(entry.identity) : entry.package_key;
 }
 
 // The scope block rigse sent and /work returns, as the runner writes it into scope.json.

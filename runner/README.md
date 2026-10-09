@@ -1,6 +1,6 @@
 # Runner
 
-The MicroVM image that runs a researcher's packages. It answers Lambda's lifecycle hooks, asks report-service's `researcherDashboard` function for its work (`POST /work`), its storage credentials (`POST /storage-credentials`) and its suspend (`POST /idle`), and makes no AWS call on the execution role: every S3 client is built from the storage broker's credentials, and the SDK's default credential chain is switched off in the process at start (`final-design.md` sections 7, 10 and 11.3).
+The MicroVM image that runs a researcher's packages. It answers Lambda's lifecycle hooks, asks report-service's `researcherDashboard` function for its work (`POST /work`), its storage credentials (`POST /storage-credentials`) and its suspend (`POST /idle`), and makes no AWS call on the execution role: every S3 client is built from the storage broker's credentials, and the SDK's default credential chain is switched off in the process at start.
 
 ## Configuration
 

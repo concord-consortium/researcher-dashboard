@@ -1,10 +1,10 @@
 import { S3Client } from "@aws-sdk/client-s3";
 import { log } from "./log.js";
 
-// The only place an S3 client is built, and only from the storage broker's credentials
-// (final-design.md section 11.3). The execution role reaches nothing but the VM's logs,
-// and the default chain is switched off in-process (config.js
-// disableDefaultCredentialChain), so a client built any other way fails.
+// The only place an S3 client is built, and only from the storage broker's credentials.
+// The execution role reaches nothing but the VM's logs, and the default chain is switched
+// off in-process (config.js disableDefaultCredentialChain), so a client built any other
+// way fails.
 export function makeS3Client(credentials) {
   const { accessKeyId, secretAccessKey, sessionToken, region, expiration } = credentials ?? {};
   for (const [name, value] of Object.entries({ accessKeyId, secretAccessKey, sessionToken, region })) {
@@ -54,7 +54,6 @@ export class StorageCredentials {
     return this.#fetched.expiresAt - this.now() > REFRESH_MARGIN_MS;
   }
 
-  // The S3 client for the current credentials, fetching new ones first if needed.
   async client() {
     if (this.#usable()) return this.#client;
     if (!this.#inFlight) {

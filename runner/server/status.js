@@ -1,7 +1,7 @@
 import { log, redact } from "./log.js";
 
-// Document paths from final-design.md section 9. Firestore alternates collection and
-// document, so each of these has an even number of segments.
+// Document paths. Firestore alternates collection and document, so each of these has an
+// even number of segments.
 export function runnerPath(portal, platformUserId) {
   return `researcher_dashboard/${portal}/runners/${platformUserId}`;
 }
@@ -11,7 +11,7 @@ export function classPath(portal, classHash) {
 }
 
 // The scope document for one researcher of one class, which holds that researcher's
-// counts: two researchers of a class see different data (final-design.md section 8).
+// counts: two researchers of a class see different data.
 export function scopePath(portal, classHash, platformUserId) {
   return `${classPath(portal, classHash)}/researchers/${platformUserId}`;
 }
@@ -36,8 +36,7 @@ export function bounded(promise, ms = STATUS_WRITE_TIMEOUT_MS, what = "status wr
 // platform_id, which the rules check against the token's claim rather than trusting the
 // {portal} path segment, and a server-time updated_at, which the rules require.
 //
-// A hook's write is bounded and never fails the hook (final-design.md section 7.1(a)):
-// a failure is logged and kept, and the next write that succeeds reports it.
+// A hook's write is bounded and never fails the hook: a failure is logged and kept, and the next write that succeeds reports it.
 export class RunnerStatus {
   #failures = [];
 
@@ -109,7 +108,7 @@ export class ClassDocuments {
 
   // The claim: the result says running, which is what takes it out of /work's answer and
   // what the watchdog reads. It clears the last run's summary and display, so a result
-  // only ever describes the run its `package` names (final-design.md section 8).
+  // only ever describes the run its `package` names.
   async claim(docId, { pkg, imageVersion, microvmId, expectedDurationSeconds }) {
     await bounded(this.store.merge(this.#result(docId), this.#stamped({
       status: "running",
@@ -230,16 +229,21 @@ export class LogStore {
   async close() {}
 }
 
-// The claims a Firebase custom token carries, read without verifying it. Only the
-// in-memory store uses this, standing in for what Firebase would verify at sign-in.
-export function customTokenClaims(token) {
+// A Firebase custom token's payload, read without verifying it.
+export function customTokenPayload(token) {
   try {
     const [, payload] = String(token).split(".");
     if (!payload) return null;
-    return JSON.parse(Buffer.from(payload, "base64url").toString("utf8"))?.claims ?? null;
+    return JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
   } catch {
     return null;
   }
+}
+
+// The claims it carries. Only the in-memory store uses them, standing in for what
+// Firebase would verify at sign-in.
+export function customTokenClaims(token) {
+  return customTokenPayload(token)?.claims ?? null;
 }
 
 // In-memory store used by the tests and by SYNC_BACKEND=DIR local runs, where no

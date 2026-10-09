@@ -4,7 +4,7 @@ import { log } from "./log.js";
 
 // What a package is handed, and where its credential lives.
 //
-// The package makes its own AP and log pulls with cc-data (final-design.md section 13),
+// The package makes its own AP and log pulls with cc-data,
 // which is only safe because the credential is the requesting researcher's own rather
 // than a shared site admin's: a package that leaks it reaches what its researcher could
 // already download to their laptop, and nothing else. CLUE reads stay in the runner,
@@ -20,7 +20,7 @@ import { log } from "./log.js";
 // it falls back to $HOME/cc-data, which here is the throwaway home, so every pull lands
 // somewhere that is deleted before the next run and is never synced.
 
-// cc-data's dataset grammar, the narrowest of the names in play (final-design.md 5.3).
+// cc-data's dataset grammar, the narrowest of the names in play.
 export const DATASET_NAME = /^[a-z0-9][a-z0-9_-]{0,62}$/;
 
 // Keyed to the package rather than its version, so a new version reuses the pulls the
@@ -48,8 +48,8 @@ export function packagePaths({ workRoot, dataRoot, classHash, docId }) {
   };
 }
 
-// The file a package writes its filters from (final-design.md section 10). Everything
-// but clue_source, dataset and output_dir comes from the scope block rigse sent, which
+// The file a package writes its filters from. Everything but clue_source, dataset and
+// output_dir comes from the scope block rigse sent, which
 // /work returns: the runner holds no portal bearer and cannot build it any other way.
 export function scopeFile({ scope, clueSource, dataset, outputDir }) {
   return {
@@ -213,8 +213,7 @@ function readOwnFile(outputDir, name, limit) {
 }
 
 // What the package counted, because it makes the pulls and the runner writes Firestore.
-// Only the counts the scope document holds are read (final-design.md section 9); the
-// CLUE count is the runner's own. Absent or unreadable is not a failure.
+// Only the counts the scope document holds are read; the CLUE count is the runner's own. Absent or unreadable is not a failure.
 export function readPackageCounts(outputDir) {
   try {
     const parsed = JSON.parse(readOwnFile(outputDir, "counts.json", DISPLAY_LIMIT_BYTES)?.text ?? "");
@@ -228,8 +227,8 @@ export function readPackageCounts(outputDir) {
   }
 }
 
-// The display cap: `display.md` goes into one Firestore field, so it is capped at 64 KiB,
-// and final-design.md section 10 is the only place that number lives.
+// `display.md` goes into one Firestore field, so it is capped; larger is refused, never
+// truncated.
 export const DISPLAY_LIMIT_BYTES = 64 * 1024;
 
 // What the package wrote: display.md, required and refused rather than truncated when it
