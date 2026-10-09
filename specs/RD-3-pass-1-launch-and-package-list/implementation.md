@@ -17,17 +17,17 @@ Run everything with Node 22 from nvm: `PATH=$HOME/.nvm/versions/node/v22.17.1/bi
 **Summary**: R22, R24 and R23's link name. The spike's page, its renderer, its status logic and the CLUE wiring go, with their tests. Until the next step the app renders the info page for every query, which is what `main` already does for the link the portal sends today. A pure deletion step reviews in minutes and keeps the next one about new code only.
 
 **Files affected**:
-- `app/src/pages/AnalyzeClass.tsx`, `app/src/components/Display.tsx`, `app/src/shell/display.ts`, `app/src/shell/status.ts`: deleted.
-- `app/tests/analyze-class.test.tsx`, `app/tests/display.test.ts`, `app/tests/status.test.ts`: deleted.
-- `app/src/shell/portal.ts`: `runPackage`, `RunPackageResult`, `getClass`, `ClassInfo` and `Assignment` deleted (the next step adds the scope's types).
+- `app/src/pages/AnalyzeClass.tsx`, `app/src/components/Display.tsx`, `app/src/shell/display.ts`, `app/src/shell/status.ts`, and `app/src/shell/launch.ts`, whose spike grammar (`ANALYZE_CLASS`, `pageFor`, `classRef`) only `App` read: deleted.
+- `app/tests/analyze-class.test.tsx`, `app/tests/display.test.ts`, `app/tests/status.test.ts`, `app/tests/launch.test.ts`: deleted.
+- `app/src/shell/portal.ts`: `runPackage`, `RunPackageResult`, `getClass`, `ClassInfo`, `Assignment` and `PortalError.unauthorized` deleted (the class step adds the scope's types).
 - `app/src/shell/firebase.ts`: the `collaborative-learning-staging` config, `watchCollection`, `inClass` and `Paths`/`paths()` deleted; `classPath(portalOrigin, classHash)` added; the header comment says one project, report-service's.
-- `app/src/App.tsx`: renders `<Info reason="no-launch" />`.
-- `app/src/pages/Info.tsx`: "use the Researcher Dashboard link"; "What it can show" describes the package list without the "Analyze Class" name.
+- `app/src/App.tsx`, `app/src/main.tsx`: `App` takes no props and renders `<Info />`.
+- `app/src/pages/Info.tsx`: no `reason` prop, since the expired-link case went with the spike's grammar; "use the Researcher Dashboard link"; "What it can show" describes the package list without the "Analyze Class" name.
 - `app/tests/app.test.tsx`, `app/tests/portal.test.ts`, `app/tests/firebase.test.ts`: cases for what was deleted removed; `classPath` tested; a test that the info page contains no "Analy" text.
 
 **Estimated diff size**: ~-700, +40
 
-In `styles.css`, `.result-list`, `.queued`, `.summary` and `.platform` lose their only users here and are deleted; the other rules stay.
+In `styles.css`, `.result-list`, `.queued`, `.summary`, `.platform`, the `button` rules and `--accent`, and the `table` and `dl` rules lose their only users here and are deleted; the other rules stay.
 
 ---
 
@@ -37,12 +37,12 @@ In `styles.css`, `.result-list`, `.queued`, `.summary` and `.platform` lose thei
 
 **Files affected**:
 - `app/src/shell/portals.ts`: new. The allowlist, `devPortal(env)`, `portalFor(authDomain, extra)`, `PROFILE_MAX_AGE_MS`.
-- `app/src/shell/launch.ts`: rewritten. `parseLaunch`, `launchQuery`.
+- `app/src/shell/launch.ts`: new. `parseLaunch`, `launchQuery`.
 - `app/src/shell/oauth.ts`: new. PKCE, `redirectUriFor`, `authorizeUrl`, `startAuthorization`.
 - `app/src/shell/start.ts`: new. `start(deps)`'s launch branch and `reauthorize(deps, portal, launch)`; `Start` without its `ready` case.
 - `app/src/App.tsx`, `app/src/main.tsx`: rewritten, `App` rendering `info` and `redirecting` and `main.tsx` rendering what `start(deps)` resolves to. `main.tsx` below is the next step's: until `Start` has its `ready` case, `started.kind === "ready"` does not compile (TS2367).
 - `app/src/pages/Info.tsx`: takes `InfoReason` and an optional `detail`, one sentence per reason in a `role="status"` paragraph.
-- Tests: `launch.test.ts` (rewritten), `oauth.test.ts` and `start.test.ts` (the authorize cases), `app.test.tsx`.
+- Tests: `launch.test.ts` (new), `oauth.test.ts` and `start.test.ts` (the authorize cases), `app.test.tsx`.
 
 **Estimated diff size**: ~+400 including tests
 

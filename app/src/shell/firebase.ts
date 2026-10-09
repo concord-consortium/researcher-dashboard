@@ -1,16 +1,9 @@
 import { initializeApp, type FirebaseApp } from "firebase/app";
 import { connectAuthEmulator, getAuth, signInWithCustomToken } from "firebase/auth";
-import {
-  collection, connectFirestoreEmulator, doc, getFirestore, onSnapshot, query, where,
-  type Firestore, type QueryConstraint
-} from "firebase/firestore";
+import { connectFirestoreEmulator, doc, getFirestore, onSnapshot, type Firestore } from "firebase/firestore";
 
-// The Firebase projects this app reads, and the sign-in that gets it in.
-//
-// Two of them, because a custom token is signed by one project's service account and
-// cannot be exchanged in another: the display documents live in report-service's project
-// and CLUE's documents live in CLUE's. The app signs into each separately with a token the
-// portal minted for that project.
+// The Firebase project this app reads, and the sign-in that gets it in: report-service's,
+// which holds the dashboard tree, with a custom token the portal minted for one class.
 //
 // None of these values is secret. A Web API key identifies a project to Identity Toolkit
 // and carries quota; it authorizes nothing, and access is decided by the custom token and
@@ -25,15 +18,6 @@ const PROJECTS: Record<string, Record<string, string>> = {
     storageBucket: "report-service-dev.appspot.com",
     messagingSenderId: "402218300971",
     appId: "1:402218300971:web:32b7266ef5226ff7"
-  },
-  "collaborative-learning-staging": {
-    apiKey: atob("QUl6YVN5Q0dKRjQybE15XzhjSFpkU0lQa0FvWE9WWFBHMmotSHAw"),
-    authDomain: "collaborative-learning-staging.firebaseapp.com",
-    databaseURL: "https://collaborative-learning-staging-default-rtdb.firebaseio.com",
-    projectId: "collaborative-learning-staging",
-    storageBucket: "collaborative-learning-staging.firebasestorage.app",
-    messagingSenderId: "822807055414",
-    appId: "1:822807055414:web:9e08fe0f4ffaf6130f9c97"
   }
 };
 
@@ -93,19 +77,8 @@ export function portalSegment(portalOrigin: string): string {
   return new URL(portalOrigin).host.replace(/\./g, "_");
 }
 
-export interface Paths {
-  researcher: (platformUserId: string) => string;
-  clazz: (classHash: string) => string;
-  results: (classHash: string) => string;
-}
-
-export function paths(portalOrigin: string): Paths {
-  const root = `researcher_dashboard/${portalSegment(portalOrigin)}`;
-  return {
-    researcher: (platformUserId) => `${root}/researchers/${platformUserId}`,
-    clazz: (classHash) => `${root}/classes/${classHash}`,
-    results: (classHash) => `${root}/classes/${classHash}/results`
-  };
+export function classPath(portalOrigin: string, classHash: string): string {
+  return `researcher_dashboard/${portalSegment(portalOrigin)}/classes/${classHash}`;
 }
 
 export function watchDoc<T>(
@@ -118,25 +91,4 @@ export function watchDoc<T>(
     // that it stopped, which reads as "nothing is happening" rather than as an error.
     (error) => console.error(`listener on ${path} failed`, error)
   );
-}
-
-// `constraints` are not an optimization. Firestore evaluates security rules against the
-// query, not against the documents it would return, so a listener on a collection whose
-// rule permits only some of it is denied outright unless the query says so itself.
-// Filtering the results in the browser cannot stand in for that.
-export function watchCollection<T>(
-  db: Firestore, path: string, onValue: (values: Array<T & { id: string }>) => void,
-  ...constraints: QueryConstraint[]
-): () => void {
-  return onSnapshot(
-    query(collection(db, path), ...constraints),
-    (snapshot) => onValue(snapshot.docs.map((d) => ({ id: d.id, ...(d.data() as T) }))),
-    (error) => console.error(`listener on ${path} failed`, error)
-  );
-}
-
-// The constraint CLUE's rules require of a researcher reading a class's documents:
-// `request.auth.token.class_hash == resource.data.context_id`.
-export function inClass(classHash: string): QueryConstraint {
-  return where("context_id", "==", classHash);
 }

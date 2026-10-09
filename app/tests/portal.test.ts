@@ -22,27 +22,11 @@ function portalWith(response: Response) {
 }
 
 describe("Portal", () => {
-  it("sends the launch grant as the bearer on every call", async () => {
-    const { portal, calls } = portalWith(jsonResponse({ id: 111 }));
-    await portal.getClass("111");
+  it("sends the grant as the bearer", async () => {
+    const { portal, calls } = portalWith(jsonResponse({ token: "custom" }));
+    await portal.firebaseToken("report-service-dev", "the-hash");
     const headers = calls[0][1]?.headers as Record<string, string>;
     expect(headers.Authorization).toBe(`Bearer ${TOKEN}`);
-  });
-
-  it("asks the portal it was launched from, not a configured one", async () => {
-    const { portal, calls } = portalWith(jsonResponse({ id: 111 }));
-    await portal.getClass("111");
-    expect(calls[0][0]).toBe(`${ORIGIN}/api/v1/researcher_dashboard/classes/111`);
-  });
-
-  it("returns the class as the portal described it", async () => {
-    const info = {
-      id: 111, name: "Scotts Class A", class_hash: "abc", platform_user_id: 200,
-      teacher_names: ["Scott C"], cohort_names: ["Spike"],
-      assignments: [{ id: 1, runnable_id: 2, name: "CLUE", platform: null }]
-    };
-    const { portal } = portalWith(jsonResponse(info));
-    expect(await portal.getClass("111")).toEqual(info);
   });
 
   describe("firebaseToken", () => {
@@ -52,6 +36,7 @@ describe("Portal", () => {
 
       expect(token).toBe("custom");
       const url = new URL(calls[0][0]);
+      expect(url.origin).toBe(ORIGIN);
       expect(url.pathname).toBe("/api/v1/jwt/firebase");
       expect(url.searchParams.get("firebase_app")).toBe("report-service-dev");
       expect(url.searchParams.get("class_hash")).toBe("the-hash");
@@ -60,46 +45,12 @@ describe("Portal", () => {
     });
   });
 
-  describe("runPackage", () => {
-    it("posts the run and returns where the result will be", async () => {
-      const accepted = { package: "class-counts", doc_path: "researcher_dashboard/p/classes/c/results/class-counts" };
-      const { portal, calls } = portalWith(jsonResponse(accepted));
-
-      const result = await portal.runPackage({
-        class_id: 111,
-        package: { name: "class-counts", version: "1.0.5", checksum: "sha256:abc" },
-        firebase_project: "report-service-dev",
-        firebase_apps: ["report-service-dev"]
-      });
-
-      expect(result).toEqual(accepted);
-      expect(calls[0][1]?.method).toBe("POST");
-      expect(JSON.parse(String(calls[0][1]?.body)).class_id).toBe(111);
-    });
-  });
-
   describe("when the portal refuses", () => {
     it("carries the portal's own message rather than inventing one", async () => {
       const { portal } = portalWith(
-        jsonResponse({ message: "You do not have access to the requested class as a researcher" }, 403)
+        jsonResponse({ message: "You do not have access to the requested class_hash as a researcher" }, 400)
       );
-      await expect(portal.getClass("111")).rejects.toThrow(/do not have access/);
-    });
-
-    // The app's answer to an expired grant is always "relaunch from the portal", which is
-    // a different thing to say than "something went wrong".
-    it("marks 401 and 403 as a credential problem", async () => {
-      for (const status of [401, 403]) {
-        const { portal } = portalWith(jsonResponse({ message: "no" }, status));
-        const error = (await portal.getClass("111").catch((e) => e)) as PortalError;
-        expect(error.unauthorized).toBe(true);
-      }
-    });
-
-    it("does not mark a server error as a credential problem" , async () => {
-      const { portal } = portalWith(jsonResponse({ message: "boom" }, 500));
-      const error = (await portal.getClass("111").catch((e) => e)) as PortalError;
-      expect(error.unauthorized).toBe(false);
+      await expect(portal.firebaseToken("report-service-dev", "h")).rejects.toThrow(/do not have access/);
     });
 
     it("still fails when the body is not json", async () => {
@@ -108,7 +59,7 @@ describe("Portal", () => {
         json: async () => { throw new Error("not json"); }
       } as unknown as Response;
       const { portal } = portalWith(broken);
-      await expect(portal.getClass("111")).rejects.toThrow(PortalError);
+      await expect(portal.firebaseToken("report-service-dev", "h")).rejects.toThrow(PortalError);
     });
   });
 });
@@ -124,13 +75,13 @@ describe("the default fetch", () => {
       // what makes this test fail when the implementation stores a bare reference.
       if (this !== globalThis && this !== undefined) throw new TypeError("Illegal invocation");
       calls.push(url);
-      return Promise.resolve(jsonResponse({ id: 111 }));
+      return Promise.resolve(jsonResponse({ token: "custom" }));
     });
     vi.stubGlobal("fetch", stub);
 
-    await new Portal(ORIGIN, TOKEN).getClass("111");
+    await new Portal(ORIGIN, TOKEN).firebaseToken("report-service-dev", "h");
 
-    expect(calls).toEqual([`${ORIGIN}/api/v1/researcher_dashboard/classes/111`]);
+    expect(calls).toHaveLength(1);
     vi.unstubAllGlobals();
   });
 });
