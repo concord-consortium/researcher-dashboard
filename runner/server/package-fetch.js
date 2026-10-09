@@ -26,6 +26,10 @@ export function checksumsMatch(a, b) {
   return typeof a === "string" && typeof b === "string" && a.toLowerCase() === b.toLowerCase();
 }
 
+// The bucket prefix packages are published under, beside `researchers/`
+// (final-design.md section 12). The broker's session policy grants read on it.
+export const PACKAGES_PREFIX = "packages";
+
 export function packageKey(name, version) {
   return `${name}/${version}.zip`;
 }

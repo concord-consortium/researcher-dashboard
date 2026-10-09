@@ -9,6 +9,7 @@ import { promisify } from "node:util";
 import { createEgressProxy } from "./egress-proxy.js";
 import { HOST_ADDR, PROXY_PORT, setupNamespace } from "./netns.js";
 import { makeSteps } from "./steps.js";
+import { PACKAGES_PREFIX } from "./package-fetch.js";
 import { revokeOwnToken } from "./report-server.js";
 
 const execFileAsync = promisify(execFile);
@@ -114,12 +115,12 @@ export function buildRunner(env) {
           ? new DirBackend(`${env.syncDir}/${prefix}`)
           : new S3Backend({ bucket, prefix })
       }),
-    // Packages are fetched from the same bucket the data syncs to, under scripts/, so
-    // one execution role permission covers both.
+    // Packages are fetched from the same bucket the data syncs to, under packages/,
+    // which is where report-server publishes them.
     makePackageBackend: ({ bucket }) =>
       dir
-        ? new DirBackend(`${env.syncDir}/scripts`)
-        : new S3Backend({ bucket, prefix: "scripts" }),
+        ? new DirBackend(`${env.syncDir}/${PACKAGES_PREFIX}`)
+        : new S3Backend({ bucket, prefix: PACKAGES_PREFIX }),
     unzip: unzipArchive,
     // Skipped in DIR mode, which runs on a laptop with no namespaces and no need for
     // one: there is no execution role there to protect.
