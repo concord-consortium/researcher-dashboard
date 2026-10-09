@@ -1,38 +1,18 @@
 # RD-3 pass 1: the launch and the package list
 
 **Jira**: https://concord-consortium.atlassian.net/browse/RD-3
-**Repo**: https://github.com/concord-consortium/researcher-dashboard
-**Implementation Spec**: [implementation.md](implementation.md)
-**Pass**: 1 of 3. Branch `RD-3-pass-1-launch-and-package-list`, from `main` at `e363311`. Passes 2 and 3 stack on this branch (sprint 28); RD-1 production's branch stacks on pass 3's.
-**Status**: **In Development**
+
+**Status**: **Closed**, with the staging check still to run (see "Not Yet Implemented")
+
+**Pass**: 1 of 3. Passes 2 and 3 stack on this branch (sprint 28); RD-1 production's branch stacks on pass 3's.
 
 ## Overview
 
 Replace the spike's placeholder page with the start of the real dashboard: the app launches itself from the portal's "Researcher Dashboard" link with the OAuth2 code flow, shows the class it was opened on, and lists the analysis packages that apply to that class, grouped by where they come from. Nothing runs yet; running and results are passes 2 and 3.
 
-## Project Owner Overview
-
 A researcher who follows "Researcher Dashboard" on a class in the portal today lands on the spike's page, which expects a token in the link that the portal no longer sends, so it shows only the "how to open it" page, and that page still points at a link named "Analyze Class". After this pass the same click signs the researcher in through the portal, shows the class (its name, teachers, cohorts and assignments) and lists the packages that suit it: Official ones, the class's project's own, the researcher's own, and a collapsed Community group that warns that a stranger's package runs with the researcher's access to student data.
 
 This is the first of three passes because the page can reach a researcher long before the runner can. It needs nothing from the runner, the VM or any student data: which packages apply is decided from the class's authored content, which the portal and report-service already know. Grouping by provenance rather than by platform (RIGSE-360) and patterns plus visibility rather than a per-class catalog (RIGSE-363) are the two changes the PM should see as changes. RIGSE-359 to RIGSE-363 stay open: they are the PI's acceptance stories, and nothing here closes them.
-
-## Background
-
-**The launch changed under the placeholder.** `main`'s app is the RIGSE-365 spike's: it parses `?page=analyze-class&class=<portal class URL>&token=<grant>&researcher=true` (`app/src/shell/launch.ts`) and calls the portal with that grant. RIGSE-367 (merged, staging `v2.31.0-pre.5`) redesigned the launch on 2026-09-29: no credential rides in the link, and the app is an OAuth2 public client running the authorization code flow with PKCE (`final-design.md` section 4 and 11.1). The staging check on 2026-10-09 (channel #59) found external report 79, labeled "Researcher Dashboard", launching class 223 as
-
-```
-https://models-resources.concord.org/researcher-dashboard/branch/main/index.html?authDomain=https%3A%2F%2Flearn.portal.staging.concord.org%2F&classId=223&loginHint=200
-```
-
-which `main` renders as its info page, and that page still says to "use the Analyze Class link".
-
-**`classId` is a request, never a scope.** `final-design.md` 4: `classId` is what the app asks for, as `context=class:<classId>` on the authorize request; what it holds afterwards is the access token's `context` claim, bound only after rigse runs `can_be_researcher_for_clazz?`. rigse's three dashboard endpoints take the class from the token, so the app has no use for `classId` after the redirect. It cannot drop it from the request: checked live against staging on 2026-10-09, an authorize request without `context` comes straight back with `error=invalid_request` (`AccessGrant.validate_scope_and_context` requires a context for the client's class-bound capabilities). So "the app must not use `classId`" (channel #59) means it is forwarded into the authorize request and read nowhere else.
-
-**Applicability moved to report-server.** RD-3's Jira description was amended (comment 2026-10-08) for REPORT-167: the app keeps no glob matcher, and lists with `POST /api/v1/packages/list`, the launch token as the bearer and `{scope_urls}` in the body, the class profile's `assignment_urls` and `interactive_urls`. Each row comes back in `GET /api/v1/packages`'s shape with `applies` added. REPORT-167 is spec'd (`eec896a`, `c51f93e` rebased unchanged, report-service branch `REPORT-167-report-service-one-home-for`) and implemented (`64c0c09`, channel #72), then merged into `master` as `9793e8f` and deployed to staging as report-server `1.13.0-pre.1` (channel #122, #123) with the list contract unchanged; this spec is written against that contract.
-
-**Why pass 1 reads Firestore at all.** The profile those URLs come from is the Firestore document `researcher_dashboard/{portal}/classes/{class_hash}`, which report-service's function writes and only it writes. A pass that read nothing could list every package or none, and would never learn the profile is missing and ask rigse to derive it (`fy26-sprint-26.md`, RD-3's "One constraint the split has to respect").
-
-**The passes.** `plan.md` splits RD-3 in three. Pass 1 (this spec, sprint 27): the app, the launch, the class metadata and the package list with the conditional refresh. Pass 2 (sprint 28): the runner, scope and result listeners, the queue and session state. Pass 3 (sprint 28): the finished result, the markdown renderer with its CSP, `stuck`, and the counts. Pass 1 touches `app/`, this spec and the root README's first line, which it writes as RD-4 pass 2 does (R25), so it does not rebase against the RD-4 stack, which touches `runner/`, `specs/` and that README.
 
 ## Requirements
 
@@ -101,9 +81,9 @@ which `main` renders as its info page, and that page still says to "use the Anal
 - **The Firebase app name** in `jwt/firebase` is a rigse `FirebaseApp` row; staging's `report-service-dev` row is the one the spike's page used.
 - **Existing seams kept:** `shell/firebase.ts`'s per-project named apps, emulator wiring (`VITE_FIRESTORE_EMULATOR` with `VITE_AUTH_EMULATOR`), `portalSegment` and `watchDoc`; `Portal`'s injected `fetchImpl` and its error handling, which keeps the server's own `message`; `build-info.ts`; `vite.config.ts`'s relative `base`, so the same build serves under any `branch/` or `version/` path and `redirect_uri` is derived from where it is served.
 - **Checked by running it (2026-10-09, throwaway code, deleted).** Under the app's vitest and jsdom: WebCrypto's SHA-256 with unpadded base64url reproduces RFC 7636 appendix B's challenge, and 32 random bytes encode to a 43-character verifier rigse's `PKCE_VALUE` accepts; `initializeAuth(app, {persistence: inMemoryPersistence})` followed by `getAuth(app)` returns the same instance and takes `connectAuthEmulator`; `history.replaceState` rewrites the query without a history entry. Against staging: the authorize request with `context` redirects to the login page with `app_name=Researcher Dashboard`, without `context` it comes back with `error=invalid_request&state=...`, with an unregistered `redirect_uri` it is a 500; `POST /oauth/token` with a form body and a bad code answers 400 `{"error":"invalid_grant"}`; the token endpoint's preflight from the app's origin passes and report-server's bearer preflight is refused 403.
-- **Local tooling.** On this machine Node is under nvm, not asdf: `PATH=$HOME/.nvm/versions/node/v22.17.1/bin:$PATH npm ci && npm test` (61 tests pass on `main`, 2026-10-09). `npm run lint` fails, since `eslint` is not a dependency.
+- **Local tooling.** On this machine Node is under nvm, not asdf: `PATH=$HOME/.nvm/versions/node/v22.17.1/bin:$PATH npm ci && npm test`. `npm run lint` fails, since `eslint` is not a dependency.
 
-## Prerequisites outside this repository
+### Prerequisites outside this repository
 
 None of these block the spec; each blocks the staging check of the implementation, and none is this pass's code.
 
@@ -114,7 +94,7 @@ None of these block the spec; each blocks the staging check of the implementatio
 - **This branch's URL among the staging `Client`'s redirect URIs**, for a check before the merge.
 - **A staging class with the Wildfire module assigned** and a researcher grant reaching it, and at least one package published there, for the list to have something to show. Done 2026-10-09: class 590, "Researcher Dashboard Wildfire", in project 20, assigning material 604 only (#108), and `projects/20/wildfire-responses` 1.0.0 published official (`catalog_id` 2, #119).
 
-## Clauses covered
+### Clauses covered
 
 Jira's clauses for the whole story, and which pass carries each.
 
@@ -149,9 +129,24 @@ Jira's clauses for the whole story, and which pass carries each.
 - Any change to rigse, report-server, report-service functions or their stack parameters; the prerequisites above are ops steps or other stories.
 - Closing or transitioning RIGSE-359 to RIGSE-363.
 
-## Open Questions
+## Not Yet Implemented
 
-### RESOLVED: Judgment call: a listener on the class document, rather than a single `get`
+**The staging check** waits on prerequisites outside this repository, not on code: class 590's profile (the functions' `PORTAL_PUBLIC_KEYS`, the `researcherDashboard` and `deriveProfileWorker` deploy, and rigse's `ResearcherDashboardFunctionURL`), `PackagesCorsOrigins` on `report-service-qa` naming `https://models-resources.concord.org`, and this branch's URL among the staging `Client`'s redirect URIs. Once they are in place:
+
+1. As a researcher with a grant reaching class 590 ("Researcher Dashboard Wildfire", #108), follow its "Researcher Dashboard" link from project 20's Research Classes page, with the link's path changed from `branch/main` to this branch's.
+2. The page shows class 590's name, teachers, cohorts and assignments, and the address bar holds the launch query with no `code`.
+3. On a class with no profile, "Reading this class's activities…" gives way to the list within a minute, and the network panel shows exactly one `refresh_profile`; a reload shows the list at once and no `refresh_profile`.
+4. The list's request carries the bearer and the profile's URLs, and `projects/20/wildfire-responses` (staging's one official package, #119) is listed under Official; a package with a pattern the class does not match is absent.
+5. `sessionStorage`, `localStorage` and IndexedDB for the origin hold no access token and no Firebase session after the launch.
+6. A second tab on another class leaves the first tab's page working.
+
+Post the result to the stream channel.
+
+## Decisions
+
+### Requirements
+
+#### A listener on the class document, rather than a single `get`
 **Context**: `plan.md` and `fy26-sprint-26.md` describe pass 1 as "one read of `classes/{class_hash}`"; the Jira description has a listener on it.
 **Options considered**:
 - A) One `onSnapshot` listener on that one document.
@@ -159,7 +154,7 @@ Jira's clauses for the whole story, and which pass carries each.
 
 **Decision**: A. The refresh is asynchronous, so after asking for one, a single `get` leaves the page on the missing or stale profile until the researcher reloads, and a first launch on a class would never show a list without a reload. A one-document listener is a `get` under the rules, reads the same single document, and is what "one read" was contrasting with: a Firestore-free pass (R11).
 
-### RESOLVED: Judgment call: `classId` goes into the authorize request
+#### `classId` goes into the authorize request
 **Context**: Channel #59 says the app must not use `classId`. The authorize request needs a context.
 **Options considered**:
 - A) Forward it as `context=class:<classId>` and read it nowhere else.
@@ -167,7 +162,7 @@ Jira's clauses for the whole story, and which pass carries each.
 
 **Decision**: A. B was checked live on staging: rigse refuses it with `invalid_request`. `final-design.md` 4 says `classId` is what the app asks for and the token's `context` is what it holds, which R4 makes testable (R3, R4).
 
-### RESOLVED: Judgment call: delete the spike's display and status code now rather than leave it for passes 2 and 3
+#### Delete the spike's display and status code now rather than leave it for passes 2 and 3
 **Context**: Deleting `AnalyzeClass.tsx` leaves `Display.tsx`, `display.ts`, `status.ts` and the CLUE wiring with no caller.
 **Options considered**:
 - A) Delete them with their tests (R24).
@@ -175,7 +170,7 @@ Jira's clauses for the whole story, and which pass carries each.
 
 **Decision**: A. Their contracts are the spike's: `display` as JSON sections where results are now markdown, the status document at `researchers/` where it is now `runners/` with a `queue`, a 409 queue the design deletes. Passes 2 and 3 write against the new contracts, and dead modules with passing tests read as supported code.
 
-### RESOLVED: Low confidence: 24 hours as the profile's maximum age
+#### 24 hours as the profile's maximum age
 **Context**: R12. `final-design.md` 5.5 says re-authored activity content is caught by "the configured maximum age" and gives no value. Shorter catches a re-authored activity sooner and costs a derivation (up to 500 public fetches) per class per period, shared by every researcher of the class.
 **Options considered**:
 - A) 24 hours, a build constant.
@@ -184,7 +179,7 @@ Jira's clauses for the whole story, and which pass carries each.
 
 **Decision**: A. A changed assignment set is caught on the next launch by the fingerprint whatever the age, so the age bound only covers an activity re-authored in place, which is rare during a study and almost never matters within a day. One derivation per class per day is cheap (the deriver fetches public authoring JSON five at a time with a 15-second timeout, `derive-profile.ts`), while an hour would re-derive on most working sessions for no change. It is one constant in the build config, so it can move without a design change.
 
-### RESOLVED: Low confidence: the staging-only allowlist
+#### The staging-only allowlist
 **Context**: R2. Production's portals cannot launch the dashboard until RD-1 production creates their `Client` rows and report-server's `PackagesCorsOrigins` there, and production's Firebase config is not in the app.
 **Options considered**:
 - A) Staging only in this pass; RD-1 production adds `learn.concord.org` (and the NGSS portal, if it gets the dashboard) with report-server and `report-service-pro`.
@@ -192,61 +187,90 @@ Jira's clauses for the whole story, and which pass carries each.
 
 **Decision**: A. RD-1 production is the line that owns "a production launch end to end from the portal link to a rendered result", and its values (production report-server's URL as rigse's `REPORT_SERVER_URL` holds it, `report-service-pro`'s web config) are not recorded anywhere this pass can check. An entry nobody can exercise is a guess that looks configured. The allowlist is one map, so adding a portal is one entry.
 
-## Self-Review
+#### The Firestore prerequisite named the wrong rules
+**Decision**: The spec said the `classes/{class_hash}` read waited on REPORT-143's rules, which are not implemented. The ruleset deployed on `report-service-dev` (the spike's, 2026-09-18, fetched through the Firebase Rules API) already grants it, and `master`'s `firestore.rules` has no dashboard block. R11 and the prerequisites now say so, including that a rules deploy from `master` before REPORT-143 would remove the grant.
 
-Roles: Security Engineer, Senior Engineer, QA Engineer, DevOps Engineer, Product Manager, WCAG Accessibility Expert. Each finding below was checked against code or a live system before it was written; each had one defensible correction, applied in place.
+#### A trailing-slash URL would derive an unregistered `redirect_uri`
+**Decision**: `Client#check_redirect_uri` matches a registered URI exactly and an unregistered one is a 500 (checked live). A page reached at `.../branch/main/` would send `.../branch/main/`. R3 now appends `index.html` to a path ending in `/`.
 
-### DevOps Engineer
+#### Timer-driven re-authorization would navigate a reader away
+**Decision**: R8 re-authorized "before `expires_in` runs out", a full-page redirect in the middle of reading, and after the portal's 90-minute idle timeout a redirect to its login page. Pass 1 calls rigse and report-server only at load and on a profile change, and the Firebase session renews itself. R8 now re-authorizes only on a call made with a token about to expire, or on a 401.
 
-#### RESOLVED: The Firestore prerequisite named the wrong rules
-The spec said the `classes/{class_hash}` read waited on REPORT-143's rules, which are not implemented. The ruleset deployed on `report-service-dev` (the spike's, 2026-09-18, fetched through the Firebase Rules API) already grants it, and `master`'s `firestore.rules` has no dashboard block. R11 and the prerequisites now say so, including that a rules deploy from `master` before REPORT-143 would remove the grant.
+#### A late list answer could overwrite a newer one
+**Decision**: R14 re-lists when the profile's URLs change, which happens while the first call can still be in flight (the refresh lands a few seconds after launch). R14 now renders only the latest call's answer.
 
-#### RESOLVED: A trailing-slash URL would derive an unregistered `redirect_uri`
-`Client#check_redirect_uri` matches a registered URI exactly and an unregistered one is a 500 (checked live). A page reached at `.../branch/main/` would send `.../branch/main/`. R3 now appends `index.html` to a path ending in `/`.
+#### An absent `derived_at` was not covered by R12
+**Decision**: R12 now treats an absent `derived_at` as old.
 
-### Senior Engineer
+#### The app's origin is shared with every SPA on `models-resources`
+**Decision**: `deploy-app.yml` publishes to the shared `models-resources` bucket, so `sessionStorage` and IndexedDB belong to an origin other Concord apps also run on. R3 names its storage key for the dashboard, and R10's rationale now includes that a persisted Firebase session would sit in that shared storage.
 
-#### RESOLVED: Timer-driven re-authorization would navigate a reader away
-R8 re-authorized "before `expires_in` runs out", a full-page redirect in the middle of reading, and after the portal's 90-minute idle timeout a redirect to its login page. Pass 1 calls rigse and report-server only at load and on a profile change, and the Firebase session renews itself. R8 now re-authorizes only on a call made with a token about to expire, or on a 401.
+#### No accessibility requirement for a new page
+**Decision**: The spec had none for a page of grouped lists with a collapsed group and changing status lines. R26 adds the heading structure, a native disclosure for Community and a polite live region for status, and R27 tests them.
 
-#### RESOLVED: A late list answer could overwrite a newer one
-R14 re-lists when the profile's URLs change, which happens while the first call can still be in flight (the refresh lands a few seconds after launch). R14 now renders only the latest call's answer.
+#### Every unreachable server read as the package catalog
+**Decision**: The throwaway build's `refused` fell back to "The package catalog could not be reached." for any error that was not an `ApiError`, so a network failure on the scope call, or a Firebase sign-in that failed, said the catalog was unreachable (both checked with throwaway tests). R8 now names what failed, and R21 keeps the catalog line for the list alone.
 
-#### RESOLVED: An absent `derived_at` was not covered by R12
-R12 now treats an absent `derived_at` as old.
+#### A launch that throws left a blank page
+**Decision**: `start()` rejects when `sessionStorage.setItem` throws (checked with a throwaway test), and `main.tsx` renders only on success. R5 now renders the sign-in page for anything the launch or callback throws.
 
-### Security Engineer
+#### R8 said a reading page is never navigated away from
+**Decision**: A profile whose URLs change re-lists (R14), and with an expired token that call re-authorizes, which navigates. R8 now says that is the one case. Its duplicated "with the portal session still alive" and R9's "not shown or used beyond display" are fixed with it.
 
-#### RESOLVED: The app's origin is shared with every SPA on `models-resources`
-`deploy-app.yml` publishes to the shared `models-resources` bucket, so `sessionStorage` and IndexedDB belong to an origin other Concord apps also run on. R3 names its storage key for the dashboard, and R10's rationale now includes that a persisted Firebase session would sit in that shared storage.
+#### R18's "official first" could never apply
+**Decision**: R17 puts every official row under Official, so no other group holds one and Official holds nothing else. Deleting the sort key left the throwaway build's 61 tests green. R18 now orders by title and says why "official first" holds by construction, and the clauses table says so.
 
-### WCAG Accessibility Expert
+#### R20 was silent on `runnable`
+**Decision**: report-server answers `runnable: false` for every non-official package while `PACKAGES_UNREVIEWED_RUNS` is off (`Packages.unrunnable_reason`). R20 now says this pass does not read `runnable`, and that marking an unrunnable row belongs with the run control.
 
-#### RESOLVED: No accessibility requirement for a new page
-The spec had none for a page of grouped lists with a collapsed group and changing status lines. R26 adds the heading structure, a native disclosure for Community and a polite live region for status, and R27 tests them.
+#### The class's loading line and its failure were not announced
+**Decision**: `ClassDashboard` renders "Loading the class…", and a failure in its place, as bare text in `<main>`, outside the live region. R26 now includes them.
 
+### Implementation
 
-### Fresh review (2026-10-09)
+#### A report-server 403 on the list
+**Context**: The throwaway build's `refused()` sent every 403 to the withdrawn page, where R21 shows report-server's message.
+**Options considered**:
+- A) Show report-server's message; only rigse's 403 renders the withdrawn page.
+- B) Render the withdrawn page for every 403.
 
-A second review by a session that did not write the spec, as Security Engineer, Senior Engineer, test writer, commit reviewer, Product Manager and WCAG Accessibility Expert. Each finding was checked against rigse `9f948f6c0`, REPORT-167 `64c0c09` or the throwaway build, and each had one defensible correction, applied in place. The implementation's findings are in its own Self-Review.
+**Decision**: A (Doug, 2026-10-09). Only rigse's 403 means the researcher check failed. `refused` takes which server refused.
 
-#### RESOLVED: Senior Engineer: every unreachable server read as the package catalog
-The throwaway build's `refused` fell back to "The package catalog could not be reached." for any error that was not an `ApiError`, so a network failure on the scope call, or a Firebase sign-in that failed, said the catalog was unreachable (both checked with throwaway tests). R8 now names what failed, and R21 keeps the catalog line for the list alone.
+#### Resolve the launch before React renders
+**Context**: The callback must redeem its code exactly once.
+**Options considered**:
+- A) A plain async `start()` in `main.tsx`, then render the result.
+- B) A `useEffect` in `App` with a ref guarding against StrictMode's second run.
 
-#### RESOLVED: Senior Engineer: a launch that throws left a blank page
-`start()` rejects when `sessionStorage.setItem` throws (checked with a throwaway test), and `main.tsx` renders only on success. R5 now renders the sign-in page for anything the launch or callback throws.
+**Decision**: A. Under StrictMode, B's effect runs twice in development and the second run finds the pending entry already removed, so it needs a guard whose only job is to undo React's development check; and a component that navigates away during render is awkward to test. A keeps every side effect of the launch in one function with injected dependencies, which `start.test.ts` exercises without rendering anything.
 
-#### RESOLVED: Senior Engineer: R8 said a reading page is never navigated away from
-A profile whose URLs change re-lists (R14), and with an expired token that call re-authorizes, which navigates. R8 now says that is the one case. Its duplicated "with the portal session still alive" and R9's "not shown or used beyond display" are fixed with it.
+#### One `Api` class for both servers
+**Context**: rigse and report-server take the same bearer and both need the expiry and 401 handling.
+**Options considered**:
+- A) `Api` holds origin, token and `fetch`, and `Portal` and `ReportServer` are thin wrappers over it.
+- B) Keep `Portal.request` and give `ReportServer` its own copy.
 
-#### RESOLVED: Product Manager: R18's "official first" could never apply
-R17 puts every official row under Official, so no other group holds one and Official holds nothing else. Deleting the sort key left the throwaway build's 61 tests green. R18 now orders by title and says why "official first" holds by construction, and the clauses table says so.
+**Decision**: A. The expiry margin and the young-401 rule have to agree for both servers, and one implementation is the only way to keep them agreeing. `PortalError` becomes `ApiError`, since it is no longer the portal's alone.
 
-#### RESOLVED: Product Manager: R20 was silent on `runnable`
-report-server answers `runnable: false` for every non-official package while `PACKAGES_UNREVIEWED_RUNS` is off (`Packages.unrunnable_reason`). R20 now says this pass does not read `runnable`, and that marking an unrunnable row belongs with the run control.
+#### Inject a services object into the page rather than mock modules
+**Context**: `ClassDashboard` talks to rigse, report-server and Firestore.
+**Options considered**:
+- A) `DashboardServices` passed as a prop, with `makeServices(config, token)` building the real one.
+- B) `vi.mock` the Firebase and fetch modules in the page tests.
 
-#### RESOLVED: WCAG Accessibility Expert: the class's loading line and its failure were not announced
-`ClassDashboard` renders "Loading the class…", and a failure in its place, as bare text in `<main>`, outside the live region. R26 now includes them.
+**Decision**: A. The page tests drive snapshots by hand (missing, then present; URLs changed; an answer held back), which needs control of the listener callback that a module mock gives only awkwardly. The one thing that needs a module mock, the persistence argument to `initializeAuth`, has its own small test.
 
-#### RESOLVED: Commit reviewer: REPORT-167's spec hash was stale
-REPORT-167 was rebased (`eec896a`, content unchanged from `c51f93e`) and implemented (`64c0c09`) after this spec was written. The list route, its limits, `CatalogCors` and the 401 were read there. The Background now cites both.
+#### R4's planned test could not fail
+**Decision**: `ClassDashboard` in the throwaway build receives only `services` and `onExpired`; the `Launch` never reaches it (checked in the patch). A test that the page shows the scope endpoint's class rather than the launch's is true by construction. R4 now states the structural guarantee, R27 no longer claims a test for it, and the step says the page receives no launch.
+
+#### A refused profile listener left the packages section silently empty
+**Decision**: `watchDoc`'s error callback only logs (`app/src/shell/firebase.ts` on `main`), and the page renders nothing for a profile that never arrives: no reading line, no list, no reason. R11 now asks for a line, and the profile step adds `onError` to `watchDoc` and a test.
+
+#### Community's heading sat inside `<summary>`
+**Decision**: The throwaway build's `<summary><h3>…</h3></summary>` puts the heading inside a control whose children are presentational. The heading now precedes the disclosure in its own section, and the summary's text names the count.
+
+#### The refresh-once test could not fail
+**Decision**: Its second snapshot was `null` again. React skips a state update to the same value, so the refresh effect never re-ran, and deleting the `refreshed` ref left the suite green. Two distinct stale profiles catch it: with the ref deleted, the refresh was called twice. The profile step's tests now say so.
+
+#### No test could catch deleting the official sort key
+**Decision**: Every official row is grouped under Official (R18), so `byOfficialThenTitle`'s first comparison never decided anything, and deleting it left the suite green. The key is deleted and the comparator is `byTitle`.
