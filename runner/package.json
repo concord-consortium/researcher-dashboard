@@ -8,7 +8,9 @@
   },
   "scripts": {
     "start": "node server/index.js",
-    "test": "node --test \"test/**/*.test.js\""
+    "test": "node --test --test-force-exit \"test/**/*.test.js\"",
+    "contract:sync": "node scripts/contract.mjs sync",
+    "contract:check": "node scripts/contract.mjs check"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1134.0",

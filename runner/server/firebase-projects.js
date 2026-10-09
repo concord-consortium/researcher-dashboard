@@ -7,7 +7,8 @@
 // is wrong. The names are not always equal, which is what makes the pairing worth
 // writing down: CLUE production is portal row `collaborative-learning` against project
 // `collaborative-learning-ec215`. This follows
-// collaborative-learning/src/lib/firebase-config.ts, which pairs them the same way.
+// collaborative-learning/src/lib/firebase-config.ts, which pairs them the same way, and
+// portal-report/js/db.ts for report-service's two projects.
 //
 // None of this is secret. A Web API key identifies a project to Identity Toolkit and
 // carries quota; it authorizes nothing, and access is decided by the custom token and
@@ -16,6 +17,7 @@
 const PROJECTS = {
   "report-service-dev": {
     portalFirebaseApp: "report-service-dev",
+    clueProject: "collaborative-learning-staging",
     config: {
       apiKey: atob("QUl6YVN5Q3Z4S1d1WURnSjRyNG84SmVOQU9ZdXN4MGFWNzFfWXVF"),
       authDomain: "report-service-dev.firebaseapp.com",
@@ -24,6 +26,19 @@ const PROJECTS = {
       storageBucket: "report-service-dev.appspot.com",
       messagingSenderId: "402218300971",
       appId: "1:402218300971:web:32b7266ef5226ff7"
+    }
+  },
+  "report-service-pro": {
+    portalFirebaseApp: "report-service-pro",
+    clueProject: "collaborative-learning-ec215",
+    config: {
+      apiKey: atob("QUl6YVN5Qm1OU2EyVXozRGFFd0tjbHN2SFBCd2Z1Y1NtWldBQXpn"),
+      authDomain: "report-service-pro.firebaseapp.com",
+      databaseURL: "https://report-service-pro.firebaseio.com",
+      projectId: "report-service-pro",
+      storageBucket: "report-service-pro.appspot.com",
+      messagingSenderId: "22386066971",
+      appId: "1:22386066971:web:e0cdec7cb0f0893a8a5abe"
     }
   },
   "collaborative-learning-staging": {
@@ -37,22 +52,48 @@ const PROJECTS = {
       messagingSenderId: "822807055414",
       appId: "1:822807055414:web:9e08fe0f4ffaf6130f9c97"
     }
+  },
+  "collaborative-learning-ec215": {
+    portalFirebaseApp: "collaborative-learning",
+    config: {
+      apiKey: atob("QUl6YVN5QVV6T2JMblZESURYYTB4ZUxmSVpLV3BiLTJZSWpYSXBJ"),
+      authDomain: "collaborative-learning-ec215.firebaseapp.com",
+      databaseURL: "https://collaborative-learning-ec215.firebaseio.com",
+      projectId: "collaborative-learning-ec215",
+      storageBucket: "collaborative-learning-ec215.appspot.com",
+      messagingSenderId: "112537088884",
+      appId: "1:112537088884:web:c51b1b8432fff36faff221"
+    }
   }
 };
 
-export function firebaseConfig(projectId) {
-  const entry = PROJECTS[projectId];
-  if (!entry) {
+function entry(projectId) {
+  const found = PROJECTS[projectId];
+  if (!found) {
     throw new Error(
       `No Firebase config for project ${projectId}; known: ${Object.keys(PROJECTS).join(", ")}`
     );
   }
-  return entry.config;
+  return found;
 }
 
-// The portal `firebase_apps` row to ask for a token for this project. See above.
+export function firebaseConfig(projectId) {
+  return entry(projectId).config;
+}
+
+// The portal `firebase_apps` row whose tokens this project accepts. rigse keys
+// class_tokens by it (RIGSE-368), so it is what the runner looks a token up by.
 export function portalFirebaseApp(projectId) {
-  return firebaseConfig(projectId) && PROJECTS[projectId].portalFirebaseApp;
+  return entry(projectId).portalFirebaseApp;
+}
+
+// Which project holds CLUE for the environment a report-service project serves. Runner
+// configuration per environment, not a caller parameter (final-design.md section 13):
+// the payload's firebase_project says which environment this VM is in.
+export function clueProjectFor(reportServiceProject) {
+  const clue = entry(reportServiceProject).clueProject;
+  if (!clue) throw new Error(`${reportServiceProject} is not a report-service project, so it names no CLUE project`);
+  return clue;
 }
 
 export function knownProjects() {

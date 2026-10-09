@@ -1,28 +1,23 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import path from "node:path";
 import test, { after, before, describe } from "node:test";
-import { doc, getDoc } from "firebase/firestore";
-import { loadEnv } from "../server/config.js";
+import { Timestamp } from "firebase/firestore";
 import { FirestoreStore } from "../server/firestore.js";
-import { Runner } from "../server/runner.js";
-import { resultPath, classPath, researcherPath } from "../server/status.js";
-import { DirBackend, Syncer } from "../server/sync/index.js";
+import { ClassDocuments, RunnerStatus, resultPath, runnerPath, scopePath } from "../server/status.js";
 
 // Skipped unless the emulators are up, so the default `npm test` stays hermetic.
-// `make test-emulator` starts them and sets these.
+// `make test-emulator` starts them and sets these. Run against report-service's rules
+// (REPORT-143) as well, it shows the writes are the ones those rules accept.
 const FIRESTORE = process.env.FIRESTORE_EMULATOR_HOST;
 const AUTH = process.env.FIREBASE_AUTH_EMULATOR_HOST;
 const PROJECT = process.env.GCLOUD_PROJECT ?? "demo-researcher-dashboard";
 
 const PORTAL = "learn_portal_staging_concord_org";
+const PLATFORM_ID = "https://learn.portal.staging.concord.org";
 const USER = "439";
 const CLASS = "7be899cf".repeat(6);
 
-// The Auth emulator does not verify the signature, so a custom token can be built
-// here rather than minted by the portal. The claims are the session runner token's
-// from design.md: no class_hash, and the runner claim that the rules key on.
+// The Auth emulator does not verify the signature, so a custom token can be built here
+// rather than minted by the portal or the function.
 function customToken(claims) {
   const b64 = (o) => Buffer.from(JSON.stringify(o)).toString("base64url");
   const now = Math.floor(Date.now() / 1000);
@@ -41,127 +36,69 @@ function customToken(claims) {
   ].join(".");
 }
 
-const SESSION_TOKEN = customToken({
-  platform_user_id: USER,
-  platform_id: "https://learn.portal.staging.concord.org",
-  user_type: "researcher",
-  researcher_dashboard_runner: true
-});
+const IDENTITY = { platform_id: PLATFORM_ID, platform_user_id: 439, user_type: "researcher", researcher_dashboard_runner: true };
 
-describe("status writes against the Firestore emulator", { skip: !FIRESTORE || !AUTH }, () => {
-  let work;
-  let store;
-  let runner;
+describe("the runner's writes against the Firestore and Auth emulators", { skip: !FIRESTORE || !AUTH }, () => {
+  const emulators = { firestore: FIRESTORE, auth: AUTH };
+  let session;
+  let klass;
 
+  // The emulator's first write compiles the rules and takes about fifteen seconds, longer
+  // than a status write is allowed, so one unbounded write warms it first.
   before(async () => {
-    work = await mkdtemp(path.join(tmpdir(), "rd-emu-"));
-    store = new FirestoreStore({
-      projectId: PROJECT,
-      emulators: { firestore: FIRESTORE, auth: AUTH }
-    });
-    const env = {
-      ...loadEnv({ SYNC_BACKEND: "DIR", SYNC_DIR: path.join(work, "remote") }),
-      dataRoot: path.join(work, "data"),
-      workRoot: path.join(work, "work"),
-      packageTimeoutMs: 5000
-    };
-    runner = new Runner({
-      env,
-      makeStore: () => store,
-      makeFunctionClient: () => async () => { throw new Error("no function in this test"); },
-    makeSyncer: ({ root }) =>
-        new Syncer({ backend: new DirBackend(path.join(work, "remote")), root }),
-      readSecret: async () => "report-service-token",
-      netGuard: async () => ({ uid: 1000, binary: "stub" }),
-      steps: {
-        installCredential: async ({ sessionToken, store: s }) => {
-          if (sessionToken) await s.signIn(sessionToken);
-        },
-        resolvePackage: async () => ({ expected_duration_seconds: 5 }),
-        pullData: async () => ({ answers: 201, logs: 490, clue_documents: 12 }),
-        runPackage: async () => ({
-          version: 1,
-          summary: "12 documents, 201 answers",
-          sections: [{ title: "Counts", markdown: "ok" }]
-        })
-      }
-    });
-  });
+    session = new FirestoreStore({ projectId: PROJECT, emulators });
+    await session.signIn(customToken(IDENTITY));
+    klass = new FirestoreStore({ projectId: PROJECT, emulators });
+    await klass.signIn(customToken({ ...IDENTITY, class_hash: CLASS }));
+    await session.merge(runnerPath(PORTAL, USER), { platform_id: PLATFORM_ID, updated_at: session.serverTimestamp() });
+  }, { timeout: 60_000 });
 
   after(async () => {
-    await rm(work, { recursive: true, force: true });
+    await session?.close();
+    await klass?.close();
   });
 
-  const read = async (p) => (await getDoc(doc(store.db, p))).data();
-
-  test("signing in with a custom token carries the runner claims", async () => {
-    await runner.run({
-      microvmId: "mvm-emulator",
-      runHookPayload: JSON.stringify({
-        session_token: SESSION_TOKEN,
-        platform_user_id: USER,
-        portal: PORTAL,
-        firebase_project: PROJECT,
-        bucket: "researcher-dashboard-runner-staging",
-        report_server_token: "forwarded-report-server-token",
-        report_server_url: "https://report-server.example.org",
-        platform_id: "https://learn.portal.staging.concord.org",
-        function_url: "https://functions.example.org/researcherDashboard"
-      })
-    });
-
-    const token = await store.auth.currentUser.getIdTokenResult();
-    assert.equal(token.claims.researcher_dashboard_runner, true);
-    assert.equal(token.claims.platform_user_id, USER);
-    assert.equal(token.claims.class_hash, undefined, "the session token carries no class");
+  test("the claims Firebase verified are the ones the runner checks", async () => {
+    const claims = await session.claims();
+    assert.equal(claims.researcher_dashboard_runner, true);
+    assert.equal(claims.platform_user_id, 439, "a number, as rigse mints it");
+    assert.equal(claims.class_hash, undefined, "the session token carries no class");
+    assert.match(await session.idToken(true), /^ey/);
   });
 
-  test("the researcher document reaches ready with the launch fields", async () => {
-    const researcher = await read(researcherPath(PORTAL, USER));
-    assert.equal(researcher.state, "ready");
-    assert.equal(researcher.microvm_id, "mvm-emulator");
-    assert.ok(researcher.expires_at, "expires_at drives the /analyze duration refusal");
-    assert.ok(researcher.updated_at);
+  test("the status document is written with the server's time", async () => {
+    const status = new RunnerStatus({ store: session, portal: PORTAL, platformUserId: USER, platformId: PLATFORM_ID });
+    await status.write({ state: "ready", current_package: null, queue: [] });
+    const doc = await session.get(runnerPath(PORTAL, USER));
+    assert.equal(doc.state, "ready");
+    assert.ok(doc.updated_at instanceof Timestamp);
   });
 
-  test("an analysis writes a real document that reads back as done", async () => {
-    await runner.startPackage({
-      scope: { kind: "class", class_hash: CLASS, class_id: 111 },
-      package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
-      class_tokens: {
-        "report-service-dev": customToken({
-          platform_user_id: USER,
-          user_type: "researcher",
-          researcher_dashboard_runner: true,
-          class_hash: CLASS
-        })
-      }
-    });
-    await runner.currentRun?.done;
-
-    const analysis = await read(resultPath(PORTAL, CLASS, "demo"));
-    assert.equal(analysis.status, "done");
-    assert.equal(analysis.requested_by, USER);
-    assert.deepEqual(analysis.package, {
-      name: "demo",
-      version: "1.0.0",
-      checksum: "sha256:abc"
-    });
-    // display is the contract the dashboard app renders from, so it has to
-    // survive the round trip through Firestore intact.
-    assert.equal(analysis.display.summary, "12 documents, 201 answers");
-    assert.deepEqual(analysis.display.sections, [{ title: "Counts", markdown: "ok" }]);
-
-    const klass = await read(classPath(PORTAL, CLASS));
-    assert.equal(klass.data.answers, 201);
-    assert.equal(klass.last_pulled_by, USER);
-    assert.ok(klass.data.last_pull_at);
+  test("a claim, a stage and a finish land as one result, with Firestore timestamps", async () => {
+    const docs = new ClassDocuments({ store: klass, portal: PORTAL, classHash: CLASS, platformUserId: USER, platformId: PLATFORM_ID });
+    const pkg = { identity: "users/136/class-counts", version: "1.0.0", checksum: `sha256:${"ab".repeat(32)}` };
+    await docs.claim("users__136__class-counts", { pkg, imageVersion: "24.0", microvmId: "mvm-emulator", expectedDurationSeconds: 120 });
+    await docs.stage("users__136__class-counts", "pull");
+    await docs.done("users__136__class-counts", { pkg, imageVersion: "24.0", summary: "12 documents", display: "# Counts" });
+    const result = await klass.get(resultPath(PORTAL, CLASS, USER, "users__136__class-counts"));
+    assert.equal(result.status, "done");
+    assert.equal(result.display, "# Counts");
+    assert.equal(result.microvm_id, "mvm-emulator");
+    assert.ok(result.started_at instanceof Timestamp && result.finished_at instanceof Timestamp);
   });
 
-  test("suspend and resume are durable, not just in-memory", async () => {
-    await runner.suspend();
-    assert.equal((await read(researcherPath(PORTAL, USER))).state, "suspended");
-    await runner.resume();
-    assert.equal((await read(researcherPath(PORTAL, USER))).state, "ready");
+  test("the counts land on the researcher's scope document", async () => {
+    const docs = new ClassDocuments({ store: klass, portal: PORTAL, classHash: CLASS, platformUserId: USER, platformId: PLATFORM_ID });
+    await docs.counts({ answers: 201, logs: 490, clueDocuments: 22, logFreshnessAt: "2026-08-26T00:00:00Z" });
+    const doc = await klass.get(scopePath(PORTAL, CLASS, USER));
+    assert.equal(doc.data.answers, 201);
+    assert.ok(doc.data.last_pull_at instanceof Timestamp);
+    assert.ok(doc.data.log_freshness_at instanceof Timestamp);
+
+    // A later run that reports only answers leaves none of the earlier run's other counts.
+    await docs.counts({ answers: 7 });
+    const later = await klass.get(scopePath(PORTAL, CLASS, USER));
+    assert.deepEqual(Object.keys(later.data).sort(), ["answers", "last_pull_at"]);
+    assert.equal(later.platform_id, PLATFORM_ID);
   });
 });

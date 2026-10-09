@@ -1,34 +1,25 @@
-import path from "node:path";
-import { log, redact, setContext, timed } from "./log.js";
-import { defaultChainState, parseRunHookPayload, researcherPrefix } from "./config.js";
+import { log, setContext, timed } from "./log.js";
+import { defaultChainState, parseRunHookPayload, portalHost, researcherPrefix } from "./config.js";
 import { verifySandbox } from "./sandbox.js";
-import { PROXY_PORT, setupNamespace } from "./netns.js";
 import { STATES, VmState } from "./state.js";
-import { StatusWriter } from "./status.js";
-import { revokeOwnToken } from "./report-server.js";
+import { ClassDocuments, RunnerStatus, bounded } from "./status.js";
+import { askApplies, revokeOwnToken } from "./report-server.js";
+import { CHECKSUM, declaresPatterns, IDENTITY, VERSION, packageDocId } from "./package-fetch.js";
+import { CLUE_SOURCE } from "./steps.js";
 
 const EIGHT_HOURS_MS = 8 * 60 * 60 * 1000;
-
-// The claims a runner token carries, read without verifying the signature: Firebase
-// verifies it at sign-in, and this is only checking that the token says what the
-// request says. A token whose claims cannot be read at all is not rejected here, since
-// sign-in is the thing that decides whether it is real.
-export function tokenClaims(token) {
-  try {
-    const [, payload] = String(token).split(".");
-    if (!payload) return null;
-    const json = Buffer.from(payload.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8");
-    return JSON.parse(json)?.claims ?? null;
-  } catch {
-    return null;
-  }
-}
-
-function isTokenMap(value) {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-  const entries = Object.entries(value);
-  return entries.length > 0 && entries.every(([app, token]) => app !== "" && typeof token === "string" && token !== "");
-}
+// Kept back from the window for the last flush and the /terminate hook at the VM's cap.
+export const WINDOW_RESERVE_MS = 5 * 60_000;
+// The watchdog's margin on a declared duration (REPORT-143 R17), and the in-VM timeout's.
+export const PACKAGE_TIMEOUT_MARGIN_MS = 10 * 60_000;
+// /work refuses the VM until the function has recorded its launch, one transaction after
+// RunMicrovm returns (REPORT-143 R6a), so a 409 this soon after /run is retried.
+export const LAUNCH_RECORD_WINDOW_MS = 60_000;
+export const LAUNCH_RETRY_MS = 5_000;
+export const CLAIM_ATTEMPTS = 3;
+export const TOKEN_TIMEOUT_MS = 15_000;
+// The report-server revocation in /terminate, inside the hook's 60 seconds.
+export const REVOKE_TIMEOUT_MS = 10_000;
 
 export class HookError extends Error {
   constructor(status, message, extra = {}) {
@@ -38,49 +29,63 @@ export class HookError extends Error {
   }
 }
 
-// Orchestrates the VM's lifecycle. Everything that touches the world is injected:
-// the sync backend, the Firestore store, the egress setup, and the analysis steps.
-// That is what lets the tests drive the real state sequences without S3, Firestore
-// or cc-data.
+const sleepFor = (ms) => new Promise((resolve) => setTimeout(resolve, ms).unref?.());
+
+// Orchestrates the VM's lifecycle and its pull loop (final-design.md sections 6, 7 and
+// 10). Everything that touches the world is injected: the stores, the function, the
+// storage credentials, the sync and package backends, the egress setup and the package
+// steps. That is what lets the tests drive the real sequences without S3, Firestore,
+// report-service or cc-data.
 export class Runner {
   #vm = new VmState();
+  // The package running now, and the class store it writes its result through.
   #run = null;
-  // One signed-in connection per class, kept for the VM's life. The class token is
-  // good for an hour but the Firebase session it is exchanged for outlives it, and a
-  // resumed VM keeps it because memory is preserved.
+  // This request's session: the store the status document is written through.
+  #session = null;
+  // This request's class stores, by class hash. Never kept past the next /work.
   #classStores = new Map();
+  // Each resume starts a new epoch; a loop or a call from an earlier one stands down.
+  #epoch = 0;
+  #loop = null;
   #expiresAt = null;
-  // Set only when /run has finished. Lambda answers run-microvm before the hook
-  // completes, so a caller can reach /run-package while the payload is parsed but the
-  // package backend and syncer are not built yet.
+  #readyAt = null;
   #ready = false;
+  #suspendSeen = false;
+  // Failed claim attempts per queued entry, for this awake period: cleared when the
+  // entry's result is written and on every resume (R9).
+  #claimFailures = new Map();
+  // Verified manifests by identity, version and checksum, which never change for the
+  // VM's life, so a re-plan does not fetch and unpack the archive again.
+  #manifests = new Map();
+  // report-server's yes for a class, identity and version, for this awake period.
+  #applies = new Set();
+  // The last state the loop wrote, so an idle poll does not rewrite an unchanged document.
+  #lastWritten = null;
 
-  constructor({ env, makeStore, makeSyncer, makePackageBackend, makeStorage = () => null, makeFunctionClient, steps, unzip, startEgress, netGuard = verifySandbox, revokeReportServerToken = revokeOwnToken, now = () => Date.now(), processEnv = process.env }) {
+  constructor({ env, makeStore, makeSyncer, makePackageBackend, makeStorage = () => null, makeFunctionClient, steps, unzip, startEgress, netGuard = verifySandbox, revokeReportServerToken = revokeOwnToken, askAppliesRoute = askApplies, now = () => Date.now(), sleep = sleepFor, processEnv = process.env }) {
     this.env = env;
     this.processEnv = processEnv;
-    // The store and the syncer are built in /run, not here: the Firebase project
-    // and the bucket are per-VM values that arrive in runHookPayload, so neither
-    // can be constructed before that payload exists.
+    // The store, the syncer and the function client are built in /run, not here: the
+    // Firebase project, the bucket and the function's URL are per-VM values that arrive
+    // in runHookPayload.
     this.makeStore = makeStore;
+    this.makeSyncer = makeSyncer;
+    this.makePackageBackend = makePackageBackend;
     this.makeStorage = makeStorage;
     this.makeFunctionClient = makeFunctionClient;
-    // Packages live under their own prefix of the same bucket the researcher's data
-    // syncs to, so the backend is built per run like the syncer's; unzip is injected so
-    // the tests need neither S3 nor a real archive.
-    this.makePackageBackend = makePackageBackend;
     this.unzip = unzip;
-    // Builds the analysis namespace and starts the egress proxy. Injected so the tests
+    // Builds the package namespace and starts the egress proxy. Injected so the tests
     // need neither root nor a network, and so DIR mode can skip it.
     this.startEgress = startEgress;
-    this.store = null;
-    this.makeSyncer = makeSyncer;
     this.steps = steps;
     this.netGuard = netGuard;
-    // Injected so the tests need no network and DIR mode can decline to revoke.
     this.revokeReportServerToken = revokeReportServerToken;
+    this.askApplies = askAppliesRoute;
     this.now = now;
+    this.sleep = sleep;
     this.payload = null;
     this.syncer = null;
+    this.storage = null;
     this.status = null;
     this.microvmId = null;
   }
@@ -97,14 +102,26 @@ export class Runner {
     return this.#run;
   }
 
+  // Resolves when the pull loop now running stops: drained and suspended, or stood down.
+  get loop() {
+    return this.#loop;
+  }
+
   #requireStarted() {
     if (!this.#ready) throw new HookError(409, "VM has not completed /run");
   }
 
+  // ---- /run ----------------------------------------------------------------------
+
   // Lambda's /run. The payload is the only per-VM configuration, so a bad one fails
   // here rather than letting the VM serve traffic it cannot attribute.
   async run({ microvmId, runHookPayload }) {
-    this.microvmId = microvmId ?? null;
+    // /work, /idle and a claimed result all need the VM's own id (REPORT-143 R6a, R22a).
+    // A VM that cannot take work is stopped now rather than left awake.
+    if (typeof microvmId !== "string" || microvmId === "") {
+      throw new Error("/run's body carries no microvmId, so this VM could take no work");
+    }
+    this.microvmId = microvmId;
     this.payload = parseRunHookPayload(runHookPayload);
     setContext({ researcher: this.payload.platform_user_id, microvm_id: this.microvmId });
     // The switch is made when the process starts, which is the image build, before the
@@ -114,22 +131,8 @@ export class Runner {
     else log.error("aws.default_chain_enabled", { present: chain.present });
     this.callFunction = this.makeFunctionClient({ baseUrl: this.payload.function_url });
 
-    this.store = this.makeStore({ projectId: this.payload.firebase_project });
-    this.status = new StatusWriter({
-      store: this.store,
-      portal: this.payload.portal,
-      platformUserId: this.payload.platform_user_id,
-      platformId: this.payload.platform_id,
-      classStore: (classHash) => this.#classStores.get(classHash) ?? this.store
-    });
-
-    // Before anything else, and fatal if it fails. A package running as the
-    // analysis user can otherwise read execution-role credentials straight from
-    // IMDS, so a VM whose sandbox does not hold must not reach ready.
-    // The namespace and its proxy come up before the sandbox is verified, because the
-    // verification now asserts the proxy is reachable as well as that the metadata
-    // service is not: without the positive check, a namespace with no route at all
-    // would verify clean and leave every package silently offline.
+    // Before anything else, and fatal if it fails: a package running as the package
+    // user could otherwise read execution-role credentials straight from IMDS.
     if (this.startEgress) {
       this.proxyUrl = await timed("run.start_egress", {}, () => this.startEgress());
     }
@@ -137,250 +140,452 @@ export class Runner {
       this.netGuard({ uid: this.env.packageUid, proxyUrl: this.proxyUrl })
     );
 
-    // Before the first status write. Every write needs the session token's claims, so
-    // signing in later means the first one goes out unauthenticated and the rules
-    // refuse it.
-    await timed("run.sign_in", {}, () => this.steps.signIn({
-      store: this.store,
-      sessionToken: this.payload.session_token
-    }));
+    // Before the first status write, which needs the session token's claims. The claims
+    // Firebase verified must name this VM's researcher: the S3 prefix is built from it.
+    const store = await timed("run.sign_in", {}, () => this.#signIn(this.payload.firebase_project, this.payload.session_token));
+    this.#session = store;
+    this.status = new RunnerStatus({
+      store,
+      portal: this.payload.portal,
+      platformUserId: this.payload.platform_user_id,
+      platformId: this.payload.platform_id
+    });
 
     this.#expiresAt = this.now() + EIGHT_HOURS_MS;
     this.#vm.to(STATES.STARTING);
-    await this.status.researcher({
+    await this.status.writeFromHook("run", {
       state: STATES.STARTING,
       microvm_id: this.microvmId,
       image_version: this.env.imageVersion,
-      started_at: new Date(this.now()).toISOString(),
-      expires_at: new Date(this.#expiresAt).toISOString(),
+      expires_at: store.timestamp(new Date(this.#expiresAt)),
       current_package: null
     });
 
     // Every S3 call from here on, the pull-down first, goes through the broker's
     // credentials, fetched with this session's ID token (final-design.md section 11.3).
+    const prefix = researcherPrefix(this.payload.platform_user_id);
     this.storage = this.makeStorage({
       bucket: this.payload.bucket,
-      prefix: researcherPrefix(this.payload.platform_user_id),
-      fetchCredentials: async () => this.callFunction("storage-credentials", { idToken: await this.store.idToken(), body: {} })
+      prefix,
+      fetchCredentials: () => this.#call("storage-credentials", {})
     });
-    this.packageBackend = this.makePackageBackend?.({ bucket: this.payload.bucket, storage: this.storage });
+    this.packageBackend = this.makePackageBackend({ bucket: this.payload.bucket, storage: this.storage });
     this.syncer = this.makeSyncer({
       bucket: this.payload.bucket,
-      prefix: researcherPrefix(this.payload.platform_user_id),
+      prefix,
       root: this.env.dataRoot,
       storage: this.storage
     });
     if (this.storage) await timed("run.storage_credentials", {}, () => this.storage.client());
 
     await timed("run.pull_down", {}, () => this.syncer.pullDown());
-    // The researcher's own token, handed down in the payload, so there is nothing to
-    // fetch and no AWS call on this path.
-    const token = this.payload.report_server_token;
     await timed("run.install_credential", {}, () =>
-      this.steps.installCredential({
-        token,
-        portal: this.payload.portal
-      })
+      this.steps.installCredential({ token: this.payload.report_server_token, portal: this.payload.portal })
     );
 
-    // Started only once the VM can actually serve, so a tick can never race the
-    // pull that is still writing the tree it would scan.
+    // Started only once the VM can serve, so a tick can never race the pull that is
+    // still writing the tree it would scan.
     this.syncer.start();
-
     this.#vm.to(STATES.READY);
     this.#ready = true;
-    await this.status.researcher({ state: STATES.READY, classes: await this.#heldClasses() });
+    this.#readyAt = this.now();
+    await this.status.writeFromHook("run", { state: STATES.READY, scopes: await this.#heldScopes() });
+
+    // The queue is asked for once /run has answered Lambda, which gives it 60 seconds.
+    this.#startLoop({ afterResume: false });
     return { state: this.#vm.state };
   }
 
-  // Validation order matters: every refusal below happens before the result document
-  // is touched, so a refused request leaves Firestore unchanged.
-  async startPackage(body) {
-    this.#requireStarted();
-    const { scope, package: pkg, class_tokens: classTokens } = body ?? {};
-
-    // class_id as well as class_hash: Firestore and CLUE key on the hash, while
-    // report-server filters a run by the portal's numeric class id, and nothing in the
-    // VM can derive one from the other.
-    if (!scope || scope.kind !== "class" || typeof scope.class_hash !== "string") {
-      throw new HookError(400, "scope must be {kind: 'class', class_hash, class_id}");
-    }
-    if (scope.class_id === undefined || scope.class_id === null || scope.class_id === "") {
-      throw new HookError(400, "scope must carry class_id, which report-server filters runs by");
-    }
-    if (!pkg?.name || !pkg?.version || !pkg?.checksum) {
-      throw new HookError(400, "package must carry name, version and checksum");
-    }
-    // The package name is the result document's id, so it has to be a single path
-    // segment; a name with a slash would silently write a nested collection.
-    if (pkg.name.includes("/") || pkg.name === "." || pkg.name === "..") {
-      throw new HookError(400, "package name must be a single path segment");
-    }
-    // One class token per Firebase project the analysis touches, keyed by FirebaseApp
-    // name, since a custom token is signed by one project's service account and cannot
-    // be exchanged in another.
-    if (!isTokenMap(classTokens)) {
-      throw new HookError(400, "class_tokens must map a firebase app name to a token");
-    }
-    // The mint is the only gate on which class a researcher may read, and the design
-    // says so explicitly. This is the second line: a token that names a different class
-    // or a different researcher than the request would pull another class's student
-    // work into this researcher's prefix and hand it to their package. Cheap to check,
-    // and it fails a launcher bug loudly instead of silently mixing corpora.
-    for (const [app, token] of Object.entries(classTokens)) {
-      const claims = tokenClaims(token);
-      if (!claims) continue;
-      if (claims.class_hash && claims.class_hash !== scope.class_hash) {
-        throw new HookError(400, `the ${app} class token names class ${claims.class_hash}, not the requested class`);
-      }
-      if (claims.platform_user_id != null
-          && String(claims.platform_user_id) !== String(this.payload.platform_user_id)) {
-        throw new HookError(400, `the ${app} class token belongs to another researcher`);
-      }
-    }
-    if (this.#run) {
-      throw new HookError(409, "a package is already running on this VM", {
-        package: this.#run.packageName
-      });
-    }
-    // Claimed synchronously, before the first await. resolvePackage and
-    // resultStarted both yield, so a guard that only set #run afterwards let
-    // two concurrent /analyze calls past it, and only one of them would then be
-    // terminated or cleared. The claim is released on every refusal below, or a
-    // rejected request would leave the VM permanently busy.
-    const classHash = scope.class_hash;
-    const classId = scope.class_id;
-    const packageName = pkg.name;
-    this.#run = { packageName, classHash };
-
-    let record;
+  // A store signed in with `token`, whose Firebase-verified claims name this VM's
+  // researcher and portal and carry the runner claim; and, for a class token, its class.
+  async #signIn(projectId, token, classHash = null) {
+    const store = this.makeStore({ projectId });
     try {
-      // Resolving the package is what yields its declared duration, so it has to
-      // precede the expiry check. It writes nothing to Firestore.
-      const manifest = await this.steps.resolvePackage({
-        pkg,
-        backend: this.packageBackend,
-        workRoot: this.env.workRoot,
-        unzip: this.unzip
-      });
-      const expectedMs = (manifest.expected_duration_seconds ?? 0) * 1000;
-      const remainingMs = this.#expiresAt - this.now();
-      if (remainingMs < expectedMs) {
-        throw new HookError(
-          409,
-          `VM expires in ${Math.floor(remainingMs / 1000)}s, less than the package's expected ${manifest.expected_duration_seconds}s`
-        );
+      await store.signIn(token);
+      const claims = await store.claims();
+      const refuse = (why) => { throw new Error(`the ${classHash ? `class ${classHash}` : "session"} token ${why}`); };
+      if (claims.platform_user_id == null || String(claims.platform_user_id) !== String(this.payload.platform_user_id)) {
+        refuse(`names researcher ${claims.platform_user_id}, not ${this.payload.platform_user_id}`);
       }
-
-      setContext({ class_hash: classHash, package: packageName });
-      await this.#signInForClass(classHash, classTokens);
-      await this.status.resultStarted(classHash, packageName, {
-        pkg,
-        requestedBy: this.payload.platform_user_id
-      });
-
-      this.#vm.to(STATES.RUNNING);
-      await this.status.researcher({
-        state: STATES.RUNNING,
-        current_package: packageName,
-        classes: await this.#heldClasses(classHash)
-      });
-
-      record = { packageName, classHash, classId, classTokens, manifest, pkg };
-      this.#run = record;
+      if (claims.platform_id !== this.payload.platform_id) refuse(`names portal ${claims.platform_id}, not ${this.payload.platform_id}`);
+      if (claims.researcher_dashboard_runner !== true) refuse("carries no runner claim");
+      if (classHash && claims.class_hash !== classHash) refuse(`names class ${claims.class_hash}`);
+      return store;
     } catch (err) {
-      this.#run = null;
+      await store.close?.().catch(() => {});
       throw err;
     }
-
-    // The caller gets 202 as soon as the document exists; the work continues here.
-    record.done = this.#runPackage(record).catch((err) =>
-      log.error("package.unhandled", { error: err.message })
-    );
-
-    return {
-      package: packageName,
-      doc_path: `researcher_dashboard/${this.payload.portal}/classes/${classHash}/results/${packageName}`
-    };
   }
 
-  async #runPackage(record) {
-    const { packageName, classHash } = record;
-    let timer;
-    const timeout = new Promise((_, reject) => {
-      timer = setTimeout(
-        () => reject(new Error(`analysis exceeded ${this.env.packageTimeoutMs}ms`)),
-        this.env.packageTimeoutMs
-      );
-    });
+  // One call to the function, authenticated as this request's session.
+  async #call(route, body, { force = false } = {}) {
+    const idToken = await bounded(this.#session.idToken(force), TOKEN_TIMEOUT_MS, "an ID token");
+    return this.callFunction(route, { idToken, body });
+  }
 
-    try {
-      const result = await Promise.race([this.#runSteps(record), timeout]);
-      await this.status.classCounts(classHash, result.counts);
-      await this.status.resultDone(classHash, packageName, result.display);
-    } catch (err) {
-      log.error("package.failed", { error: err.message });
-      await this.status.resultFailed(classHash, packageName, redact(err.message));
-    } finally {
-      // Cleared rather than unref'd: unref would stop the timeout firing whenever
-      // nothing else holds the loop, and leaving it armed would keep a handle alive
-      // for the full timeout after a fast analysis.
-      clearTimeout(timer);
-      this.#run = null;
-      setContext({ class_hash: null, package: null });
-      // An analysis failure is the analysis's, not the VM's: the VM is still able
-      // to serve, so it returns to ready. Only a failed sync makes the VM failed.
-      if (!this.#vm.isTerminal && this.#vm.state === STATES.RUNNING) {
-        this.#vm.to(STATES.READY);
-        await this.status.researcher({ state: STATES.READY, current_package: null });
+  async #heldScopes(alsoHolding) {
+    const held = await this.steps.heldClasses({ dataRoot: this.env.dataRoot });
+    return [...new Set([...held, ...(alsoHolding ? [alsoHolding] : [])])].sort();
+  }
+
+  // ---- the pull loop -------------------------------------------------------------
+
+  #startLoop({ afterResume }) {
+    const epoch = this.#epoch;
+    this.#loop = this.#workLoop(epoch, afterResume).catch((err) => log.error("work.loop_failed", { error: err.message }));
+  }
+
+  #current(epoch) {
+    return epoch === this.#epoch && !this.#vm.isTerminal;
+  }
+
+  // Asks for work, runs it one package at a time, asking again after each, and once
+  // nothing is left, keeps asking through the idle period before asking to be
+  // suspended (final-design.md 7.2(b)). Every answer from an earlier epoch is ignored.
+  async #workLoop(epoch, afterResume) {
+    let force = afterResume;
+    let idleSince = null;
+    let refreshed = !afterResume;
+    while (this.#current(epoch)) {
+      let answer;
+      try {
+        answer = await this.#call("work", { microvm_id: this.microvmId }, { force });
+      } catch (err) {
+        if (!this.#current(epoch)) return;
+        const launching = err.status === 409 && this.now() - this.#readyAt < LAUNCH_RECORD_WINDOW_MS;
+        log.warn("work.failed", { status: err.status ?? null, error: err.message, retry_in_ms: launching ? LAUNCH_RETRY_MS : this.env.idlePollMs });
+        await this.sleep(launching ? LAUNCH_RETRY_MS : this.env.idlePollMs);
+        continue;
+      }
+      if (!this.#current(epoch)) return;
+      force = false;
+
+      let request;
+      try {
+        request = await this.#adopt(answer);
+      } catch (err) {
+        log.error("work.token_refused", { error: err.message });
+        await this.sleep(this.env.idlePollMs);
+        continue;
+      }
+
+      // After a resume: fresh credentials before the syncer ticks again, and nothing
+      // claimed until a package the suspend interrupted has finished.
+      if (!refreshed) {
+        try {
+          this.storage?.markStale();
+          if (this.storage) await this.storage.client();
+        } catch (err) {
+          log.error("storage.credentials_failed", { error: err.message });
+          await this.sleep(this.env.idlePollMs);
+          continue;
+        }
+        this.syncer.start();
+        refreshed = true;
+      }
+      if (this.#run) await this.#run.done;
+      if (!this.#current(epoch)) return;
+
+      const next = await this.#plan(request);
+      if (!this.#current(epoch)) return;
+      if (next) {
+        idleSince = null;
+        await this.#runPackage(request, next);
+        continue;
+      }
+
+      if (this.#lastWritten !== STATES.READY) {
+        const written = await this.status.writeFromHook("work", { state: STATES.READY, current_package: null, queue: [] });
+        if (written) this.#lastWritten = STATES.READY;
+      }
+      if (this.#vm.state === STATES.RUNNING) this.#vm.to(STATES.READY);
+      idleSince ??= this.now();
+      if (this.now() - idleSince < this.env.idlePeriodMs) {
+        await this.sleep(this.env.idlePollMs);
+        continue;
+      }
+
+      // The flush the /suspend hook would make, made first, so no suspend depends on the
+      // hook being delivered (REPORT-143 R1).
+      const flushed = await this.syncer.flushAndVerify("idle");
+      if (!this.#current(epoch)) return;
+      if (!flushed.ok) {
+        log.error("sync.failed", { hook: "idle", error: flushed.reason });
+        idleSince = this.now();
+        continue;
+      }
+      let idle;
+      try {
+        idle = await this.#call("idle", { microvm_id: this.microvmId });
+      } catch (err) {
+        if (!this.#current(epoch)) return;
+        log.warn("idle.failed", { status: err.status ?? null, error: err.message });
+        idleSince = this.now();
+        continue;
+      }
+      if (!this.#current(epoch)) return;
+      if (idle.work_queued) {
+        idleSince = null;
+        continue;
+      }
+      if (idle.suspended) {
+        log.info("idle.suspended", {});
+        return;
       }
     }
   }
 
-  // Which classes the status bar says this VM can answer for. Derived from the synced
-  // tree so there is one account of it, plus a class just accepted, whose directory the
-  // pull has not created yet.
-  async #heldClasses(alsoHolding) {
-    const held = await this.steps.heldClasses({ dataRoot: this.env.dataRoot });
-    const all = alsoHolding ? [...new Set([...held, alsoHolding])] : held;
-    return all.sort();
-  }
-
-  // The session token carries no class_hash, so it cannot write this class's documents:
-  // report-service's rules refuse it rather than ignoring the mismatch. This exchanges
-  // the class token for that project once and keeps the session.
-  async #signInForClass(classHash, classTokens) {
-    if (this.#classStores.has(classHash)) return this.#classStores.get(classHash);
-    const projectId = this.payload.firebase_project;
-    const token = classTokens?.[projectId];
-    if (!token) {
-      throw new HookError(400, `class_tokens carries no token for ${projectId}, so this class's results cannot be written`);
+  // Adopts a /work answer: a new session store and a new store per class, each signed
+  // in with this answer's tokens and checked against this VM's researcher before its
+  // first write. The last request's stores are closed, except one a package still uses.
+  async #adopt(answer) {
+    if (answer.firebase_project !== this.payload.firebase_project) {
+      throw new Error(`/work names project ${answer.firebase_project}, not ${this.payload.firebase_project}`);
     }
-    const store = this.makeStore({ projectId, appName: `runner-${projectId}-${classHash}` });
-    await store.signIn(token);
-    this.#classStores.set(classHash, store);
-    log.info("status.class_signed_in", { class_hash: classHash, project: projectId });
-    return store;
+    const session = await this.#signIn(this.payload.firebase_project, answer.session_token);
+    const classStores = new Map();
+    const scopes = answer.scopes ?? {};
+    for (const [classHash, { class_tokens: tokens }] of Object.entries(scopes)) {
+      const token = tokens?.[this.payload.firebase_project];
+      if (!token) {
+        log.error("work.class_refused", { class_hash: classHash, error: `no class token for ${this.payload.firebase_project}` });
+        continue;
+      }
+      try {
+        classStores.set(classHash, await this.#signIn(this.payload.firebase_project, token, classHash));
+      } catch (err) {
+        log.error("work.class_refused", { class_hash: classHash, error: err.message });
+      }
+    }
+
+    const retiring = [this.#session, ...this.#classStores.values()].filter((s) => s && s !== this.#run?.store);
+    this.#session = session;
+    this.status.store = session;
+    this.#classStores = classStores;
+    await Promise.all(retiring.map((s) => s.close?.().catch(() => {})));
+    return { packages: answer.packages ?? [], scopes, classStores };
   }
 
-  async #runSteps(record) {
-    const { packageName, classHash, classId, classTokens, manifest } = record;
+  #docs(classHash, store) {
+    return new ClassDocuments({
+      store,
+      portal: this.payload.portal,
+      classHash,
+      platformUserId: this.payload.platform_user_id,
+      platformId: this.payload.platform_id
+    });
+  }
+
+  // Everything that can refuse a package without running it, for every package in the
+  // answer, in order: the catalog grammar, its class's store and scope, the fetch and
+  // checksum, the manifest, the ceiling, applicability and the window. A refused package
+  // is written `failed`, never `running`. Returns the first package to run, if any.
+  async #plan(request) {
+    const candidates = [];
+    // Entries this plan wrote `failed`, which are no longer queued.
+    const resolved = new Set();
+    for (const entry of request.packages) {
+      const store = request.classStores.get(entry.class_hash);
+      if (!store) continue;
+      if ((this.#claimFailures.get(this.#claimKey(entry)) ?? 0) >= CLAIM_ATTEMPTS) continue;
+      const docs = this.#docs(entry.class_hash, store);
+      const pkg = { identity: entry.identity, version: entry.version, checksum: entry.checksum };
+      const refuse = async (error) => {
+        log.warn("package.refused", { scope: entry.class_hash, package: entry.identity, error });
+        try {
+          await docs.failed(IDENTITY.test(entry.identity) ? packageDocId(entry.identity) : entry.package_key, { pkg, error });
+          this.#resolved(entry, resolved);
+        } catch (err) {
+          this.#noteClaimFailure(entry, err);
+        }
+      };
+
+      if (!IDENTITY.test(entry.identity ?? "") || !VERSION.test(entry.version ?? "") || !CHECKSUM.test(entry.checksum ?? "")
+          || !Number.isInteger(entry.catalog_id) || entry.catalog_id < 1) {
+        if (IDENTITY.test(entry.identity ?? "")) await refuse("the queued package does not match the catalog's grammar");
+        else log.error("package.refused", { error: `unusable identity ${entry.identity}` });
+        continue;
+      }
+      const docId = packageDocId(entry.identity);
+      if (entry.package_key !== undefined && entry.package_key !== docId) {
+        await refuse(`/work named this package ${entry.package_key}, but its identity is ${docId}`);
+        continue;
+      }
+      const scope = request.scopes[entry.class_hash]?.scope;
+      const scopeProblem = checkScope(scope, entry.class_hash);
+      if (scopeProblem) {
+        await refuse(scopeProblem);
+        continue;
+      }
+
+      const archiveKey = `${entry.identity}@${entry.version}@${entry.checksum}`;
+      let manifest = this.#manifests.get(archiveKey);
+      if (!manifest) {
+        try {
+          manifest = await this.steps.resolvePackage({ pkg, backend: this.packageBackend, workRoot: this.env.workRoot, unzip: this.unzip });
+        } catch (err) {
+          await refuse(err.message);
+          continue;
+        }
+        this.#manifests.set(archiveKey, manifest);
+      }
+      const declared = manifest.expected_duration_seconds;
+      if (declared > this.env.packageMaxDurationSeconds) {
+        await refuse(`the package declares ${declared}s, over the runner's ceiling of ${this.env.packageMaxDurationSeconds}s`);
+        continue;
+      }
+      const appliesKey = `${entry.class_hash}/${entry.identity}@${entry.version}`;
+      if (declaresPatterns(manifest.urls) && !this.#applies.has(appliesKey)) {
+        let profile;
+        try {
+          profile = await docs.profile();
+        } catch (err) {
+          this.#noteClaimFailure(entry, err);
+          continue;
+        }
+        if (!profile) {
+          await refuse("this class's authored profile has not been derived yet; open the dashboard for it and run the package again");
+          continue;
+        }
+        let verdict;
+        try {
+          verdict = await this.askApplies({
+            baseUrl: this.payload.report_server_url,
+            token: this.payload.report_server_token,
+            urls: manifest.urls,
+            scopeUrls: [...(profile.assignment_urls ?? []), ...(profile.interactive_urls ?? [])]
+          });
+        } catch (err) {
+          log.warn("report_server.refused", { call: "applies", scope: entry.class_hash, package: entry.identity, status: err.status ?? null, error: err.message });
+          if (err.refusal) {
+            await refuse(`report-server would not check this package against this class: ${err.message}`);
+          } else if (this.#noteClaimFailure(entry, err) >= CLAIM_ATTEMPTS) {
+            // Left queued, the package would keep the VM awake until its cap, since /idle
+            // declines to suspend while work is queued.
+            await refuse(`report-server could not say whether the package applies to this class (${err.message}); run it again`);
+          }
+          continue;
+        }
+        if (!verdict.applies) {
+          await refuse(`the package does not apply to this class: ${verdict.reason}`);
+          continue;
+        }
+        this.#applies.add(appliesKey);
+      }
+      candidates.push({ entry, pkg, docId, docs, store, scope, manifest, declared });
+    }
+
+    // The window, up front: the answer's declared durations in order, against what the
+    // VM has left; from the package the window runs out on, every one is failed.
+    const left = this.#expiresAt - WINDOW_RESERVE_MS - this.now();
+    let sum = 0;
+    let runnable = null;
+    for (const candidate of candidates) {
+      sum += candidate.declared * 1000;
+      if (sum > left) {
+        await candidate.docs.failed(candidate.docId, {
+          pkg: candidate.pkg,
+          error: `VM window exhausted: ${Math.max(0, Math.floor(left / 1000))}s left, and this package and the ones before it declare ${Math.floor(sum / 1000)}s`
+        }).then(() => this.#resolved(candidate.entry, resolved), (err) => this.#noteClaimFailure(candidate.entry, err));
+        continue;
+      }
+      runnable ??= candidate;
+    }
+    return runnable && { ...runnable, resolved };
+  }
+
+  #claimKey(entry) {
+    return `${entry.class_hash}/${entry.identity}`;
+  }
+
+  // The entry's result is written, so it starts again from no failed attempts if it is
+  // queued again (REPORT-143 re-appends a finished package).
+  #resolved(entry, resolved) {
+    this.#claimFailures.delete(this.#claimKey(entry));
+    resolved?.add(this.#claimKey(entry));
+  }
+
+  #noteClaimFailure(entry, err) {
+    const key = this.#claimKey(entry);
+    const count = (this.#claimFailures.get(key) ?? 0) + 1;
+    this.#claimFailures.set(key, count);
+    log.error("package.claim_failed", { scope: entry.class_hash, package: entry.identity, attempt: count, error: err.message });
+    return count;
+  }
+
+  async #runPackage(request, next) {
+    const { entry, pkg, docId, docs, store, scope, manifest, declared, resolved } = next;
+    let resolveDone;
+    this.#run = { docId, classHash: entry.class_hash, identity: entry.identity, store, docs, pkg, done: new Promise((r) => { resolveDone = r; }) };
+    setContext({ scope: entry.class_hash, package: entry.identity });
+    try {
+      try {
+        await docs.claim(docId, { pkg, imageVersion: this.env.imageVersion, microvmId: this.microvmId, expectedDurationSeconds: declared });
+      } catch (err) {
+        this.#noteClaimFailure(entry, err);
+        return;
+      }
+      this.#resolved(entry);
+      if (this.#vm.state !== STATES.RUNNING) this.#vm.to(STATES.RUNNING);
+      // R8: what is still queued, so neither the claimed entry nor one this plan failed.
+      const queue = request.packages
+        .filter((p) => this.#claimKey(p) !== this.#claimKey(entry) && !resolved.has(this.#claimKey(p)))
+        .map((p) => ({ class_hash: p.class_hash, package_key: IDENTITY.test(p.identity ?? "") ? packageDocId(p.identity) : p.package_key }));
+      this.#lastWritten = STATES.RUNNING;
+      await this.status.writeFromHook("work", {
+        state: STATES.RUNNING,
+        current_package: { class_hash: entry.class_hash, package_key: docId },
+        queue,
+        scopes: await this.#heldScopes(entry.class_hash)
+      });
+
+      const timeoutMs = this.env.packageTimeoutMs ?? declared * 1000 + PACKAGE_TIMEOUT_MARGIN_MS;
+      let timer;
+      const timeout = new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`the package ran past its ${Math.round(timeoutMs / 1000)}s bound`)), timeoutMs);
+      });
+      try {
+        const classTokens = request.scopes[entry.class_hash]?.class_tokens;
+        const result = await Promise.race([this.#steps({ entry, docId, docs, scope, manifest, classTokens, timeoutMs }), timeout]);
+        try {
+          await docs.counts(result.counts);
+        } catch (err) {
+          log.error("status.write_failed", { write: "counts", error: err.message });
+        }
+        await docs.done(docId, { pkg, imageVersion: this.env.imageVersion, summary: result.summary, display: result.display });
+      } catch (err) {
+        log.error("package.failed", { error: err.message });
+        await docs.failed(docId, { pkg, error: err.message })
+          .catch((writeErr) => log.error("status.write_failed", { write: "result", error: writeErr.message }));
+      } finally {
+        clearTimeout(timer);
+      }
+    } finally {
+      const run = this.#run;
+      this.#run = null;
+      setContext({ scope: null, package: null });
+      if (this.#vm.state === STATES.RUNNING) this.#vm.to(STATES.READY);
+      // A class store the adoption kept for this run goes now.
+      if (run && ![...this.#classStores.values()].includes(run.store)) await run.store.close?.().catch(() => {});
+      resolveDone();
+    }
+  }
+
+  async #steps({ entry, docId, docs, scope, manifest, classTokens, timeoutMs }) {
     const stage = async (name, fn) => {
-      await this.status.resultStage(classHash, packageName, name);
+      await docs.stage(docId, name);
       return timed(`package.${name}`, {}, fn);
     };
-
-    // The runner pulls only what needs a credential the package must not hold, which
-    // today is CLUE: its class runner token is a Firebase credential, where the
-    // report-server token is the researcher's own and can be handed over.
-    const counts = await stage("pull", () =>
+    const pulled = await stage("pull", () =>
       this.steps.pullData({
-        classHash,
+        classHash: entry.class_hash,
         classTokens,
         manifest,
         portal: this.payload.portal,
         dataRoot: this.env.dataRoot,
-        makeStore: this.makeStore
+        makeStore: this.makeStore,
+        firebaseProject: this.payload.firebase_project,
+        now: this.now
       })
     );
 
@@ -388,11 +593,13 @@ export class Runner {
       this.steps.preparePackage({
         workRoot: this.env.workRoot,
         dataRoot: this.env.dataRoot,
-        classHash,
-        classId,
-        packageName,
+        classHash: entry.class_hash,
+        docId,
+        scope,
+        catalogId: entry.catalog_id,
+        clueSource: CLUE_SOURCE,
         portal: this.payload.portal,
-        reportServerToken: this.payload.report_server_token,
+        token: this.payload.report_server_token,
         reportServerUrl: this.payload.report_server_url,
         bucket: this.payload.bucket,
         storagePrefix: researcherPrefix(this.payload.platform_user_id),
@@ -401,141 +608,136 @@ export class Runner {
       })
     );
 
-    // Diagnostic, not a gate: it says what the package's own uid sees of its data
-    // directory, which is otherwise only visible as an errno from inside the package.
+    // Diagnostic, not a gate: what the package's own uid sees of its data directory.
     try {
-      const probe = await this.steps.probeWritable({
-        uid: this.env.packageUid,
-        dir: prepared.paths.dataDir
-      });
+      const probe = await this.steps.probeWritable({ uid: this.env.packageUid, dir: prepared.paths.dataDir });
       log.info("package.write_probe", { output: String(probe?.stdout ?? probe ?? "").trim() });
     } catch (err) {
       log.warn("package.write_probe_failed", { error: err.message });
     }
 
-    const display = await stage("run_package", () =>
+    const written = await stage("run_package", () =>
       this.steps.runPackage({
         manifest,
         paths: prepared.paths,
         env: prepared.env,
         uid: this.env.packageUid,
-        timeoutMs: this.env.packageTimeoutMs,
+        timeoutMs,
         proxyUrl: this.proxyUrl
       })
     );
 
-    // The package made the AP and log pulls, so it knows those counts and cannot write
-    // Firestore. Its numbers do not overwrite the runner's own: clue_documents is the
-    // runner's, and a package that reports it anyway does not get to claim it.
+    // The package made the AP and log pulls, so it knows those counts; clue_documents is
+    // the runner's own and a package does not get to claim it.
     const reported = await this.steps.readPackageCounts({ outputDir: prepared.paths.outputDir });
-    Object.assign(counts, reported, counts);
-
-    return { counts, display };
+    return {
+      summary: written.summary,
+      display: written.display,
+      counts: {
+        answers: reported.answers,
+        logs: reported.logs,
+        logFreshnessAt: reported.log_freshness_at,
+        clueDocuments: pulled.clue_documents
+      }
+    };
   }
+
+  // ---- the lifecycle hooks -------------------------------------------------------
 
   async suspend() {
     this.#requireStarted();
+    this.#suspendSeen = true;
     this.#vm.to(STATES.SUSPENDING);
-    await this.status.researcher({ state: STATES.SUSPENDING });
+    await this.status.writeFromHook("suspend", { state: STATES.SUSPENDING });
+    this.syncer.stop();
 
+    // The one hook result that is allowed to fail: a suspend on a sync that cannot be
+    // proven is exactly what this contract exists to refuse (final-design.md 7.1(a)).
     const result = await this.syncer.flushAndVerify("suspend");
     if (!result.ok) {
       this.#vm.to(STATES.FAILED);
-      await this.status.researcher({ state: STATES.FAILED, error: result.reason });
+      log.error("sync.failed", { hook: "suspend", error: result.reason });
+      await this.status.writeFromHook("suspend", { state: STATES.FAILED, error: result.reason });
       throw new HookError(500, result.reason);
     }
-
-    this.syncer.stop();
     this.#vm.to(STATES.SUSPENDED);
-    await this.status.researcher({ state: STATES.SUSPENDED });
+    // current_package and queue are kept by not being written: they are what tells
+    // "paused while idle" from "suspended mid-run" (final-design.md 7.2(d)).
+    await this.status.writeFromHook("suspend", { state: STATES.SUSPENDED });
     return { state: this.#vm.state, ...result };
   }
 
-  async resume() {
+  // Writes nothing and awaits nothing (final-design.md 7.1(a)): the session is stale, and
+  // a write on it could hang past the hook's 60 seconds. The loop that follows asks for
+  // work with a fresh ID token, adopts new stores and fetches new credentials.
+  resume() {
     this.#requireStarted();
-    // A suspended VM's clock cannot be trusted to have moved, so the first S3 call after
-    // a resume fetches new credentials.
+    this.#epoch += 1;
+    // /suspend wrote suspended, so the next drained answer writes ready again.
+    this.#lastWritten = null;
+    this.#claimFailures.clear();
+    this.#applies.clear();
+    if (!this.#suspendSeen) log.warn("lifecycle.resume_without_suspend", {});
+    this.#suspendSeen = false;
     this.storage?.markStale();
-    this.#vm.to(STATES.READY);
-    this.syncer.start();
-    await this.status.researcher({ state: STATES.READY });
+    this.syncer.stop();
+    if (this.#vm.state === STATES.SUSPENDED || this.#vm.state === STATES.FAILED) this.#vm.to(STATES.READY);
+    this.#startLoop({ afterResume: true });
     return { state: this.#vm.state };
   }
 
   async terminate() {
     this.#requireStarted();
-    // A VM torn down mid-analysis leaves a document that would otherwise read
-    // `running` forever, so it is failed here before the VM stops writing.
+    this.#epoch += 1;
+    // First, so it lands inside the hook's 60 seconds whatever the flush costs: a run
+    // outstanding at termination was interrupted, whether or not the flush completes.
     if (this.#run) {
-      const { classHash, packageName } = this.#run;
-      await this.status.resultFailed(classHash, packageName, "VM terminated during the package run");
-      this.#run = null;
-    }
-
-    // Before the sync, because the sync can fail the hook and the credential should
-    // stop working whether or not the data made it out. Revocation needs nothing from S3.
-    if (this.payload.report_server_token) {
+      const { docs, docId, pkg } = this.#run;
       try {
-        await this.revokeReportServerToken({
-          baseUrl: this.payload.report_server_url,
-          token: this.payload.report_server_token
-        });
-        log.info("terminate.revoked", {});
+        await docs.failed(docId, { pkg, error: "VM terminated during the package run" });
       } catch (err) {
-        // The VM is going either way, and an unrevoked token is a residual the design
-        // accepts: the researcher's next launch revokes it when it mints the next one.
-        // Failing the hook here would buy nothing and would mark the researcher's
-        // document failed for something that is not a data loss.
-        log.warn("terminate.revoke_failed", { error: err.message });
+        log.error("status.write_failed", { hook: "terminate", write: "result", error: err.message });
       }
     }
 
-    const result = await this.syncer.flushAndVerify("terminate");
+    // Before the sync, because the sync can fail the hook and the credential should
+    // stop working whether or not the data made it out.
+    try {
+      await bounded(this.revokeReportServerToken({
+        baseUrl: this.payload.report_server_url,
+        token: this.payload.report_server_token
+      }), REVOKE_TIMEOUT_MS, "the revocation");
+      log.info("terminate.revoked", {});
+    } catch (err) {
+      // An unrevoked token is a residual the design accepts: it expires after nine hours
+      // and the researcher's next launch revokes it (final-design.md 11.2).
+      log.warn("report_server.refused", { call: "revoke", error: err.message });
+    }
+
     this.syncer.stop();
+    const result = await this.syncer.flushAndVerify("terminate");
     if (!result.ok) {
       this.#vm.to(STATES.FAILED);
-      await this.status.researcher({ state: STATES.FAILED, error: result.reason });
+      log.error("sync.failed", { hook: "terminate", error: result.reason });
+      await this.status.writeFromHook("terminate", { state: STATES.FAILED, error: result.reason });
       throw new HookError(500, result.reason);
     }
-
     this.#vm.to(STATES.TERMINATED);
-    await this.status.researcher({ state: STATES.TERMINATED });
+    await this.status.writeFromHook("terminate", { state: STATES.TERMINATED });
     return { state: this.#vm.state, ...result };
   }
-
-  // Lets the portal hand a running VM a fresh session token without a relaunch,
-  // for when the custom token's hour expires under a long session.
-  async refreshToken(body) {
-    this.#requireStarted();
-    const token = body?.session_token;
-    const reportServerToken = body?.report_server_token;
-    if (typeof token !== "string" || token === "") {
-      throw new HookError(400, "session_token is required");
-    }
-    // A replacement for a different researcher would leave the VM signed in as one
-    // principal while writing another's document paths. The rules deny that, so it
-    // fails closed either way, but it fails as an opaque permission error much later
-    // rather than here where the cause is obvious.
-    const claims = tokenClaims(token);
-    if (claims?.platform_user_id != null
-        && String(claims.platform_user_id) !== String(this.payload.platform_user_id)) {
-      throw new HookError(400, "the replacement session token belongs to another researcher");
-    }
-
-    this.payload.session_token = token;
-    await this.steps.signIn({ store: this.store, sessionToken: token });
-
-    // The report-server credential is minted per launch and the VM outlives it if it is
-    // ever given a shorter life, so /refresh-token carries a replacement for it too.
-    if (typeof reportServerToken === "string" && reportServerToken !== "") {
-      this.payload.report_server_token = reportServerToken;
-      await this.steps.installCredential({
-        token: reportServerToken,
-        portal: this.payload.portal
-      });
-    }
-
-    log.info("refresh_token.ok", { report_server_token: Boolean(reportServerToken) });
-    return { ok: true };
-  }
 }
+
+// The scope block rigse sent and /work returns, as the runner writes it into scope.json.
+function checkScope(scope, classHash) {
+  if (!scope || scope.kind !== "class") return "the queued scope is not a class scope";
+  if (scope.id !== classHash) return `the queued scope names ${scope.id}, not ${classHash}`;
+  if (!Array.isArray(scope.classes) || scope.classes.length !== 1 || scope.classes[0]?.class_hash !== classHash
+      || !Number.isInteger(scope.classes[0]?.class_id) || scope.classes[0].class_id < 1) {
+    return "the queued scope's class list is not this class";
+  }
+  if (!Array.isArray(scope.assignments)) return "the queued scope carries no assignment list";
+  return null;
+}
+
+export { portalHost };

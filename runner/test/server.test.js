@@ -7,15 +7,15 @@ import { loadEnv } from "../server/config.js";
 import { createServer } from "../server/index.js";
 import { Runner } from "../server/runner.js";
 import { makeSteps } from "../server/steps.js";
-import { MemoryStore } from "../server/status.js";
+import { MemoryStore, runnerPath } from "../server/status.js";
 import { DirBackend, Syncer } from "../server/sync/index.js";
 
 const HOOK = "/aws/lambda-microvms/runtime/v1";
 const PORTAL = "learn_portal_staging_concord_org";
-const CLASS = "7be899cf".repeat(6);
-
+const b64 = (o) => Buffer.from(JSON.stringify(o)).toString("base64url");
+const SESSION = `${b64({ alg: "none" })}.${b64({ uid: "u", claims: { platform_id: "https://learn.portal.staging.concord.org", platform_user_id: 439, user_type: "researcher", researcher_dashboard_runner: true } })}.`;
 const PAYLOAD = JSON.stringify({
-  session_token: "session-token",
+  session_token: SESSION,
   platform_user_id: "439",
   platform_id: "https://learn.portal.staging.concord.org",
   portal: PORTAL,
@@ -29,34 +29,30 @@ const PAYLOAD = JSON.stringify({
 let work;
 let server;
 let base;
-let store;
+let docs;
+let runner;
 
 beforeEach(async () => {
   work = await mkdtemp(path.join(tmpdir(), "rd-http-"));
-  store = new MemoryStore();
+  docs = new Map();
   const env = {
     ...loadEnv({ SYNC_BACKEND: "DIR", SYNC_DIR: path.join(work, "remote") }),
     dataRoot: path.join(work, "data"),
-    workRoot: path.join(work, "work"),
-    packageTimeoutMs: 2000
+    workRoot: path.join(work, "work")
   };
-  const runner = new Runner({
+  runner = new Runner({
     env,
-    makeStore: () => store,
-    makeFunctionClient: () => async () => { throw new Error("no function in this test"); },
-    makeSyncer: ({ root }) =>
-      new Syncer({ backend: new DirBackend(path.join(work, "remote")), root }),
-    readSecret: async () => "token",
-    netGuard: async () => ({ uid: 1000, binary: "stub" }),
-    steps: {
-      signIn: async () => {},
-      installCredential: async () => {},
-      resolvePackage: async () => ({ expected_duration_seconds: 1 }),
-      pullData: async () => ({ answers: 1, logs: 2, clue_documents: 3 }),
-      runPackage: async () => ({ version: 1, summary: "ok", sections: [] }),
-      // The real one: it only reads the synced tree, and this suite is about routing.
-      heldClasses: makeSteps().heldClasses
-    }
+    makeStore: () => new MemoryStore({ docs }),
+    // Nothing queued, and /idle suspends: the loop ends as soon as it has asked.
+    makeFunctionClient: () => async (route) => (route === "work"
+      ? { success: true, packages: [], scopes: {}, session_token: SESSION, firebase_project: "report-service-dev" }
+      : { success: true, suspended: true }),
+    makeSyncer: ({ root }) => new Syncer({ backend: new DirBackend(path.join(work, "remote")), root }),
+    makePackageBackend: () => ({ async get() {} }),
+    netGuard: async () => ({ uid: 1000 }),
+    steps: { ...makeSteps(), installCredential: async () => {} },
+    sleep: async () => {},
+    now: (() => { let t = Date.now(); return () => (t += 60_000); })()
   });
   server = createServer({ runner, env });
   await new Promise((r) => server.listen(0, r));
@@ -68,11 +64,7 @@ afterEach(async () => {
   await rm(work, { recursive: true, force: true });
 });
 
-const post = (p, body) =>
-  fetch(`${base}${p}`, {
-    method: "POST",
-    body: body === undefined ? "" : JSON.stringify(body)
-  });
+const post = (p, body) => fetch(`${base}${p}`, { method: "POST", body: body === undefined ? "" : JSON.stringify(body) });
 
 test("/ready answers 200 before /run, which is what the image build waits on", async () => {
   const res = await post(`${HOOK}/ready`);
@@ -82,37 +74,20 @@ test("/ready answers 200 before /run, which is what the image build waits on", a
 
 test("the lifecycle hooks route through to the runner", async () => {
   assert.equal((await post(`${HOOK}/run`, { microvmId: "mvm-1", runHookPayload: PAYLOAD })).status, 200);
+  await runner.loop;
   assert.equal((await post(`${HOOK}/suspend`)).status, 200);
   assert.equal((await post(`${HOOK}/resume`)).status, 200);
+  await runner.loop;
   assert.equal((await post(`${HOOK}/terminate`)).status, 200);
-  assert.deepEqual(store.states(`researcher_dashboard/${PORTAL}/researchers/439`), [
-    "starting",
-    "ready",
-    "suspending",
-    "suspended",
-    "ready",
-    "terminated"
-  ]);
+  const doc = docs.get(runnerPath(PORTAL, "439"));
+  assert.equal(doc.state, "terminated");
 });
 
-test("/run-package answers 202 with the document path, not 200", async () => {
+// The dispatch and the refresh are gone: nothing calls into the VM.
+test("/run-package and /refresh-token exist nowhere", async () => {
   await post(`${HOOK}/run`, { microvmId: "mvm-1", runHookPayload: PAYLOAD });
-  const res = await post("/run-package", {
-    scope: { kind: "class", class_hash: CLASS, class_id: 111 },
-    package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
-    class_tokens: { "report-service-dev": "rs-class-token" }
-  });
-  assert.equal(res.status, 202);
-  const body = await res.json();
-  assert.equal(body.package, "demo");
-  assert.equal(body.doc_path, `researcher_dashboard/${PORTAL}/classes/${CLASS}/results/demo`);
-});
-
-test("a refusal surfaces its own status code and reason", async () => {
-  await post(`${HOOK}/run`, { microvmId: "mvm-1", runHookPayload: PAYLOAD });
-  const res = await post("/run-package", {});
-  assert.equal(res.status, 400);
-  assert.match((await res.json()).error, /scope must be/);
+  assert.equal((await post("/run-package", {})).status, 404);
+  assert.equal((await post("/refresh-token", { session_token: "x" })).status, 404);
 });
 
 test("a hook before /run is refused with 409 rather than 500", async () => {
@@ -121,8 +96,8 @@ test("a hook before /run is refused with 409 rather than 500", async () => {
   assert.match((await res.json()).error, /has not completed \/run/);
 });
 
-test("malformed JSON is a 400, not an unhandled crash", async () => {
-  const res = await fetch(`${base}/run-package`, { method: "POST", body: "{not json" });
+test("a /run whose body is not JSON is a 400, not an unhandled crash", async () => {
+  const res = await fetch(`${base}${HOOK}/run`, { method: "POST", body: "{not json" });
   assert.equal(res.status, 400);
   assert.match((await res.json()).error, /not valid JSON/);
 });
@@ -135,9 +110,25 @@ test("unknown paths and wrong methods are 404", async () => {
 
 test("GET / reports the VM's live state for a human", async () => {
   await post(`${HOOK}/run`, { microvmId: "mvm-1", runHookPayload: PAYLOAD });
+  await runner.loop;
   const body = await (await fetch(`${base}/`)).json();
   assert.equal(body.state, "ready");
   assert.equal(body.microvm_id, "mvm-1");
+  assert.equal(body.current_package, null);
   assert.equal(body.sync_backend, "DIR");
-  assert.ok(body.expires_at, "expires_at drives the /analyze duration refusal");
+  assert.ok(body.expires_at);
+});
+
+test("a hook that fails is logged as hook.failed", async () => {
+  const lines = [];
+  const original = process.stdout.write;
+  process.stdout.write = (chunk) => { lines.push(String(chunk)); return true; };
+  try {
+    await post(`${HOOK}/suspend`);
+  } finally {
+    process.stdout.write = original;
+  }
+  const failed = lines.map((l) => JSON.parse(l)).find((l) => l.event === "hook.failed");
+  assert.ok(failed);
+  assert.equal(failed.status, 409);
 });

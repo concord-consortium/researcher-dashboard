@@ -23,10 +23,10 @@ export const REQUIRED_PAYLOAD_FIELDS = Object.freeze([
 ]);
 
 // The report-server credential is the requesting researcher's own, minted per VM
-// creation and handed down in the payload (design.md, Per-researcher forwarding).
-// It is required rather than optional: an analysis package is given egress on the
-// premise that the credential it can read reaches only its own researcher's data,
-// so a VM with no forwarded credential has no safe world to run a package in.
+// creation and handed down in the payload (final-design.md section 11.2).
+// It is required rather than optional: a package is given egress on the premise that
+// the credential it can read reaches only its own researcher's data, so a VM with no
+// forwarded credential has no safe world to run a package in.
 export const CREDENTIAL_FIELDS = Object.freeze(["report_server_token"]);
 
 function packageUid(env) {
@@ -37,6 +37,19 @@ function packageUid(env) {
   return uid;
 }
 
+function positiveInt(env, name, fallback) {
+  const raw = env[name];
+  if (raw === undefined || raw === "") return fallback;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1) throw new Error(`${name} must be a positive integer, got ${raw}`);
+  return value;
+}
+
+// report-server's publish limit on a declared duration, from the package contract's
+// `limits.max_duration_seconds`; a runner ceiling below it would refuse packages
+// report-server accepted.
+export const PACKAGE_MAX_DURATION_DEFAULT = 7200;
+
 export function loadEnv(env = process.env) {
   const backend = (env.SYNC_BACKEND ?? "S3").toUpperCase();
   if (backend !== "S3" && backend !== "DIR") {
@@ -45,12 +58,18 @@ export function loadEnv(env = process.env) {
   if (backend === "DIR" && !env.SYNC_DIR) {
     throw new Error("SYNC_BACKEND=DIR requires SYNC_DIR");
   }
-  // LOG writes the status documents to the log instead of Firestore, for running a
-  // VM before the portal can mint a real session token: the sequence of states is
-  // still observable, without a sign-in that cannot succeed.
+  // LOG writes the status documents to the log instead of Firestore. It cannot bring a
+  // VM to ready, since every call to the function needs the session.
   const statusBackend = (env.STATUS_BACKEND ?? "FIRESTORE").toUpperCase();
   if (!["FIRESTORE", "LOG", "MEMORY"].includes(statusBackend)) {
     throw new Error(`STATUS_BACKEND must be FIRESTORE, LOG or MEMORY, got ${statusBackend}`);
+  }
+  const maxDuration = positiveInt(env, "PACKAGE_MAX_DURATION_SECONDS", PACKAGE_MAX_DURATION_DEFAULT);
+  if (maxDuration > 28_800) {
+    throw new Error("PACKAGE_MAX_DURATION_SECONDS must be at most 28800, the VM's life");
+  }
+  if (maxDuration < PACKAGE_MAX_DURATION_DEFAULT) {
+    throw new Error(`PACKAGE_MAX_DURATION_SECONDS must be at least ${PACKAGE_MAX_DURATION_DEFAULT}, the most report-server accepts at publish, got ${maxDuration}`);
   }
   return {
     port: Number(env.PORT ?? 8080),
@@ -64,15 +83,23 @@ export function loadEnv(env = process.env) {
     statusBackend,
     syncDir: env.SYNC_DIR ?? null,
     syncIntervalMs: Number(env.SYNC_INTERVAL_MS ?? 30_000),
-    packageTimeoutMs: Number(env.PACKAGE_TIMEOUT_MS ?? 30 * 60_000),
+    // The runner's own ceiling on a declared duration: a manifest declaring more is
+    // refused, because the duration is data the runner trusts from fetched code
+    // (final-design.md section 6.1).
+    packageMaxDurationSeconds: maxDuration,
+    // Unset, a package's process is bounded at its declared duration plus the
+    // watchdog's ten-minute margin. Set, it replaces that bound for every package.
+    packageTimeoutMs: env.PACKAGE_TIMEOUT_MS ? positiveInt(env, "PACKAGE_TIMEOUT_MS") : null,
+    // How long a drained VM stays awake, asking for work, before it asks to be
+    // suspended; well under the watchdog's thirty-minute idle sweep.
+    idlePeriodMs: positiveInt(env, "IDLE_PERIOD_MS", 5 * 60_000),
+    idlePollMs: positiveInt(env, "IDLE_POLL_MS", 30_000),
     // Rejected below 1000 rather than defaulted: verifySandbox compares the observed
     // uid to this one, so PACKAGE_UID=0 would pass the check while giving the package
     // root, a route back to the host namespace and the credential store.
     packageUid: packageUid(env),
-    // Where an analysis package may reach, enforced by the egress proxy rather than
-    // asserted. A leading dot allows a zone's subdomains and not the zone itself.
-    // report-server is the whole of it today; anything else a package needs goes
-    // through the runner, which is the point of having one list.
+    // Where a package may reach, enforced by the egress proxy rather than asserted. A
+    // leading dot allows a zone's subdomains and not the zone itself.
     // report-server delivers a report's CSV as a presigned S3 URL rather than a stream,
     // so a package that may pull its own data has to reach S3 as well as report-server.
     // This grants no bucket access: the package holds no AWS credentials and the

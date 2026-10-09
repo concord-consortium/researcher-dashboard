@@ -1,11 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { firebaseConfig, knownProjects, portalFirebaseApp } from "../server/firebase-projects.js";
+import { clueProjectFor, firebaseConfig, knownProjects, portalFirebaseApp } from "../server/firebase-projects.js";
 
-// The runner signs into both, so both have to be configured or an analysis fails at
-// sign-in rather than at startup.
-test("both projects an analysis touches are configured", () => {
-  assert.deepEqual(knownProjects().sort(), ["collaborative-learning-staging", "report-service-dev"]);
+// Both environments' report-service and CLUE projects, so a production image needs no
+// runner change.
+test("every project a package run touches, in both environments, is configured", () => {
+  assert.deepEqual(knownProjects().sort(), [
+    "collaborative-learning-ec215",
+    "collaborative-learning-staging",
+    "report-service-dev",
+    "report-service-pro"
+  ]);
 });
 
 test("every config carries what the SDK needs to sign in and read", () => {
@@ -23,15 +28,22 @@ test("every config carries what the SDK needs to sign in and read", () => {
   }
 });
 
-test("the portal firebase_apps row is paired with each project", () => {
-  for (const project of knownProjects()) {
-    assert.ok(portalFirebaseApp(project), `${project} names no portal firebase_apps row`);
-  }
+// rigse keys class_tokens by FirebaseApp name, and CLUE production's row is not named
+// after its project (collaborative-learning/src/lib/firebase-config.ts).
+test("each project is paired with the portal firebase_apps row that signs its tokens", () => {
+  assert.equal(portalFirebaseApp("report-service-dev"), "report-service-dev");
+  assert.equal(portalFirebaseApp("report-service-pro"), "report-service-pro");
+  assert.equal(portalFirebaseApp("collaborative-learning-staging"), "collaborative-learning-staging");
+  assert.equal(portalFirebaseApp("collaborative-learning-ec215"), "collaborative-learning");
+});
+
+// Runner configuration per environment, not a caller parameter (final-design.md 13).
+test("each report-service project names the CLUE project of its environment", () => {
+  assert.equal(clueProjectFor("report-service-dev"), "collaborative-learning-staging");
+  assert.equal(clueProjectFor("report-service-pro"), "collaborative-learning-ec215");
+  assert.throws(() => clueProjectFor("collaborative-learning-staging"), /names no CLUE project/);
 });
 
 test("an unconfigured project fails by name rather than at sign-in", () => {
-  assert.throws(
-    () => firebaseConfig("collaborative-learning-ec215"),
-    /No Firebase config for project collaborative-learning-ec215/
-  );
+  assert.throws(() => firebaseConfig("report-service-qa"), /No Firebase config for project report-service-qa/);
 });

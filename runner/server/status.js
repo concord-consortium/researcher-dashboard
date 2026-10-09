@@ -1,137 +1,210 @@
-import { log } from "./log.js";
+import { log, redact } from "./log.js";
 
-// Document paths from design.md Contracts. Firestore alternates collection and
+// Document paths from final-design.md section 9. Firestore alternates collection and
 // document, so each of these has an even number of segments.
-export function researcherPath(portal, platformUserId) {
-  return `researcher_dashboard/${portal}/researchers/${platformUserId}`;
+export function runnerPath(portal, platformUserId) {
+  return `researcher_dashboard/${portal}/runners/${platformUserId}`;
 }
 
 export function classPath(portal, classHash) {
   return `researcher_dashboard/${portal}/classes/${classHash}`;
 }
 
-// One document per class and package, holding that package's current result for that
-// class rather than a record per run. The source data in S3 is overwritten on every
-// pull and cc-data's manifest carries its provenance, so a history of results here
-// would be snapshots of inputs that no longer exist.
-export function resultPath(portal, classHash, packageName) {
-  return `${classPath(portal, classHash)}/results/${packageName}`;
+// The scope document for one researcher of one class, which holds that researcher's
+// counts: two researchers of a class see different data (final-design.md section 8).
+export function scopePath(portal, classHash, platformUserId) {
+  return `${classPath(portal, classHash)}/researchers/${platformUserId}`;
 }
 
-// Writes the three documents the dashboard reads. The store is injected so the
-// tests drive the real state sequences against an in-memory double, and so the
-// Firestore emulator can stand in before todo 13 deploys the rules.
-export class StatusWriter {
-  // Two stores, because the rules distinguish the two token shapes. `store` is signed
-  // in with the session token, which carries no class_hash and may write only the
-  // researcher document. `classStore(classHash)` is signed in with that class's token,
-  // which is the only thing report-service's rules let write the class and analysis
-  // documents. Writing those through the session store is denied, not ignored.
-  constructor({ store, classStore, portal, platformUserId, platformId }) {
+// One document per researcher per package per class, holding that package's latest run.
+export function resultPath(portal, classHash, platformUserId, docId) {
+  return `${scopePath(portal, classHash, platformUserId)}/results/${docId}`;
+}
+
+// Well under a hook's 60 seconds: a status write that hangs must not take the VM with it.
+export const STATUS_WRITE_TIMEOUT_MS = 10_000;
+
+export function bounded(promise, ms = STATUS_WRITE_TIMEOUT_MS, what = "status write") {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${what} did not finish within ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+// The status document, written through the session store. Every write carries
+// platform_id, which the rules check against the token's claim rather than trusting the
+// {portal} path segment, and a server-time updated_at, which the rules require.
+//
+// A hook's write is bounded and never fails the hook (final-design.md section 7.1(a)):
+// a failure is logged and kept, and the next write that succeeds reports it.
+export class RunnerStatus {
+  #failures = [];
+
+  constructor({ store, portal, platformUserId, platformId }) {
     this.store = store;
-    this.classStore = classStore ?? (() => store);
     this.portal = portal;
     this.platformUserId = platformUserId;
     this.platformId = platformId;
   }
 
-  // Every document carries platform_id, because the rules check it against the
-  // token's claim rather than trusting the {portal} path segment, the same way the
-  // student work rules check it rather than trusting {source}. A merge that omitted
-  // it on the first write would create a document the rules then refuse to read.
-  #stamped(fields) {
-    return { platform_id: this.platformId, ...fields };
+  get path() {
+    return runnerPath(this.portal, this.platformUserId);
   }
 
-  #now() {
-    return new Date().toISOString();
+  get pendingFailures() {
+    return [...this.#failures];
   }
 
-  async researcher(fields) {
-    const path = researcherPath(this.portal, this.platformUserId);
-    const doc = this.#stamped({ ...fields, updated_at: this.#now() });
-    await this.store.merge(path, doc);
-    log.info("status.researcher", { state: doc.state ?? null });
+  async write(fields) {
+    const doc = {
+      platform_id: this.platformId,
+      ...fields,
+      updated_at: this.store.serverTimestamp(),
+      ...(this.#failures.length ? { status_write_failures: this.#failures } : {})
+    };
+    await bounded(this.store.merge(this.path, doc));
+    if (this.#failures.length) this.#failures = [];
+    log.info("status.runner", { state: doc.state ?? null });
     return doc;
   }
 
-  // Counts describe the class rather than the researcher who pulled them, so this
-  // is last-writer-wins by design and carries who wrote it.
-  async classCounts(classHash, data) {
-    const path = classPath(this.portal, classHash);
-    await this.classStore(classHash).merge(path, this.#stamped({
-      data: { ...data, last_pull_at: this.#now() },
-      last_pulled_by: this.platformUserId
-    }));
+  // For the hooks: never throws, since losing the VM is worse than a document that lags.
+  async writeFromHook(hook, fields) {
+    try {
+      return await this.write(fields);
+    } catch (err) {
+      const error = redact(err.message);
+      log.error("status.write_failed", { hook, error });
+      // The last ten, so a status document that cannot be written for a while stays small.
+      this.#failures = [...this.#failures, { hook, error }].slice(-10);
+      return null;
+    }
+  }
+}
+
+// A class's documents for this researcher, written through that class's store: the
+// session token carries no class_hash, so report-service's rules refuse it on these.
+export class ClassDocuments {
+  constructor({ store, portal, classHash, platformUserId, platformId }) {
+    this.store = store;
+    this.portal = portal;
+    this.classHash = classHash;
+    this.platformUserId = platformUserId;
+    this.platformId = platformId;
   }
 
-  // The runner writes the result document only once it has accepted the work, so a
-  // refused request changes nothing. requested_by comes from the session token the VM
-  // holds, never from the request, and records who ran it last: the document is shared
-  // by every researcher of the class, so overwriting one another is the intent.
-  //
-  // A merge rather than a set, and display is deliberately absent: a run that is
-  // starting must not wipe the last good display, which stays visible until this run
-  // produces a new one.
-  async resultStarted(classHash, packageName, { pkg, requestedBy }) {
-    const now = this.#now();
-    await this.classStore(classHash).merge(resultPath(this.portal, classHash, packageName), this.#stamped({
+  #result(docId) {
+    return resultPath(this.portal, this.classHash, this.platformUserId, docId);
+  }
+
+  #stamped(fields) {
+    return { platform_id: this.platformId, ...fields, updated_at: this.store.serverTimestamp() };
+  }
+
+  // The authored URL profile the function derived for this class, or null.
+  async profile() {
+    return this.store.get(classPath(this.portal, this.classHash));
+  }
+
+  // The claim: the result says running, which is what takes it out of /work's answer and
+  // what the watchdog reads. It clears the last run's summary and display, so a result
+  // only ever describes the run its `package` names (final-design.md section 8).
+  async claim(docId, { pkg, imageVersion, microvmId, expectedDurationSeconds }) {
+    await bounded(this.store.merge(this.#result(docId), this.#stamped({
       status: "running",
       stage: "starting",
-      updated_at: now,
+      package: pkg,
+      image_version: imageVersion,
+      microvm_id: microvmId,
+      expected_duration_seconds: expectedDurationSeconds,
+      started_at: this.store.serverTimestamp(),
       finished_at: null,
       error: null,
-      package: pkg,
-      requested_by: requestedBy,
-      requested_at: now
-    }));
+      summary: null,
+      display: null
+    })));
   }
 
-  async resultStage(classHash, packageName, stage) {
-    await this.classStore(classHash).merge(resultPath(this.portal, classHash, packageName), this.#stamped({
-      stage,
-      updated_at: this.#now()
-    }));
+  async stage(docId, stage) {
+    await bounded(this.store.merge(this.#result(docId), this.#stamped({ stage })));
   }
 
-  async resultDone(classHash, packageName, display) {
-    const now = this.#now();
-    await this.classStore(classHash).merge(resultPath(this.portal, classHash, packageName), this.#stamped({
+  // Every field of a finished result in one call, so nothing on it can describe another run.
+  async done(docId, { pkg, imageVersion, summary, display }) {
+    await bounded(this.store.merge(this.#result(docId), this.#stamped({
       status: "done",
       stage: "done",
+      package: pkg,
+      image_version: imageVersion,
+      summary,
       display,
       error: null,
-      finished_at: now,
-      updated_at: now
-    }));
+      finished_at: this.store.serverTimestamp()
+    })));
   }
 
-  // display is not cleared: a failed run leaves the last good result readable, with
-  // the failure beside it, rather than blanking the page.
-  async resultFailed(classHash, packageName, error) {
-    const now = this.#now();
-    await this.classStore(classHash).merge(resultPath(this.portal, classHash, packageName), this.#stamped({
+  // A run that failed, or a package refused before it was claimed. The reason reaches the
+  // researcher's page, so it is redacted.
+  async failed(docId, { pkg, error }) {
+    await bounded(this.store.merge(this.#result(docId), this.#stamped({
       status: "failed",
-      error,
-      finished_at: now,
-      updated_at: now
+      error: redact(error),
+      package: pkg,
+      finished_at: this.store.serverTimestamp()
+    })));
+  }
+
+  // This researcher's counts for this class. Nothing per researcher goes on the class's
+  // own document, which holds the authored profile and nothing else.
+  async counts({ answers, logs, clueDocuments, logFreshnessAt }) {
+    const data = { last_pull_at: this.store.serverTimestamp() };
+    if (answers !== undefined) data.answers = answers;
+    if (logs !== undefined) data.logs = logs;
+    if (clueDocuments !== undefined) data.clue_documents = clueDocuments;
+    const freshness = logFreshnessAt ? new Date(logFreshnessAt) : null;
+    if (freshness && !Number.isNaN(freshness.getTime())) data.log_freshness_at = this.store.timestamp(freshness);
+    // `data` is replaced whole, so a count this run did not report is absent rather than
+    // an earlier run's.
+    await bounded(this.store.replaceFields(scopePath(this.portal, this.classHash, this.platformUserId), {
+      platform_id: this.platformId,
+      data
     }));
   }
 }
 
-// Writes every status document to the structured log instead of Firestore. It
-// exists for running a VM before the portal can mint a real session token: the
-// state sequence stays observable in CloudWatch, and no sign-in is attempted that
-// could not succeed. It is not a fallback for a broken Firestore, because a VM
-// using it makes no durable claim about its state at all.
+const isMap = (value) => value !== null && typeof value === "object" && !Array.isArray(value) && value !== SERVER_TIME;
+
+function deepMerge(existing, fields) {
+  const merged = { ...existing };
+  for (const [key, value] of Object.entries(fields)) {
+    merged[key] = isMap(value) && isMap(existing[key]) ? deepMerge(existing[key], value) : value;
+  }
+  return merged;
+}
+
+// What the in-memory and log stores write where Firestore would put the server's time.
+export const SERVER_TIME = Object.freeze({ serverTime: true });
+
+// Writes every status document to the structured log instead of Firestore. It exists
+// for looking at a VM's state sequence in CloudWatch without a sign-in; it cannot bring
+// a VM to ready, since every call to the function needs the session's ID token.
 export class LogStore {
   async signIn(customToken) {
     log.warn("status.sign_in_skipped", { token_length: customToken?.length ?? 0 });
     return null;
   }
 
+  async claims() {
+    return {};
+  }
+
   async idToken() {
     throw new Error("the log store signs nothing in, so it has no ID token");
+  }
+
+  async get() {
+    return null;
   }
 
   async set(path, doc) {
@@ -141,23 +214,54 @@ export class LogStore {
   async merge(path, fields) {
     log.info("status.write", { op: "merge", path, doc: fields });
   }
+
+  async replaceFields(path, fields) {
+    log.info("status.write", { op: "replaceFields", path, doc: fields });
+  }
+
+  serverTimestamp() {
+    return SERVER_TIME;
+  }
+
+  timestamp(date) {
+    return date.toISOString();
+  }
+
+  async close() {}
+}
+
+// The claims a Firebase custom token carries, read without verifying it. Only the
+// in-memory store uses this, standing in for what Firebase would verify at sign-in.
+export function customTokenClaims(token) {
+  try {
+    const [, payload] = String(token).split(".");
+    if (!payload) return null;
+    return JSON.parse(Buffer.from(payload, "base64url").toString("utf8"))?.claims ?? null;
+  } catch {
+    return null;
+  }
 }
 
 // In-memory store used by the tests and by SYNC_BACKEND=DIR local runs, where no
 // Firebase project is reachable. It records writes in order so a test can assert
-// the sequence of states, which is what criteria 2, 8, 11 and 13 turn on.
+// the sequence of states.
 export class MemoryStore {
-  constructor() {
-    this.docs = new Map();
+  constructor({ docs } = {}) {
+    // Shared across stores when given, as one Firestore is shared by every connection.
+    this.docs = docs ?? new Map();
     this.writes = [];
-    // Which tokens were exchanged, so a test can assert the class writes went out on
-    // the class token rather than the session one.
     this.signedInWith = [];
+    this.closed = false;
   }
 
   async signIn(customToken) {
+    if (this.closed) throw new Error("store is closed");
     this.signedInWith.push(customToken);
     return { user: { uid: "memory" } };
+  }
+
+  async claims() {
+    return customTokenClaims(this.signedInWith.at(-1)) ?? {};
   }
 
   async idToken() {
@@ -166,25 +270,39 @@ export class MemoryStore {
   }
 
   async set(path, doc) {
+    if (this.closed) throw new Error("store is closed");
     this.docs.set(path, { ...doc });
     this.writes.push({ op: "set", path, doc: { ...doc } });
   }
 
+  // Firestore's merge: a nested map merges into the stored one, and anything else,
+  // arrays included, replaces it.
   async merge(path, fields) {
-    const existing = this.docs.get(path) ?? {};
-    this.docs.set(path, { ...existing, ...fields });
+    if (this.closed) throw new Error("store is closed");
+    this.docs.set(path, deepMerge(this.docs.get(path) ?? {}, fields));
     this.writes.push({ op: "merge", path, doc: { ...fields } });
   }
 
-  get(path) {
-    return this.docs.get(path);
+  async replaceFields(path, fields) {
+    if (this.closed) throw new Error("store is closed");
+    this.docs.set(path, { ...(this.docs.get(path) ?? {}), ...fields });
+    this.writes.push({ op: "replaceFields", path, doc: { ...fields } });
   }
 
-  // The ordered `state` values written to one document, which is how a test spells
-  // "passes through starting, ready, running, ready".
-  states(path) {
-    return this.writes
-      .filter((w) => w.path === path && w.doc.state !== undefined)
-      .map((w) => w.doc.state);
+  serverTimestamp() {
+    return SERVER_TIME;
+  }
+
+  timestamp(date) {
+    return date.toISOString();
+  }
+
+  async close() {
+    this.closed = true;
+  }
+
+  // Synchronous, so a test can read a document straight back; `await` accepts it too.
+  get(path) {
+    return this.docs.get(path) ?? null;
   }
 }

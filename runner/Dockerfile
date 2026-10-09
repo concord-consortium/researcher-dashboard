@@ -71,8 +71,10 @@ COPY package.json package-lock.json /srv/
 RUN npm ci --omit=dev && npm cache clean --force
 COPY server/ /srv/server/
 # /data is the researcher's synced tree, owned by the runner; /work holds each
-# package's home, input and output, and is handed to the package user.
-RUN mkdir -p /work /data && chown package:package /work
+# package's cached archive, home, input and output. /work stays the runner's: the
+# runner hands the package user its own home and output directory and nothing above
+# them, so a package cannot swap a directory the runner later reads as root.
+RUN mkdir -p /work /data
 
 EXPOSE 8080
 CMD ["node", "/srv/server/index.js"]

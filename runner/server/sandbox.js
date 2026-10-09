@@ -32,6 +32,12 @@ export const IMDS_ADDRESS = "169.254.169.254";
 // than anything the package is entitled to resolve for itself.
 const IP = "/usr/sbin/ip";
 const SETPRIV = "/usr/bin/setpriv";
+const KILL = "/usr/bin/kill";
+const PGREP = "/usr/bin/pgrep";
+// Every state but a zombie's. A killed process stays a zombie until its parent reaps it,
+// and an orphan's parent is PID 1, which the image's CMD makes the runner's own node, so
+// it never is; a zombie runs nothing and writes nothing.
+const LIVE_STATES = "R,S,D,T,t";
 
 export function sandboxCommand({ uid, command, args = [], netns = NETNS }) {
   return {
@@ -120,6 +126,28 @@ async function reachable({ uid, netns, exec, url, acceptRefusal = false }) {
   } catch {
     return false;
   }
+}
+
+// Kills every process the package uid owns. `execFile` returns when the entrypoint exits,
+// and anything it started in the background would otherwise run on into the next
+// package's turn as the same uid, able to write that package's output. kill(-1) from a
+// process with no capabilities reaches only its own uid, never the runner, which is root.
+export async function killPackageProcesses({ uid, exec = run, attempts = 5 }) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    // Exits non-zero when nothing was left to signal, which is the outcome wanted.
+    await exec(SETPRIV, [`--reuid=${uid}`, `--regid=${uid}`, "--clear-groups", "--no-new-privs", "--bounding-set", "-all", KILL, "-KILL", "-1"], { timeout: 5_000 })
+      .catch(() => {});
+    let left;
+    try {
+      left = String((await exec(PGREP, ["-u", String(uid), "--runstates", LIVE_STATES], { timeout: 5_000 })).stdout ?? "").trim();
+    } catch (err) {
+      // pgrep exits 1 when it finds nothing; any other failure proves nothing.
+      if (err.code !== 1) throw new Error(`could not check for the package's processes: ${err.message}`);
+      left = "";
+    }
+    if (left === "") return;
+  }
+  throw new Error(`the package left processes running as uid ${uid} that ${attempts} kills did not stop`);
 }
 
 // Runs a package's entrypoint in the sandbox, as the package uid.

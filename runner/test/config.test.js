@@ -15,3 +15,11 @@ test("the image version comes from the variable Lambda injects", () => {
 test("a runner started outside a MicroVM has no image version rather than a made-up one", () => {
   assert.equal(loadEnv(BASE).imageVersion, null);
 });
+
+test("the duration ceiling refuses a configured value below report-server's limit or above the VM's life", () => {
+  assert.equal(loadEnv(BASE).packageMaxDurationSeconds, 7200);
+  assert.equal(loadEnv({ ...BASE, PACKAGE_MAX_DURATION_SECONDS: "28800" }).packageMaxDurationSeconds, 28800);
+  assert.throws(() => loadEnv({ ...BASE, PACKAGE_MAX_DURATION_SECONDS: "7199" }), /at least 7200/);
+  assert.throws(() => loadEnv({ ...BASE, PACKAGE_MAX_DURATION_SECONDS: "28801" }), /at most 28800/);
+  assert.throws(() => loadEnv({ ...BASE, PACKAGE_MAX_DURATION_SECONDS: "2h" }), /positive integer/);
+});
