@@ -70,7 +70,7 @@ RD-1 was first spec'd (2026-09-25) as three passes, so that no running VM would 
   - The broker, with the same kind of token: a session with the whole ceiling reads the probe archive and is refused a write, delete and list under `packages/`; a session under R12's policy for a test id writes and lists its own prefix, reads the archive, and is refused another prefix that holds an object. *(Passed 2026-10-09, before the merge: the token was minted through `generateIdToken` with `grant-operator`'s role, which is all `id-token` wraps.)*
   - The execution role's only inline policy is `runtime` with R13's statement, and it has no attached policy. *(Passed 2026-10-08.)*
   - A VM's endpoint, on the stack's first VM: as the launcher, `create-microvm-auth-token` is refused, and the endpoint answers `403, Request missing authentication`. *(Pending, see "Not Yet Implemented".)*
-- **R21.** The rollout also audits who can act as the function in GCP IAM in report-service-dev and report-service-pro: holders of OpenID Token Creator or Token Creator on the `researcher-dashboard` account, and who may deploy functions that run as it. *(Done 2026-10-09; one finding is open, see "Not Yet Implemented".)*
+- **R21.** The rollout also audits who can act as the function in GCP IAM in report-service-dev and report-service-pro: holders of OpenID Token Creator or Token Creator on the `researcher-dashboard` account, and who may deploy functions that run as it. *(Done 2026-10-09. Its one finding was accepted, see Decisions.)*
 
 ### Deployment and documentation
 
@@ -82,7 +82,8 @@ RD-1 was first spec'd (2026-09-25) as three passes, so that no running VM would 
   5. `report-service-qa` given `PackageBuckets` (`{"learn.portal.staging.concord.org": "researcher-dashboard-runner-staging"}`, keyed by portal host) and the writer's key by a parameter-only update; task definition `report-server:100` rolled out and the server answers 200.
   6. R20's writer and execution-role checks passed. *(The rest of R20 except the endpoint check, and R21's audit, ran 2026-10-09; see item 8.)*
   7. After review, 2026-10-09: change set `git-5947976` updated the stack in place (versioning and `ExpireOldVersions` on `DataBucket`, the execution role's log-stream ARN; the other three IAM principals only re-evaluated, nothing replaced), `UPDATE_COMPLETE`, and the writer and execution-role checks passed again. The writer's probe object, put before and after, now has two versions.
-  8. 2026-10-09, as the function (`grant-operator` taken and revoked around it): the token's claims are `aud` the stack's name and `azp` and `sub` both `101230238764588293065`. The launcher reads the image and is refused `list-microvms` and S3; a token for `not-researcher-dashboard-runner-staging` is refused by both roles; the broker's whole-ceiling session and its session under R12's policy pass every check, and the ceiling session is also refused deleting an object version. The probe objects and all their versions were then removed. R21's audit found the finding under "Not Yet Implemented".
+  8. 2026-10-09, as the function (`grant-operator` taken and revoked around it): the token's claims are `aud` the stack's name and `azp` and `sub` both `101230238764588293065`. The launcher reads the image and is refused `list-microvms` and S3; a token for `not-researcher-dashboard-runner-staging` is refused by both roles; the broker's whole-ceiling session and its session under R12's policy pass every check, and the ceiling session is also refused deleting an object version. The probe objects and all their versions were then removed. R21's audit's one finding was accepted (see Decisions).
+  9. 2026-10-09, a launch as the launcher, with the function's token: `RunMicrovm` on image version 1.0, passing the execution role and `INTERNET_EGRESS` by its full ARN, succeeded, so `RunMicrovm`, `iam:PassRole` and `PassNetworkConnector` hold together. The 0.1.0 runner's `/run` hook answered 500 to the empty payload, so the platform terminated the VM before the endpoint check could run; the runner's log line reached the stack's log group, so the execution role's log grant works, and the VM record lists an ingress connector nobody passed. `TerminateMicrovm` as the launcher succeeded. **For report-service:** `RunMicrovm` refuses a connector named `INTERNET_EGRESS` (`ValidationException: Malformed network connector ARN`), which is what `microvm.ts` on `master` passes and `microvm.test.ts` pins; it takes `arn:aws:lambda:<region>:aws:network-connector:aws-network-connector:INTERNET_EGRESS`.
 - **R23.** The repository README's layout lists `cloudformation/`.
 
 ## Technical Notes
@@ -112,7 +113,6 @@ RD-1 was first spec'd (2026-09-25) as three passes, so that no running VM would 
 The endpoint check runs after the merge (Doug, 2026-10-08, "When does the branch merge"), with `cloudformation/README.md`'s "Checking the grants on a live stack", and its result is recorded on RD-1 in Jira. A problem it finds is fixed by a follow-up pull request, applied from its branch before it merges.
 
 - **R20, a VM's endpoint** (`create-microvm-auth-token` refused as the launcher, and the endpoint answering `403, Request missing authentication`): waiting for the stack's first VM, which RD-4 pass 2's runner brings when it is released to the QA stack.
-- **R21's finding: the Firebase Admin SDK account can mint the function's tokens** (audit 2026-10-09, decision open). In both projects, `firebase-adminsdk-…` holds `roles/iam.serviceAccountTokenCreator` project-wide (Firebase's default grant), which includes `getOpenIdToken` on every account in the project, and it has user-managed JSON keys: three in report-service-dev (2019 to 2022) and five in report-service-pro (2020 to 2022). Anyone holding one of those keys can mint a token for the stack's audience and assume `BrokerRole` without a session policy, which is every researcher's data. Otherwise only the owners (`developer@`, `scytacki@`) can mint tokens or grant themselves the role, and the editors (`dmartin@`, `emcelroy@`, plus `kswenson@` in dev) and Google's default compute and App Engine accounts can deploy code that runs as the account. Nobody holds a role on the account itself but the account. Fixing it is report-service IAM, not this stack, and must happen before the production stack trusts report-service-pro.
 - **`BuildRole`'s logs grant narrowed** from `/aws/lambda-microvms/*` to this stack's log group: deferred from review (Doug, 2026-10-09). QA shows only the stack's own group, but only an image build proves the build writes nowhere else, and a wrong guess fails the next runner release.
 - **The production stack** (R2): deferred to the RD-1 production line, from the same README with `FunctionServiceAccountUniqueId` from report-service-pro (`114768968256413137012` on 2026-10-07).
 
@@ -174,6 +174,16 @@ The endpoint check runs after the merge (Doug, 2026-10-08, "When does the branch
 - B) Drop it and rely on the template test.
 
 **Decision**: A. The test proves what the policy says, not what AWS does with it, and the check costs one command. Confirmed 2026-10-09: both roles refuse a token for another audience.
+
+---
+
+#### The Firebase Admin SDK account can mint the function's tokens
+**Context**: R21's audit (2026-10-09). In both report-service projects, `firebase-adminsdk-…` holds `roles/iam.serviceAccountTokenCreator` project-wide, Firebase's default grant, which includes `getOpenIdToken` on the function's account, and it has user-managed JSON keys (three in report-service-dev, 2019 to 2022; five in report-service-pro, 2020 to 2022). A holder of one could assume `BrokerRole` without a session policy. Otherwise only the owners can mint the account's tokens, and the editors and Google's default accounts can deploy code that runs as it.
+**Options considered**:
+- A) Leave it.
+- B) Narrow the Admin SDK account's Token Creator to itself, and delete its old keys.
+
+**Decision**: A (Doug, 2026-10-09): no need to tighten it.
 
 ---
 
