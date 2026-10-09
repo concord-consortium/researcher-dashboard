@@ -580,12 +580,12 @@ Tests: grouping puts an official row that is also mine under Official, a project
 
 ## The staging check
 
-Not a commit. After REPORT-167 is on report-server staging, `PackagesCorsOrigins` on `report-service-qa` names `https://models-resources.concord.org`, this branch's URL is among the staging `Client`'s redirect URIs, and the class-profile half of report-service is deployed (requirements, "Prerequisites outside this repository"):
+Not a commit. REPORT-167 is on report-server staging (#123); the check also waits until `PackagesCorsOrigins` on `report-service-qa` names `https://models-resources.concord.org`, this branch's URL is among the staging `Client`'s redirect URIs, and the class-profile half of report-service is deployed (requirements, "Prerequisites outside this repository"):
 
-1. As a researcher with a grant reaching class 223, follow its "Researcher Dashboard" link from project 20's Research Classes page, with the link's path changed from `branch/main` to this branch's.
-2. The page shows class 223's name, teachers, cohorts and assignments, and the address bar holds the launch query with no `code`.
+1. As a researcher with a grant reaching class 590 ("Researcher Dashboard Wildfire", #108), follow its "Researcher Dashboard" link from project 20's Research Classes page, with the link's path changed from `branch/main` to this branch's.
+2. The page shows class 590's name, teachers, cohorts and assignments, and the address bar holds the launch query with no `code`.
 3. On a class with no profile, "Reading this class's activities…" gives way to the list within a minute, and the network panel shows exactly one `refresh_profile`; a reload shows the list at once and no `refresh_profile`.
-4. The list's request carries the bearer and the profile's URLs, and a package published to staging with a pattern the class matches is listed under its group; one with a pattern it does not match is absent.
+4. The list's request carries the bearer and the profile's URLs, and `projects/20/wildfire-responses` (staging's one official package, #119) is listed under Official; a package with a pattern the class does not match is absent.
 5. `sessionStorage`, `localStorage` and IndexedDB for the origin hold no access token and no Firebase session after the launch.
 6. A second tab on another class leaves the first tab's page working.
 
