@@ -1,5 +1,5 @@
 import { launchQuery, parseCallback, parseLaunch, type Callback, type Launch } from "./launch";
-import { exchangeCode, redirectUriFor, startAuthorization, takePending, TokenError, type Token } from "./oauth";
+import { exchangeCode, redirectUriFor, startAuthorization, takePending, TokenError, type Pending, type Token } from "./oauth";
 import { portalFor, type PortalConfig } from "./portals";
 
 // What the page does before React renders: start an authorization, finish one, or decide there
@@ -65,7 +65,12 @@ async function resolveStart(deps: StartDeps): Promise<Start> {
 // The callback leaves the address bar and the history before anything else, whatever happens
 // next, so a reload starts a fresh launch rather than replaying a spent code.
 async function finishAuthorization(deps: StartDeps, callback: Callback): Promise<Start> {
-  const pending = takePending(deps.storage, callback.state);
+  let pending: Pending | null;
+  try {
+    pending = takePending(deps.storage, callback.state);
+  } catch {
+    pending = null;
+  }
   if (!pending) {
     deps.replaceUrl(deps.location.pathname);
     return { kind: "info", reason: "sign-in-failed" };

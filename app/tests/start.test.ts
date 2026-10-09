@@ -77,6 +77,13 @@ describe("start", () => {
     expect(back.replaced).toEqual([PAGE.pathname]);
   });
 
+  it("clears the callback from the address bar when storage cannot be read", async () => {
+    const blocked = { getItem() { throw new DOMException("denied", "SecurityError"); }, removeItem() {} } as unknown as Storage;
+    const back = deps("?code=c1&state=s1", { storage: blocked });
+    expect(await start(back)).toEqual({ kind: "info", reason: "sign-in-failed" });
+    expect(back.replaced).toEqual([PAGE.pathname]);
+  });
+
   // A reload then starts a fresh launch instead of replaying a spent code.
   it("puts the launch back in the address bar when the sign-in fails", async () => {
     const denied = deps(`?error=access_denied&state=${await launch()}`);

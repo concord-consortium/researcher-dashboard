@@ -57,15 +57,17 @@ export function ClassDashboard({ services, onExpired }: {
     return () => { canceled = true; };
   }, [services]);
 
+  // Stopped as soon as the page turns into an info page, so a researcher told their access was
+  // withdrawn stops receiving the class's profile.
   useEffect(() => {
-    if (!scope) return;
+    if (!scope || info) return;
     let stop: (() => void) | null = null;
     let canceled = false;
     services.watchProfile(scope, setProfile, () => setProfileProblem(UNREACHABLE.firebase))
       .then((unsubscribe) => { if (canceled) unsubscribe(); else stop = unsubscribe; })
       .catch((error) => { if (!canceled) refused(error, setProfileProblem, "firebase"); });
     return () => { canceled = true; stop?.(); };
-  }, [scope, services]);
+  }, [scope, services, info]);
 
   // Decided on the first snapshot only, so a derivation that keeps failing cannot loop.
   useEffect(() => {

@@ -22,16 +22,17 @@ function services(over: {
 } = {}) {
   let push: (p: Profile | null) => void = () => {};
   let fail: (e: Error) => void = () => {};
+  const unsubscribe = vi.fn();
   const refreshProfile = vi.fn(over.refresh ?? (async () => ({ queued: true })));
   const listPackages = vi.fn(over.list ?? (async () => [row({ title: "Wildfire open responses", official: true })]));
   const fake: DashboardServices = {
     portal: { scope: over.scope ?? (async () => SCOPE), refreshProfile } as unknown as Portal,
     reportServer: { listPackages } as unknown as ReportServer,
-    watchProfile: vi.fn(over.watch ?? (async (_scope, onValue, onError) => { push = onValue; fail = onError; return () => {}; })),
+    watchProfile: vi.fn(over.watch ?? (async (_scope, onValue, onError) => { push = onValue; fail = onError; return unsubscribe; })),
     now: () => NOW
   };
   return {
-    fake, refreshProfile, listPackages,
+    fake, refreshProfile, listPackages, unsubscribe,
     snapshot: (p: Profile | null) => act(() => push(p)),
     refuse: () => act(() => fail(new Error("permission-denied")))
   };
@@ -269,5 +270,14 @@ describe("ClassDashboard", () => {
     await s.snapshot({ ...CURRENT, interactive_urls: [] });
     expect(screen.queryByText("Old")).toBeNull();
     expect(screen.getByText(/listing the packages that apply/i)).toBeDefined();
+  });
+
+  it("stops listening to the profile once the page says access was withdrawn", async () => {
+    const s = services({ refresh: async () => { throw new ApiError("You do not have access to this class as a researcher", 403); } });
+    await mounted(s);
+    await s.snapshot(null);
+    expect(await screen.findByText(/access to this class has been withdrawn/)).toBeDefined();
+    expect(s.unsubscribe).toHaveBeenCalledTimes(1);
+    expect(s.fake.watchProfile).toHaveBeenCalledTimes(1);
   });
 });
