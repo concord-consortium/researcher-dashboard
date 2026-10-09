@@ -2,7 +2,7 @@
 
 **Jira**: https://concord-consortium.atlassian.net/browse/RD-3
 
-**Status**: **Closed**, with the staging check still to run (see "Not Yet Implemented")
+**Status**: **Closed**
 
 **Pass**: 1 of 3. Passes 2 and 3 stack on this branch (sprint 28); RD-1 production's branch stacks on pass 3's.
 
@@ -129,18 +129,18 @@ Jira's clauses for the whole story, and which pass carries each.
 - Any change to rigse, report-server, report-service functions or their stack parameters; the prerequisites above are ops steps or other stories.
 - Closing or transitioning RIGSE-359 to RIGSE-363.
 
-## Not Yet Implemented
+## Staging check
 
-**The staging check** waits on prerequisites outside this repository, not on code: class 590's profile (the functions' `PORTAL_PUBLIC_KEYS`, the `researcherDashboard` and `deriveProfileWorker` deploy, and rigse's `ResearcherDashboardFunctionURL`), `PackagesCorsOrigins` on `report-service-qa` naming `https://models-resources.concord.org`, and this branch's URL among the staging `Client`'s redirect URIs. Once they are in place:
+Passed on 2026-10-09 against the branch build at `93ca767`, as `dougresearcher` (user 200), launched from class 590's "Researcher Dashboard" link on project 20's Research Classes page with the path changed to `branch/pass-1-launch-and-package-list`:
 
-1. As a researcher with a grant reaching class 590 ("Researcher Dashboard Wildfire", #108), follow its "Researcher Dashboard" link from project 20's Research Classes page, with the link's path changed from `branch/main` to this branch's.
-2. The page shows class 590's name, teachers, cohorts and assignments, and the address bar holds the launch query with no `code`.
-3. On a class with no profile, "Reading this class's activities…" gives way to the list within a minute, and the network panel shows exactly one `refresh_profile`; a reload shows the list at once and no `refresh_profile`.
-4. The list's request carries the bearer and the profile's URLs, and `projects/20/wildfire-responses` (staging's one official package, #119) is listed under Official; a package with a pattern the class does not match is absent.
-5. `sessionStorage`, `localStorage` and IndexedDB for the origin hold no access token and no Firebase session after the launch.
-6. A second tab on another class leaves the first tab's page working.
+1. The code flow came back to the launch query with no `code` in the address bar.
+2. The page showed class 590, "Researcher Dashboard Wildfire", with its teacher, cohorts and its one assignment.
+3. The profile was missing: "Reading this class's activities…" showed, one `refresh_profile` answered 202, and the list replaced it within seconds. A reload listed at once with no `refresh_profile`.
+4. The list's request carried the bearer, and as `scope_urls` the assignment URL followed by the three derived interactive URLs (multiple choice, open response, the Wildfire model). report-server answered from the app's origin, and Official listed `projects/20/runner-smoke` and `projects/20/wildfire-responses`, both `applies: true`. On class 223, `runner-smoke` was `applies: false` and absent.
+5. After the launch, `sessionStorage` and `localStorage` were empty, the app set no cookie, and the only IndexedDB database was Firebase's heartbeat store, which holds a date.
+6. With class 223 open in a second tab, class 590's tab kept its list and logged no listener error.
 
-Post the result to the stream channel.
+Once PR #3 merges, the branch's redirect URI comes off the staging `Client`.
 
 ## Decisions
 
