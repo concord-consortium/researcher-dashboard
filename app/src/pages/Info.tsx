@@ -1,17 +1,27 @@
 import { BUILD_VERSION } from "../build-info";
+import type { InfoReason } from "../shell/start";
+
+const REASONS: Record<Exclude<InfoReason, "no-launch">, string> = {
+  "unknown-portal": "This link is for a portal this dashboard does not serve.",
+  "sign-in-failed": "This sign-in could not be completed. Launch the dashboard again from the portal."
+};
 
 // Deliberately not a demo. portal-report has a fake-data mode and copying it here would put
 // invented results in front of a researcher, which read as real ones. This page says what
-// the dashboard is and how to get into it, and nothing else.
-export function Info() {
+// the dashboard is, why it is showing instead, and how to get in, and nothing else.
+export function Info({ reason }: { reason: InfoReason }) {
   return (
     <main className="info">
       <h1>Researcher Dashboard</h1>
 
-      <p>
-        This is the Concord Consortium Researcher Dashboard. It shows the packages that apply to
-        a class you research.
-      </p>
+      {reason === "no-launch" ? (
+        <p>
+          This is the Concord Consortium Researcher Dashboard. It shows the packages that apply
+          to a class you research.
+        </p>
+      ) : (
+        <p className="notice" role="status">{REASONS[reason]}</p>
+      )}
 
       <h2>How to open it</h2>
       <p>

@@ -36,12 +36,12 @@ In `styles.css`, `.result-list`, `.queued`, `.summary`, `.platform`, the `button
 **Summary**: R1 to R3 and R23. A launch link is checked against the allowlist and sent to the portal's authorize endpoint with PKCE, resolved before React renders. Kept outside React because the pending launch is single use and StrictMode runs effects twice. After this step a launch reaches the portal's sign-in, and the portal's redirect back renders the info page (a callback carries no `authDomain`, so it is not a launch), which the next step replaces.
 
 **Files affected**:
-- `app/src/shell/portals.ts`: new. The allowlist, `devPortal(env)`, `portalFor(authDomain, extra)`, `PROFILE_MAX_AGE_MS`.
-- `app/src/shell/launch.ts`: new. `parseLaunch`, `launchQuery`.
+- `app/src/shell/portals.ts`: new. The allowlist, `devPortal(env)`, `portalFor(authDomain, extra)`.
+- `app/src/shell/launch.ts`: new. `parseLaunch`.
 - `app/src/shell/oauth.ts`: new. PKCE, `redirectUriFor`, `authorizeUrl`, `startAuthorization`.
-- `app/src/shell/start.ts`: new. `start(deps)`'s launch branch and `reauthorize(deps, portal, launch)`; `Start` without its `ready` case.
+- `app/src/shell/start.ts`: new. `start(deps)`'s launch branch, its catch, and `reauthorize(deps, portal, launch)`; `Start` without its `ready` case or `detail`, and `InfoReason` with only the reasons this step can reach (`no-launch`, `unknown-portal`, `sign-in-failed`); each later step adds its own.
 - `app/src/App.tsx`, `app/src/main.tsx`: rewritten, `App` rendering `info` and `redirecting` and `main.tsx` rendering what `start(deps)` resolves to. `main.tsx` below is the next step's: until `Start` has its `ready` case, `started.kind === "ready"` does not compile (TS2367).
-- `app/src/pages/Info.tsx`: takes `InfoReason` and an optional `detail`, one sentence per reason in a `role="status"` paragraph.
+- `app/src/pages/Info.tsx`: takes `InfoReason`, one sentence per reason in a `role="status"` paragraph.
 - Tests: `launch.test.ts` (new), `oauth.test.ts` and `start.test.ts` (the authorize cases), `app.test.tsx`.
 
 **Estimated diff size**: ~+400 including tests
@@ -53,9 +53,10 @@ In `styles.css`, `.result-list`, `.queued`, `.summary`, `.platform`, the `button
 **Summary**: R4 to R9. The callback redeems its code, the token is held in memory, and a first `ClassDashboard` loads the scope and shows the class. `ClassDashboard` receives only the services built from the portal's configuration and the token, never the launch, which is what makes R4 hold by construction.
 
 **Files affected**:
-- `app/src/shell/launch.ts`: `parseCallback`.
+- `app/src/shell/launch.ts`: `parseCallback`, `launchQuery`.
 - `app/src/shell/oauth.ts`: `takePending`, `exchangeCode`, `TokenError`, `Token`.
-- `app/src/shell/start.ts`: the callback branch and `Start`'s `ready` case.
+- `app/src/shell/start.ts`: the callback branch, `Start`'s `ready` case and `detail`, and the reasons the callback and the page reach.
+- `app/src/pages/Info.tsx`: the optional `detail`.
 - `app/src/shell/portal.ts`: `Api` (bearer, expiry, 401 as `SessionExpired`), `ApiError` replacing `PortalError`, `Portal.scope()`, the `Scope` and `Assignment` types.
 - `app/src/shell/services.ts`: new, with `portal` only in this step.
 - `app/src/pages/ClassDashboard.tsx`: new. The scope load, the header and assignments, the info reasons for 403, 404, an unsupported `kind` and a young 401.
@@ -350,6 +351,7 @@ Tests, each named for what it catches: `start.test.ts` launches with `classId=22
 - `app/src/shell/firebase.ts`: `signIn` creates the app's auth with `initializeAuth(app, { persistence: inMemoryPersistence })` before any `getAuth`, and passes that instance to `connectAuthEmulator`. `watchDoc` takes an `onError` callback beside its logging, so a refused listener reaches the page instead of only the console.
 - `app/src/shell/portal.ts`: `Portal.firebaseToken` (the existing call, on `Api`) and `Portal.refreshProfile()` (`POST`, no body).
 - `app/src/shell/packages.ts`: new, with `Profile` and `needsRefresh` in this step.
+- `app/src/shell/portals.ts`: `PROFILE_MAX_AGE_MS`.
 - `app/src/shell/services.ts`: `watchProfile(scope, onValue)`.
 - `app/src/pages/ClassDashboard.tsx`: the profile and refresh effects, and the status region's "Reading this class's activities…", refresh-refused and profile-unreadable lines.
 - Tests: `firebase-sign-in.test.ts` (new), `packages.test.ts` (`needsRefresh`), `portal.test.ts` (`firebaseToken`, `refreshProfile`), `class-dashboard.test.tsx` (refresh cases).
