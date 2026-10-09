@@ -16,7 +16,7 @@ Move the bucket prefix the runner fetches package archives from, `scripts/`, to 
 - **R2.** In DIR mode the runner fetches it from `<SYNC_DIR>/packages/<name>/<version>.zip`, mirroring the bucket's layout as it already does for `researchers/`.
 - **R3.** The prefix is spelled once in the runner's code, beside `packageKey`, and both modes use it.
 - **R4.** `runner/scripts/publish-package.sh` uploads `<version>.zip` and `<version>.sha256` to `s3://<bucket>/packages/<name>/`, and its header comment and output name the new prefix. Its arguments, archive and checksum are unchanged.
-- **R5.** Tests: a runner test that the S3-mode package backend `buildRunner` builds requests `packages/<name>/<version>.zip` from the payload's bucket; a runner test that the DIR-mode backend reads `<SYNC_DIR>/packages/<name>/<version>.zip`; and the sample URL in `redact.test.js` uses `packages/`. After the change, `grep -rn 'scripts/' runner --exclude-dir=node_modules` finds nothing.
+- **R5.** Tests: a runner test that a package run hands its package backend the payload's bucket and asks it for `<name>/<version>.zip`; a runner test that the S3-mode package backend `buildRunner` builds requests `packages/<name>/<version>.zip` from the bucket it is given; a runner test that the DIR-mode backend reads `<SYNC_DIR>/packages/<name>/<version>.zip`; and the sample URL in `redact.test.js` uses `packages/`. After the change, `grep -rn 'scripts/' runner --exclude-dir=node_modules` finds nothing.
 
 Unchanged by this pass: the `/run-package` body and its single-segment name check, the result document's id, the local fetch cache at `<workRoot>/packages/<name>/<version>.zip`, the package's home and output directories, checksum verification before unpacking, and the manifest check against the requested name and version.
 
@@ -29,8 +29,8 @@ Unchanged by this pass: the `/run-package` body and its single-segment name chec
 
 - **R10.** None of its own. On RD-1's stack the execution role reads no S3, so a VM from this runner can fetch nothing; the first runner release that does work on staging is RD-4 pass 2's.
 - **R11.** A runner change reaches a stack as a runner release: `make publish-artifact VERSION=<x.y.z> ARTIFACT_BUCKET=<bucket in the stack's account>` in `runner/` (`concordqa-devops` for staging), then that key as `CodeArtifactKey` in a change set. A new package version needs no image rebuild; a new prefix does.
-- **R12.** `runner/Makefile`'s comment on `artifact-uri` names the stack's `CodeArtifactKey` parameter and `cloudformation/README.md`, not cloud-formation's retired `create-stack` config.
-- **R13.** `cloudformation/README.md` gains "Releasing the runner": publish the artifact, then a change set that sets `CodeArtifactKey` explicitly while every other parameter keeps its previous value, and the rule that a runner change needing a new grant goes in the same change set as the grant, with live VMs terminated first. *(As built, the section also gives the commands for terminating the VMs on the old image, run with the operator's own credentials since the launcher cannot list VMs.)*
+- **R12.** `runner/Makefile`'s comment on the artifact names the stack's `CodeArtifactKey` parameter and `cloudformation/README.md`, not cloud-formation's retired `create-stack` config. *(As built after review: `make artifact-key` prints the key, which the README and the template's parameter description use, and `publish-artifact` refuses a `VERSION` already in the bucket.)*
+- **R13.** `cloudformation/README.md` gains "Releasing the runner": publish the artifact, then a change set that sets `CodeArtifactKey` explicitly while every other parameter keeps its previous value, and the rule that a runner change needing a new grant goes in the same change set as the grant, with live VMs terminated first. *(As built, the section also gives the commands for terminating the suspended VMs on an older image version, run with the operator's own credentials since the launcher cannot list VMs, and says that a grant-changing release terminates them after the update completes and that runs can fail during it.)*
 
 ## Technical Notes
 
@@ -119,3 +119,14 @@ Unchanged by this pass: the `/run-package` body and its single-segment name chec
 
 ### "Releasing the runner" said to terminate old VMs without saying how (code review, 2026-10-09)
 **Decision**: The section gives the commands: find the stack's `MicrovmImageArn` and its `latestActiveImageVersion`, then terminate each VM on any other version, with the operator's own credentials, so a VM already launched on the new version is left alone (Copilot's review of PR #2).
+
+---
+
+### Which old VMs does a release terminate, and when? (Ethan McElroy's review of PR #2, 2026-10-09)
+**Context**: Terminating every old-version VM kills a run in progress, and the loop also listed VMs already terminating. For a grant change, terminating before the update leaves the build window, in which a run request still launches on the old image.
+**Options considered**:
+- A) Terminate old-version VMs whatever their state, accepting a lost run.
+- B) Terminate only old-version VMs that are suspended, and rerun the loop until it terminates nothing; a running one suspends once idle.
+- C) Have report-service's function replace a suspended VM on an old version instead of resuming it, so no operator step is needed.
+
+**Decision**: B in the README now (Doug), and C as its own report-service story, after which the loop is cleanup only. A grant change terminates every old-version VM after the update completes, and the README says runs can fail during the update, since nothing in this repository can pause new runs.
