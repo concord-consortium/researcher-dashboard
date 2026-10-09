@@ -118,4 +118,4 @@ Unchanged by this pass: the `/run-package` body and its single-segment name chec
 ---
 
 ### "Releasing the runner" said to terminate old VMs without saying how (code review, 2026-10-09)
-**Decision**: The section gives the commands: find the stack's `MicrovmImageArn`, list its VMs and terminate each, with the operator's own credentials.
+**Decision**: The section gives the commands: find the stack's `MicrovmImageArn` and its `latestActiveImageVersion`, then terminate each VM on any other version, with the operator's own credentials, so a VM already launched on the new version is left alone (Copilot's review of PR #2).

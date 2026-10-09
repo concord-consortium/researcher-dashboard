@@ -101,17 +101,20 @@ aws cloudformation create-change-set --stack-name "$STACK" --change-set-name "gi
   --parameters $PARAMS ParameterKey=CodeArtifactKey,ParameterValue="$KEY"
 ```
 
-The bucket is the one "Before a stack is created in an account" names: `concordqa-devops` for staging, `concord-devops` for production. Review, diff and execute the change set as in "Updating a stack"; the update builds the new image. Then terminate the VMs still running the old one, since nothing else retires them. With your own credentials, since the launcher cannot list VMs:
+The bucket is the one "Before a stack is created in an account" names: `concordqa-devops` for staging, `concord-devops` for production. Review, diff and execute the change set as in "Updating a stack"; the update builds the new image. Then terminate the VMs still running an older version, since nothing else retires them, and leave any already on the new one. With your own credentials, since the launcher cannot list VMs:
 
 ```sh
 IMAGE=$(aws cloudformation describe-stacks --stack-name "$STACK" \
   --query "Stacks[0].Outputs[?OutputKey=='MicrovmImageArn'].OutputValue" --output text)
-for VM in $(aws lambda-microvms list-microvms --image-identifier "$IMAGE" --query 'items[].microvmId' --output text); do
+ACTIVE=$(aws lambda-microvms get-microvm-image --image-identifier "$IMAGE" \
+  --query latestActiveImageVersion --output text)
+for VM in $(aws lambda-microvms list-microvms --image-identifier "$IMAGE" \
+    --query "items[?imageVersion!='$ACTIVE'].microvmId" --output text); do
   aws lambda-microvms terminate-microvm --microvm-identifier "$VM"
 done
 ```
 
-**When the change needs a grant the stack lacks, the grant goes in the same change set, applied from the same commit**: a stack with the new runner and the old grant, or the reverse, fails at the first call. Run the block above before applying a change like that, or the running VMs will make the old call against the new grant.
+**When the change needs a grant the stack lacks, the grant goes in the same change set, applied from the same commit**: a stack with the new runner and the old grant, or the reverse, fails at the first call. Before applying a change like that, terminate every running VM (the same loop without the `imageVersion` filter), or they will make the old call against the new grant.
 
 ## What goes where after a create or update
 
