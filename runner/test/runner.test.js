@@ -133,7 +133,7 @@ function steps(record, overrides = {}) {
 
 // A runner wired to in-memory stores, a directory for S3 and the fake function. The clock
 // is advanced by `sleep`, so the idle period passes without waiting.
-function build({ stepOverrides = {}, envOverrides = {}, makeStore, revoke, applies, clock = { t: Date.parse("2026-09-26T12:00:00Z") } } = {}) {
+function build({ stepOverrides = {}, envOverrides = {}, makeStore, makePackageBackend, revoke, applies, clock = { t: Date.parse("2026-09-26T12:00:00Z") } } = {}) {
   const docs = new Map();
   const fn = fakeFunction(docs);
   const record = { resolved: [], pulled: [], prepared: [], stores: [], manifests: {}, sleeps: [], revoked: [], applies: [] };
@@ -153,7 +153,7 @@ function build({ stepOverrides = {}, envOverrides = {}, makeStore, revoke, appli
     }),
     makeFunctionClient: fn.makeFunctionClient,
     makeSyncer: ({ root }) => new Syncer({ backend: new DirBackend(path.join(work, "remote")), root }),
-    makePackageBackend: () => ({ async get() {} }),
+    makePackageBackend: makePackageBackend ?? (() => ({ async get() {} })),
     unzip: async () => {},
     netGuard: async () => ({ uid: 1000 }),
     revokeReportServerToken: revoke ?? (async (args) => { record.revoked.push(args); }),
@@ -504,6 +504,19 @@ test("an archive that cannot be fetched is refused as missing or not readable", 
   await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
   await built.runner.loop;
   assert.match(result(built.docs, "users/1/gone").error, /missing or not readable/);
+});
+
+test("a queued package is fetched from the payload's bucket at its identity's key", async () => {
+  const asked = [];
+  const built = build({
+    makePackageBackend: ({ bucket }) => ({ async get(key) { asked.push({ bucket, key }); throw new Error("stop"); } }),
+    stepOverrides: { resolvePackage: makeSteps().resolvePackage }
+  });
+  built.fn.queue({ identity: "users/136/class-counts" });
+  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+  await built.runner.loop;
+
+  assert.deepEqual(asked, [{ bucket: "researcher-dashboard-runner-staging", key: "users/136/class-counts/1.0.0.zip" }]);
 });
 
 // The id comes from the identity; /work's own package_key is only checked.
