@@ -74,7 +74,7 @@ function steps(overrides = {}) {
   };
 }
 
-function build({ stepOverrides = {}, now, envOverrides = {}, makeStore, revokeReportServerToken } = {}) {
+function build({ stepOverrides = {}, now, envOverrides = {}, makeStore, makePackageBackend, revokeReportServerToken } = {}) {
   const env = {
     ...loadEnv({ SYNC_BACKEND: "DIR", SYNC_DIR: path.join(work, "remote") }),
     dataRoot: path.join(work, "data"),
@@ -89,7 +89,7 @@ function build({ stepOverrides = {}, now, envOverrides = {}, makeStore, revokeRe
   return new Runner({
     env,
     makeStore: makeStore ?? (() => store),
-    makePackageBackend: () => ({ async get() {} }),
+    makePackageBackend: makePackageBackend ?? (() => ({ async get() {} })),
     unzip: async () => {},
     makeSyncer: ({ root }) =>
       new Syncer({ backend: new DirBackend(path.join(work, "remote")), root }),
@@ -823,7 +823,22 @@ test("/run-package is refused until /run has finished", async () => {
   await running;
 });
 
-// report-server publishes under packages/, the only prefix a package is fetched from.
+test("a package run fetches from the payload's bucket at the package's key", async () => {
+  const asked = [];
+  const runner = await started({
+    makePackageBackend: ({ bucket }) => ({ async get(key) { asked.push({ bucket, key }); throw new Error("stop"); } }),
+    stepOverrides: { resolvePackage: makeSteps().resolvePackage }
+  });
+  await runner.startPackage({
+    scope: { kind: "class", class_hash: CLASS, class_id: 111 },
+    package: { name: "class-counts", version: "1.0.6", checksum: "sha256:abc" },
+    class_tokens: CLASS_TOKENS
+  }).catch(() => {});
+  await runner.currentAnalysis?.done;
+
+  assert.deepEqual(asked, [{ bucket: "researcher-dashboard-runner-staging", key: "class-counts/1.0.6.zip" }]);
+});
+
 test("packages are fetched from the packages/ prefix of the bucket", async () => {
   const runner = buildRunner(loadEnv({ SYNC_BACKEND: "S3" }));
   const backend = runner.makePackageBackend({ bucket: "researcher-dashboard-runner-staging" });
