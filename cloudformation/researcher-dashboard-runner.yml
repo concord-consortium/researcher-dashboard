@@ -1,0 +1,442 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: "Researcher Dashboard package runner: MicroVM image, roles, data bucket and log group, the roles report-service's function assumes, and the IAM user report-server publishes packages as"
+
+# One stack per environment: staging in the QA account, production in the production
+# account. Every create-only value below (bucket, log group, role and user names, the
+# access key's Serial, the image Name) must stay what a live stack was created with,
+# or an update replaces the resource; tests/test_runner_template.py holds them fixed.
+# See README.md for how this template is applied.
+
+Parameters:
+  Environment:
+    Type: String
+    Description: Lowercase name of environment (either staging or production)
+    Default: staging
+    AllowedValues: [staging, production]
+  Contact:
+    Type: String
+    Description: Value of the Contact cost-allocation tag
+    Default: dmartin
+  CodeArtifactBucket:
+    Type: String
+    Description: Bucket holding the runner code artifact zip (Dockerfile plus build context), in this stack's account
+    Default: concord-devops
+  CodeArtifactKey:
+    Type: String
+    Description: Key of the runner code artifact zip within CodeArtifactBucket, as `make artifact-uri` in runner/ prints it
+    Default: researcher-dashboard-runner/runner-0.1.0.zip
+  BaseImageArn:
+    Type: String
+    Description: ARN of the Lambda-managed MicroVM base image
+    Default: arn:aws:lambda:us-east-1:aws:microvm-image:al2023-1
+  BaseImageVersion:
+    Type: String
+    Description: Version of the Lambda-managed base image. CloudFormation requires it, so a base image patch is a stack update
+    Default: "1"
+  BaselineMemoryInMiB:
+    Type: Number
+    Description: Baseline MicroVM memory. 4096 gives 4 GB / 2 vCPU baseline, 16 GB / 8 vCPU peak and 16 GB of disk
+    Default: 4096
+    AllowedValues: [512, 1024, 2048, 4096, 8192]
+  HooksPort:
+    Type: Number
+    Description: Port the runner's HTTP server listens on, for both the lifecycle hooks and the runner's own PORT
+    Default: 8080
+    MinValue: 1
+    MaxValue: 65535
+  LogRetentionInDays:
+    Type: Number
+    Description: Days CloudWatch keeps the runner's build and runtime logs
+    Default: 30
+  FunctionServiceAccountUniqueId:
+    Type: String
+    Description: Numeric unique ID of the researcher-dashboard service account report-service's function runs as, which setup-researcher-dashboard-iam.sh check prints. The launcher and broker roles trust only this account
+    AllowedPattern: "^[0-9]+$"
+
+Resources:
+
+  DataBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub "researcher-dashboard-runner-${Environment}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      # A delete or an overwrite keeps the old version, and removing a version takes
+      # s3:DeleteObjectVersion, which nothing here holds, so no session can destroy a file.
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        # Current objects never expire (final-design.md section 12): researchers return to
+        # a class a year later. Old versions are recoverable for 180 days, Concord's usual
+        # window; the rules also drop delete markers with nothing behind them and the parts
+        # of multipart uploads that never completed.
+        Rules:
+          - Id: AbortIncompleteUploads
+            Status: Enabled
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
+          - Id: ExpireOldVersions
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 180
+            ExpiredObjectDeleteMarker: true
+      Tags:
+        - Key: Contact
+          Value: !Ref Contact
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: researcher-dashboard-runner
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda-microvms/researcher-dashboard-runner-${Environment}"
+      RetentionInDays: !Ref LogRetentionInDays
+      Tags:
+        - Key: Contact
+          Value: !Ref Contact
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: researcher-dashboard-runner
+
+  BuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "researcher-dashboard-runner-${Environment}-build"
+      Description: Assumed by Lambda to fetch the code artifact and write build logs while building the MicroVM image
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+              - sts:TagSession
+      Policies:
+        - PolicyName: build
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub "arn:aws:s3:::${CodeArtifactBucket}/${CodeArtifactKey}"
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda-microvms/*"
+      Tags:
+        - Key: Contact
+          Value: !Ref Contact
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: researcher-dashboard-runner
+
+  # Every MicroVM from this image runs as this role, and a package that escapes its
+  # sandbox can read its credentials from the metadata service. So it writes the VM's
+  # logs and nothing else: storage credentials come from the broker, scoped to one
+  # researcher, and suspending a VM is the function's call.
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "researcher-dashboard-runner-${Environment}-execution"
+      Description: Runtime role of every MicroVM from this image. It writes the VM's logs and nothing else
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+              - sts:TagSession
+      Policies:
+        - PolicyName: runtime
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:${LogGroup}:log-stream:*"
+      Tags:
+        - Key: Contact
+          Value: !Ref Contact
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: researcher-dashboard-runner
+
+  # What report-service's function calls Lambda MicroVMs as. It holds no AWS key: it
+  # exchanges a Google ID token for this role's credentials.
+  LauncherRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "researcher-dashboard-runner-${Environment}-launcher"
+      Description: Assumed by report-service's function, with its Google identity, to launch, resume, suspend and terminate MicroVMs
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          # Google is built into AWS as an identity provider. A service account's ID
+          # token carries its unique ID in azp (AWS's accounts.google.com:aud) and sub,
+          # and the requested audience in aud (accounts.google.com:oaud). AWS does not
+          # require sub for Google, so this condition is what limits the trust to the
+          # one account.
+          - Effect: Allow
+            Principal:
+              Federated: accounts.google.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                "accounts.google.com:aud": !Ref FunctionServiceAccountUniqueId
+                "accounts.google.com:sub": !Ref FunctionServiceAccountUniqueId
+                "accounts.google.com:oaud": !Sub "researcher-dashboard-runner-${Environment}"
+      Policies:
+        - PolicyName: launch
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: lambda:RunMicrovm
+                Resource:
+                  - !GetAtt MicrovmImage.ImageArn
+                  - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:microvm:*"
+              # What the reuse decision compares a VM's image version with.
+              - Effect: Allow
+                Action: lambda:GetMicrovmImage
+                Resource: !GetAtt MicrovmImage.ImageArn
+              # Both ARN shapes: these authorize against the image a VM was built from,
+              # which only a refused real call showed. One researcher's VM cannot be told
+              # from another's by ARN, so this is image-wide. No CreateMicrovmAuthToken:
+              # nothing calls into a VM, and its endpoint refuses a request without a token.
+              - Effect: Allow
+                Action:
+                  - lambda:GetMicrovm
+                  - lambda:ResumeMicrovm
+                  - lambda:SuspendMicrovm
+                  - lambda:TerminateMicrovm
+                Resource:
+                  - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:microvm:*"
+                  - !GetAtt MicrovmImage.ImageArn
+              # Passing an AWS-managed connector is its own permission. Enumerated rather
+              # than wildcarded, so a new connector needs this stack changed too. No
+              # shell connector: it yields a root shell on the VM, and no environment has it.
+              - Effect: Allow
+                Action: lambda:PassNetworkConnector
+                Resource:
+                  - !Sub "arn:aws:lambda:${AWS::Region}:aws:network-connector:aws-network-connector:HTTP_INGRESS"
+                  - !Sub "arn:aws:lambda:${AWS::Region}:aws:network-connector:aws-network-connector:INTERNET_EGRESS"
+              # Unconditioned: RunMicrovm does not populate iam:PassedToService, so a
+              # condition on it never matches. The execution role trusts only Lambda.
+              - Effect: Allow
+                Action: iam:PassRole
+                Resource: !GetAtt ExecutionRole.Arn
+      Tags:
+        - Key: Contact
+          Value: !Ref Contact
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: researcher-dashboard-runner
+
+  # What a VM's storage credentials are drawn from. These policies are the ceiling of
+  # every session: the function narrows each one to researchers/<platform_user_id>/ and
+  # packages/ with a session policy on AssumeRoleWithWebIdentity, and a session without
+  # one would reach every researcher's prefix.
+  BrokerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "researcher-dashboard-runner-${Environment}-broker"
+      Description: Assumed by report-service's function, with its Google identity, to mint a VM's storage credentials, one researcher's prefix and the published packages per session
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          # The same trust as LauncherRole's: the function assumes each role directly.
+          - Effect: Allow
+            Principal:
+              Federated: accounts.google.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                "accounts.google.com:aud": !Ref FunctionServiceAccountUniqueId
+                "accounts.google.com:sub": !Ref FunctionServiceAccountUniqueId
+                "accounts.google.com:oaud": !Sub "researcher-dashboard-runner-${Environment}"
+      Policies:
+        - PolicyName: researcher-data
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt DataBucket.Arn
+                Condition:
+                  StringLike:
+                    s3:prefix: "researchers/*"
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource: !Sub "${DataBucket.Arn}/researchers/*"
+        # Read only, and no list: the runner fetches an archive by the key the catalog
+        # names and never lists packages/, whose keys name every researcher's packages,
+        # private ones too. Without a list grant a missing archive is AccessDenied.
+        - PolicyName: packages-read
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub "${DataBucket.Arn}/packages/*"
+      Tags:
+        - Key: Contact
+          Value: !Ref Contact
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: researcher-dashboard-runner
+
+  # report-server's publish path. A user of its own because report-server's existing
+  # credential reaches other buckets, and widening it would reach this one too.
+  PackagesWriterUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: !Sub "researcher-dashboard-runner-${Environment}-packages-writer"
+      Policies:
+        - PolicyName: put-packages
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: s3:PutObject
+                Resource: !Sub "${DataBucket.Arn}/packages/*"
+      Tags:
+        - Key: Contact
+          Value: !Ref Contact
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: researcher-dashboard-runner
+
+  # UserName is the literal name, not !Ref PackagesWriterUser: a Ref to a user the same
+  # update modifies can show the key as a conditional replacement. Bump Serial to
+  # rotate: the old key is deleted once the new one exists, so update report-server's
+  # PackagesAws* parameters straight away.
+  PackagesWriterKey:
+    Type: AWS::IAM::AccessKey
+    DependsOn: PackagesWriterUser
+    Properties:
+      UserName: !Sub "researcher-dashboard-runner-${Environment}-packages-writer"
+      Serial: 1
+      Status: Active
+
+  MicrovmImage:
+    Type: AWS::Lambda::MicrovmImage
+    Properties:
+      Name: !Sub "researcher-dashboard-runner-${Environment}"
+      Description: !Sub "Researcher Dashboard package runner (${Environment})"
+      BaseImageArn: !Ref BaseImageArn
+      BaseImageVersion: !Ref BaseImageVersion
+      BuildRoleArn: !GetAtt BuildRole.Arn
+      CodeArtifact:
+        Uri: !Sub "s3://${CodeArtifactBucket}/${CodeArtifactKey}"
+      CpuConfigurations:
+        - Architecture: ARM_64
+      Resources:
+        - MinimumMemoryInMiB: !Ref BaselineMemoryInMiB
+      # CAP_SYS_ADMIN: the runner gives each package its own empty network namespace,
+      # without which the package could read the execution role's credentials from the
+      # instance metadata service. ALL is the only value accepted, so the VM holds every
+      # capability; the package itself runs with none (sandbox.js, --bounding-set -all).
+      AdditionalOsCapabilities: ["ALL"]
+      EgressNetworkConnectors:
+        - !Sub "arn:aws:lambda:${AWS::Region}:aws:network-connector:aws-network-connector:INTERNET_EGRESS"
+      EnvironmentVariables:
+        # Baked into the snapshot every VM shares, so nothing per researcher and nothing
+        # secret. Per-VM values arrive in runHookPayload.
+        - Key: PORT
+          Value: !Ref HooksPort
+        - Key: DATA_ROOT
+          Value: /data
+        - Key: SYNC_BACKEND
+          Value: S3
+        - Key: STATUS_BACKEND
+          Value: FIRESTORE
+      Hooks:
+        Port: !Ref HooksPort
+        MicrovmHooks:
+          Run: ENABLED
+          RunTimeoutInSeconds: 60
+          Resume: ENABLED
+          ResumeTimeoutInSeconds: 60
+          Suspend: ENABLED
+          SuspendTimeoutInSeconds: 60
+          Terminate: ENABLED
+          TerminateTimeoutInSeconds: 60
+        MicrovmImageHooks:
+          Ready: ENABLED
+          ReadyTimeoutInSeconds: 600
+          Validate: DISABLED
+          ValidateTimeoutInSeconds: 600
+      Logging:
+        CloudWatch:
+          LogGroup: !Ref LogGroup
+      Tags:
+        - Key: Contact
+          Value: !Ref Contact
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: researcher-dashboard-runner
+
+Outputs:
+  DataBucketName:
+    Description: Bucket holding researcher datasets and published packages; the function's RD_DATA_BUCKET and report-server's PackageBuckets entry
+    Value: !Ref DataBucket
+  MicrovmImageArn:
+    Description: ARN of the MicroVM image, the function's RD_MICROVM_IMAGE_ARN
+    Value: !GetAtt MicrovmImage.ImageArn
+  ExecutionRoleArn:
+    Description: ARN the function passes to RunMicrovm, its RD_EXECUTION_ROLE_ARN
+    Value: !GetAtt ExecutionRole.Arn
+  BuildRoleArn:
+    Description: ARN Lambda assumes to build the MicroVM image
+    Value: !GetAtt BuildRole.Arn
+  LauncherRoleArn:
+    Description: Role the function assumes for MicroVM calls, its RD_LAUNCHER_ROLE_ARN. Its token audience, RD_AWS_AUDIENCE, is researcher-dashboard-runner-<Environment>
+    Value: !GetAtt LauncherRole.Arn
+  BrokerRoleArn:
+    Description: Role the function assumes, with the same token audience, to mint a VM's storage credentials
+    Value: !GetAtt BrokerRole.Arn
+  PackagesWriterUserName:
+    Description: IAM user report-server publishes packages as
+    Value: !Ref PackagesWriterUser
+  PackagesWriterUserArn:
+    Description: ARN of report-server's packages writer user
+    Value: !GetAtt PackagesWriterUser.Arn
+  PackagesWriterAccessKey:
+    Description: Access key of the packages writer, report-server's PackagesAwsAccessKeyId
+    Value: !Ref PackagesWriterKey
+  PackagesWriterSecretKey:
+    Description: Secret key of the packages writer, report-server's PackagesAwsSecretAccessKey
+    Value: !GetAtt PackagesWriterKey.SecretAccessKey
+  LogGroupName:
+    Description: CloudWatch log group for MicroVM build and runtime logs
+    Value: !Ref LogGroup
