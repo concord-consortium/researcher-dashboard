@@ -6,9 +6,10 @@ VERSION ?= 0.1.0
 ARTIFACT ?= dist/runner-$(VERSION).zip
 ARTIFACT_BUCKET ?= concord-devops
 ARTIFACT_PREFIX ?= researcher-dashboard-runner
-ARTIFACT_URI = s3://$(ARTIFACT_BUCKET)/$(ARTIFACT_PREFIX)/$(notdir $(ARTIFACT))
+ARTIFACT_KEY = $(ARTIFACT_PREFIX)/$(notdir $(ARTIFACT))
+ARTIFACT_URI = s3://$(ARTIFACT_BUCKET)/$(ARTIFACT_KEY)
 
-.PHONY: build run tools shell clean test test-emulator run-hook artifact artifact-uri publish-artifact
+.PHONY: build run tools shell clean test test-emulator run-hook artifact artifact-key publish-artifact
 
 build:
 	docker buildx build --platform $(PLATFORM) --load -t $(IMAGE) .
@@ -66,11 +67,18 @@ artifact:
 	mkdir -p $(dir $(ARTIFACT))
 	zip -r $(ARTIFACT) Dockerfile package.json package-lock.json server
 
-# The runner stack's CodeArtifactKey parameter is this key (cloudformation/README.md).
-artifact-uri:
-	@echo $(ARTIFACT_URI)
+# The runner stack's CodeArtifactKey parameter (cloudformation/README.md).
+artifact-key:
+	@echo $(ARTIFACT_KEY)
 
+# Refuses a VERSION already published: overwriting it changes no key, so no image is built
+# now and the next build takes the replaced code unreviewed. Only a 404 counts as unpublished.
 publish-artifact: artifact
+	@if out=$$(aws s3api head-object --bucket $(ARTIFACT_BUCKET) --key $(ARTIFACT_KEY) 2>&1); then \
+	  echo "$(ARTIFACT_URI) is already published; a release takes a VERSION never published before" >&2; exit 1; \
+	elif ! echo "$$out" | grep -q '(404)'; then \
+	  echo "$$out" >&2; exit 1; \
+	fi
 	aws s3 cp $(ARTIFACT) $(ARTIFACT_URI)
 
 clean:

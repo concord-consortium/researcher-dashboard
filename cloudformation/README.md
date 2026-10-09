@@ -85,11 +85,11 @@ A `MicrovmImage` change starts an image build. VMs already running keep their ve
 
 ## Releasing the runner
 
-A runner change reaches a stack only through a new image: publish the artifact, then update the stack with `CodeArtifactKey` pointing at it and every other parameter unchanged. A new package version needs no release; a change to the runner's own code does. "Updating a stack" cannot do this, since it carries `CodeArtifactKey` over with its previous value.
+A runner change reaches a stack only through a new image: publish the artifact, then update the stack with `CodeArtifactKey` pointing at it and every other parameter unchanged. A new package version needs no release; a change to the runner's own code does. "Updating a stack" cannot do this, since it carries `CodeArtifactKey` over with its previous value. Each release takes a `VERSION` never published before, so each has its own key: `publish-artifact` refuses one already in the bucket.
 
 ```sh
 cd ../runner && make publish-artifact VERSION=<x.y.z> ARTIFACT_BUCKET=<bucket in the stack's account>
-KEY=$(make -s artifact-uri VERSION=<x.y.z> ARTIFACT_BUCKET=<same> | sed 's#^s3://[^/]*/##')
+KEY=$(make -s artifact-key VERSION=<x.y.z>)
 cd ../cloudformation
 STACK=researcher-dashboard-runner-staging
 SHA=$(git rev-parse --short HEAD)
