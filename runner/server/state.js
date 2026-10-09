@@ -26,7 +26,7 @@ const ALLOWED = Object.freeze({
   // resume, so TERMINATED is reachable from here too.
   [SUSPENDED]: [READY, TERMINATED, FAILED],
   // FAILED is not final: a failed sync leaves the VM running, and the next
-  // successful analysis or resume puts it back in service.
+  // successful package or resume puts it back in service.
   [FAILED]: [READY, SUSPENDING, TERMINATED],
   [TERMINATED]: []
 });

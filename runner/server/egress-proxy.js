@@ -2,7 +2,7 @@ import http from "node:http";
 import net from "node:net";
 import { log } from "./log.js";
 
-// The only way out of the analysis namespace.
+// The only way out of the package namespace.
 //
 // The package gets a network namespace whose single reachable address is this proxy,
 // so "what may a package talk to" is one allowlist in one place rather than a set of

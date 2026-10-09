@@ -1,5 +1,5 @@
 // One JSON object per line on stdout, which is what CloudWatch ingests from the VM.
-// Every line carries the identifiers a run is traced by: researcher, class, analysis.
+// Every line carries the identifiers a run is traced by: researcher, scope, package.
 
 let context = {};
 
@@ -31,7 +31,7 @@ export const log = {
 };
 
 // Times an async step and logs its duration whether it succeeds or throws, so a
-// failed analysis still yields the per-step timings.
+// failed package still yields the per-step timings.
 export async function timed(event, fields, fn) {
   const started = process.hrtime.bigint();
   const ms = () => Number(process.hrtime.bigint() - started) / 1e6;

@@ -6,7 +6,7 @@ import { NETNS } from "./netns.js";
 const run = promisify(execFile);
 
 // Execution-role credentials reach the VM through IMDSv2 at this address rather
-// than through the environment, so an analysis package can read them with an
+// than through the environment, so a package can read them with an
 // ordinary HTTP request unless it is given no network at all.
 export const IMDS_ADDRESS = "169.254.169.254";
 
@@ -122,7 +122,7 @@ async function reachable({ uid, netns, exec, url, acceptRefusal = false }) {
   }
 }
 
-// Runs an analysis package's entrypoint in the sandbox, as the analysis uid.
+// Runs a package's entrypoint in the sandbox, as the package uid.
 //
 // The environment is replaced rather than extended: a package inherits nothing from the
 // runner's process, which holds credentials in its own $HOME and whatever the SDK has

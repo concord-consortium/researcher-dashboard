@@ -4,7 +4,7 @@ import { log } from "./log.js";
 
 const run = promisify(execFile);
 
-// The analysis namespace: a package's only route out is the egress proxy.
+// The package namespace: a package's only route out is the egress proxy.
 //
 // Built rather than empty, because a package makes its own report-service pulls now.
 // The shape is chosen so that "what may a package reach" is answered by routing rather
@@ -14,11 +14,11 @@ const run = promisify(execFile);
 // not because a rule says no.
 //
 // Two things still need a rule. The runner's own HTTP server binds every interface, so
-// the host end of the veth would otherwise expose /run-package and /refresh-token to
-// the package; only the proxy port is allowed. And IPv6 is never configured, which is
+// the host end of the veth would otherwise expose the lifecycle hooks and the status
+// page to the package; only the proxy port is allowed. And IPv6 is never configured, which is
 // what closes the fd00:ec2::254 metadata address without a second ruleset.
 
-export const NETNS = "analysis";
+export const NETNS = "package";
 export const HOST_ADDR = "10.201.0.1";
 export const NS_ADDR = "10.201.0.2";
 export const PREFIX = 30;
@@ -28,10 +28,10 @@ export const PROXY_PORT = 8123;
 export function setupCommands({ netns = NETNS, proxyPort = PROXY_PORT } = {}) {
   return [
     ["ip", ["netns", "add", netns]],
-    ["ip", ["link", "add", "veth-an", "type", "veth", "peer", "name", "veth-ns"]],
+    ["ip", ["link", "add", "veth-pkg", "type", "veth", "peer", "name", "veth-ns"]],
     ["ip", ["link", "set", "veth-ns", "netns", netns]],
-    ["ip", ["addr", "add", `${HOST_ADDR}/${PREFIX}`, "dev", "veth-an"]],
-    ["ip", ["link", "set", "veth-an", "up"]],
+    ["ip", ["addr", "add", `${HOST_ADDR}/${PREFIX}`, "dev", "veth-pkg"]],
+    ["ip", ["link", "set", "veth-pkg", "up"]],
     ["ip", ["netns", "exec", netns, "ip", "addr", "add", `${NS_ADDR}/${PREFIX}`, "dev", "veth-ns"]],
     ["ip", ["netns", "exec", netns, "ip", "link", "set", "veth-ns", "up"]],
     ["ip", ["netns", "exec", netns, "ip", "link", "set", "lo", "up"]],
@@ -50,7 +50,7 @@ export function setupCommands({ netns = NETNS, proxyPort = PROXY_PORT } = {}) {
 export function teardownCommands({ netns = NETNS } = {}) {
   return [
     ["ip", ["netns", "del", netns]],
-    ["ip", ["link", "del", "veth-an"]]
+    ["ip", ["link", "del", "veth-pkg"]]
   ];
 }
 

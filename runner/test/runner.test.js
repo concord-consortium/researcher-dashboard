@@ -82,7 +82,7 @@ function build({ stepOverrides = {}, now, envOverrides = {}, makeStore, makePack
     // The production default is 30 minutes and its timer is deliberately not
     // unref'd, so a test that leaves an analysis pending would hold the event loop
     // open for that long. Seconds are ample for a faked pipeline.
-    analysisTimeoutMs: 2000,
+    packageTimeoutMs: 2000,
     ...envOverrides
   };
   store = new MemoryStore();
@@ -162,7 +162,7 @@ test("a full analysis writes starting, ready, running, ready and the class count
     package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
     class_tokens: CLASS_TOKENS
   });
-  await runner.currentAnalysis?.done;
+  await runner.currentRun?.done;
   assert.equal(res.package, "demo");
 
   assert.deepEqual(store.states(rdoc()), ["starting", "ready", "running", "ready"]);
@@ -192,7 +192,7 @@ test("the status doc lists a class once a package has been accepted for it", asy
     package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
     class_tokens: CLASS_TOKENS
   });
-  await runner.currentAnalysis?.done;
+  await runner.currentRun?.done;
 
   assert.deepEqual(store.get(rdoc()).classes, [CLASS]);
 });
@@ -206,7 +206,7 @@ test("the status doc lists every class the VM holds, not only the last one", asy
       package: { name, version: "1.0.0", checksum: "sha256:abc" },
       class_tokens: CLASS_TOKENS
     });
-    await runner.currentAnalysis?.done;
+    await runner.currentRun?.done;
   }
 
   assert.deepEqual(store.get(rdoc()).classes, [other, CLASS].sort());
@@ -222,7 +222,7 @@ test("a VM that syncs down a researcher's classes reports them at ready", async 
     package: { name: "other", version: "1.0.0", checksum: "sha256:abc" },
     class_tokens: CLASS_TOKENS
   });
-  await first.currentAnalysis?.done;
+  await first.currentRun?.done;
   await first.suspend();
 
   const next = build({ envOverrides: { dataRoot: path.join(work, "data-2") } });
@@ -239,7 +239,7 @@ test("requested_by comes from the session payload, not the request body", async 
     class_tokens: CLASS_TOKENS,
     requested_by: "someone-else"
   });
-  await runner.currentAnalysis?.done;
+  await runner.currentRun?.done;
   assert.equal(store.get(resultPath(PORTAL, CLASS, "demo")).requested_by, USER);
 });
 
@@ -264,7 +264,7 @@ test("a second analysis is refused with 409 and writes nothing", async () => {
   assert.equal(store.get(resultPath(PORTAL, CLASS, "other")), undefined);
 
   release({ answers: 1, logs: 1, clue_documents: 1 });
-  await runner.currentAnalysis?.done;
+  await runner.currentRun?.done;
 });
 
 test("an analysis longer than the VM has left is refused, writing nothing", async () => {
@@ -340,7 +340,7 @@ test("a failed analysis fails its document but returns the VM to ready", async (
     package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
     class_tokens: CLASS_TOKENS
   });
-  await runner.currentAnalysis?.done;
+  await runner.currentRun?.done;
 
   const doc = store.get(resultPath(PORTAL, CLASS, "demo"));
   assert.equal(doc.status, "failed");
@@ -351,7 +351,7 @@ test("a failed analysis fails its document but returns the VM to ready", async (
 
 test("an analysis that outruns its timeout fails rather than hanging", async () => {
   const runner = await started({
-    envOverrides: { analysisTimeoutMs: 20 },
+    envOverrides: { packageTimeoutMs: 20 },
     stepOverrides: { pullData: () => new Promise(() => {}) }
   });
   await runner.startPackage({
@@ -359,7 +359,7 @@ test("an analysis that outruns its timeout fails rather than hanging", async () 
     package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
     class_tokens: CLASS_TOKENS
   });
-  await runner.currentAnalysis?.done;
+  await runner.currentRun?.done;
 
   const doc = store.get(resultPath(PORTAL, CLASS, "demo"));
   assert.equal(doc.status, "failed");
@@ -419,11 +419,11 @@ test("criterion 11: terminate during an analysis fails the analysis and terminat
     class_tokens: CLASS_TOKENS
   });
 
-  const inFlight = runner.currentAnalysis.done;
+  const inFlight = runner.currentRun.done;
   await runner.terminate();
   assert.equal(runner.state, "terminated");
   assert.equal(store.get(resultPath(PORTAL, CLASS, "demo")).status, "failed");
-  assert.match(store.get(resultPath(PORTAL, CLASS, "demo")).error, /terminated during analysis/);
+  assert.match(store.get(resultPath(PORTAL, CLASS, "demo")).error, /terminated during the package run/);
   assert.equal(store.states(rdoc()).at(-1), "terminated");
 
   release({ answers: 0, logs: 0, clue_documents: 0 });
@@ -469,7 +469,7 @@ test("every status document carries platform_id", async () => {
     package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
     class_tokens: CLASS_TOKENS
   });
-  await runner.currentAnalysis?.done;
+  await runner.currentRun?.done;
 
   for (const path of [rdoc(), `researcher_dashboard/${PORTAL}/classes/${CLASS}`,
                       resultPath(PORTAL, CLASS, "demo")]) {
@@ -514,7 +514,7 @@ test("an analysis refused after the claim leaves the VM able to accept the next 
     }),
     (err) => err instanceof HookError && err.status === 409
   );
-  assert.equal(runner.currentAnalysis, null, "the refused request must not hold the VM");
+  assert.equal(runner.currentRun, null, "the refused request must not hold the VM");
 });
 
 // The session token carries no class_hash, so report-service's rules refuse it on the
@@ -535,7 +535,7 @@ test("class-scoped documents are written on the class token, not the session tok
     package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
     class_tokens: CLASS_TOKENS
   });
-  await runner.currentAnalysis?.done;
+  await runner.currentRun?.done;
 
   assert.equal(classStores.length, 1, "one signed-in connection per class");
   assert.deepEqual(classStores[0].signedInWith, [CLASS_TOKENS["report-service-dev"]]);
@@ -580,12 +580,12 @@ test("a failed run leaves the previous display readable", async () => {
   });
 
   await runner.startPackage(body);
-  await runner.currentAnalysis?.done;
+  await runner.currentRun?.done;
   const display = store.get(resultPath(PORTAL, CLASS, "demo")).display;
   assert.ok(display, "the first run produced a display");
 
   await runner.startPackage(body);
-  await runner.currentAnalysis?.done;
+  await runner.currentRun?.done;
 
   const doc = store.get(resultPath(PORTAL, CLASS, "demo"));
   assert.equal(doc.status, "failed");
@@ -651,7 +651,7 @@ test("a token whose claims cannot be read is left to sign-in to reject", async (
     package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
     class_tokens: { "report-service-dev": "not-a-jwt" }
   });
-  await runner.currentAnalysis?.done;
+  await runner.currentRun?.done;
   assert.equal(res.package, "demo");
 });
 
@@ -686,7 +686,7 @@ test("the result records the package name, version and checksum that ran", async
     package: { name: "class-counts", version: "2.0.0", checksum: "sha256:beef" },
     class_tokens: CLASS_TOKENS
   });
-  await runner.currentAnalysis?.done;
+  await runner.currentRun?.done;
 
   const doc = store.get(resultPath(PORTAL, CLASS, "class-counts"));
   assert.deepEqual(doc.package, { name: "class-counts", version: "2.0.0", checksum: "sha256:beef" });
@@ -775,7 +775,7 @@ test("the portal class id reaches the package's environment", async () => {
     package: { name: "demo", version: "1.0.0", checksum: "sha256:abc" },
     class_tokens: CLASS_TOKENS
   });
-  await runner.currentAnalysis?.done;
+  await runner.currentRun?.done;
   assert.equal(prepared?.classId, 111);
   // The same for the report-server URL, which isolation-probe needs in order to report
   // that report-server is reachable rather than skipping the check.

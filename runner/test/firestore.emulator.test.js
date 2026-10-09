@@ -63,7 +63,7 @@ describe("status writes against the Firestore emulator", { skip: !FIRESTORE || !
       ...loadEnv({ SYNC_BACKEND: "DIR", SYNC_DIR: path.join(work, "remote") }),
       dataRoot: path.join(work, "data"),
       workRoot: path.join(work, "work"),
-      analysisTimeoutMs: 5000
+      packageTimeoutMs: 5000
     };
     runner = new Runner({
       env,
@@ -133,7 +133,7 @@ describe("status writes against the Firestore emulator", { skip: !FIRESTORE || !
         })
       }
     });
-    await runner.currentAnalysis?.done;
+    await runner.currentRun?.done;
 
     const analysis = await read(resultPath(PORTAL, CLASS, "demo"));
     assert.equal(analysis.status, "done");

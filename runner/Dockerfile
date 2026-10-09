@@ -1,5 +1,5 @@
-# Runner image: tooling only. No analysis script is baked in; packages are fetched
-# from S3 at /analyze. Nothing secret is present at build time, because every VM
+# Runner image: tooling only. No package is baked in; packages are fetched from S3
+# when the runner takes them from its queue. Nothing secret is present at build time, because every VM
 # launched from this image shares one snapshot.
 
 ARG AL2023_TAG=2023
@@ -39,7 +39,7 @@ ARG DUCKDB_VERSION
 # rebuild cannot change the runtime under a shared VM snapshot. 24 is the current LTS
 # line; the Firebase client SDK declares no engine ceiling and firebase-admin wants >=22.
 # util-linux supplies setpriv and iproute supplies `ip netns`, which the runner uses to
-# run an analysis package as an unprivileged uid inside a network namespace whose only
+# run a package as an unprivileged uid inside a network namespace whose only
 # route out is the egress proxy. iptables is what keeps the runner's own HTTP server
 # off the one address that namespace can reach. procps-ng supplies sysctl, which is how
 # IPv6 is disabled inside the namespace; the base image does not carry it.
@@ -58,9 +58,10 @@ RUN curl -fsSL -o /tmp/duckdb.zip \
 
 COPY --from=ccdata /out/cc-data /usr/local/bin/cc-data
 
-# The analysis user runs fetched packages: no tokens, no credential store, a
-# read-only dataset and a writable output directory are handed to it per analysis.
-RUN useradd --create-home --shell /usr/sbin/nologin analysis
+# The package user runs fetched packages: no tokens, no credential store, a
+# read-only dataset and a writable output directory are handed to it per run. It is
+# the image's first user, so its uid is 1000, which PACKAGE_UID defaults to.
+RUN useradd --create-home --shell /usr/sbin/nologin package
 
 WORKDIR /srv
 # Dependencies before source, so editing the runner does not reinstall them. Only
@@ -69,9 +70,9 @@ WORKDIR /srv
 COPY package.json package-lock.json /srv/
 RUN npm ci --omit=dev && npm cache clean --force
 COPY server/ /srv/server/
-# /data is the researcher's synced tree, owned by the runner; /work holds an
-# analysis's output and is handed to the analysis user.
-RUN mkdir -p /work /data && chown analysis:analysis /work
+# /data is the researcher's synced tree, owned by the runner; /work holds each
+# package's home, input and output, and is handed to the package user.
+RUN mkdir -p /work /data && chown package:package /work
 
 EXPOSE 8080
 CMD ["node", "/srv/server/index.js"]

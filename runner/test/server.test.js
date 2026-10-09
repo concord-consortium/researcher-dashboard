@@ -37,7 +37,7 @@ beforeEach(async () => {
     ...loadEnv({ SYNC_BACKEND: "DIR", SYNC_DIR: path.join(work, "remote") }),
     dataRoot: path.join(work, "data"),
     workRoot: path.join(work, "work"),
-    analysisTimeoutMs: 2000
+    packageTimeoutMs: 2000
   };
   const runner = new Runner({
     env,

@@ -67,7 +67,7 @@ export function createServer({ runner, env }) {
       body: {
         state: runner.state,
         microvm_id: runner.microvmId,
-        current_package: runner.currentAnalysis?.packageName ?? null,
+        current_package: runner.currentRun?.packageName ?? null,
         expires_at: runner.expiresAt ? new Date(runner.expiresAt).toISOString() : null,
         sync_backend: env.backend
       }

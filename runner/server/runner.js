@@ -44,7 +44,7 @@ export class HookError extends Error {
 // or cc-data.
 export class Runner {
   #vm = new VmState();
-  #analysis = null;
+  #run = null;
   // One signed-in connection per class, kept for the VM's life. The class token is
   // good for an hour but the Firebase session it is exchanged for outlives it, and a
   // resumed VM keeps it because memory is preserved.
@@ -90,8 +90,8 @@ export class Runner {
     return this.#expiresAt;
   }
 
-  get currentAnalysis() {
-    return this.#analysis;
+  get currentRun() {
+    return this.#run;
   }
 
   #requireStarted() {
@@ -125,7 +125,7 @@ export class Runner {
       this.proxyUrl = await timed("run.start_egress", {}, () => this.startEgress());
     }
     await timed("run.verify_sandbox", {}, () =>
-      this.netGuard({ uid: this.env.analysisUid, proxyUrl: this.proxyUrl })
+      this.netGuard({ uid: this.env.packageUid, proxyUrl: this.proxyUrl })
     );
 
     // Before the first status write. Every write needs the session token's claims, so
@@ -220,20 +220,20 @@ export class Runner {
         throw new HookError(400, `the ${app} class token belongs to another researcher`);
       }
     }
-    if (this.#analysis) {
+    if (this.#run) {
       throw new HookError(409, "a package is already running on this VM", {
-        package: this.#analysis.packageName
+        package: this.#run.packageName
       });
     }
     // Claimed synchronously, before the first await. resolvePackage and
-    // resultStarted both yield, so a guard that only set #analysis afterwards let
+    // resultStarted both yield, so a guard that only set #run afterwards let
     // two concurrent /analyze calls past it, and only one of them would then be
     // terminated or cleared. The claim is released on every refusal below, or a
     // rejected request would leave the VM permanently busy.
     const classHash = scope.class_hash;
     const classId = scope.class_id;
     const packageName = pkg.name;
-    this.#analysis = { packageName, classHash };
+    this.#run = { packageName, classHash };
 
     let record;
     try {
@@ -269,15 +269,15 @@ export class Runner {
       });
 
       record = { packageName, classHash, classId, classTokens, manifest, pkg };
-      this.#analysis = record;
+      this.#run = record;
     } catch (err) {
-      this.#analysis = null;
+      this.#run = null;
       throw err;
     }
 
     // The caller gets 202 as soon as the document exists; the work continues here.
-    record.done = this.#runAnalysis(record).catch((err) =>
-      log.error("analyze.unhandled", { error: err.message })
+    record.done = this.#runPackage(record).catch((err) =>
+      log.error("package.unhandled", { error: err.message })
     );
 
     return {
@@ -286,29 +286,29 @@ export class Runner {
     };
   }
 
-  async #runAnalysis(record) {
+  async #runPackage(record) {
     const { packageName, classHash } = record;
     let timer;
     const timeout = new Promise((_, reject) => {
       timer = setTimeout(
-        () => reject(new Error(`analysis exceeded ${this.env.analysisTimeoutMs}ms`)),
-        this.env.analysisTimeoutMs
+        () => reject(new Error(`analysis exceeded ${this.env.packageTimeoutMs}ms`)),
+        this.env.packageTimeoutMs
       );
     });
 
     try {
-      const result = await Promise.race([this.#analysisSteps(record), timeout]);
+      const result = await Promise.race([this.#runSteps(record), timeout]);
       await this.status.classCounts(classHash, result.counts);
       await this.status.resultDone(classHash, packageName, result.display);
     } catch (err) {
-      log.error("analyze.failed", { error: err.message });
+      log.error("package.failed", { error: err.message });
       await this.status.resultFailed(classHash, packageName, redact(err.message));
     } finally {
       // Cleared rather than unref'd: unref would stop the timeout firing whenever
       // nothing else holds the loop, and leaving it armed would keep a handle alive
       // for the full timeout after a fast analysis.
       clearTimeout(timer);
-      this.#analysis = null;
+      this.#run = null;
       setContext({ class_hash: null, package: null });
       // An analysis failure is the analysis's, not the VM's: the VM is still able
       // to serve, so it returns to ready. Only a failed sync makes the VM failed.
@@ -345,11 +345,11 @@ export class Runner {
     return store;
   }
 
-  async #analysisSteps(record) {
+  async #runSteps(record) {
     const { packageName, classHash, classId, classTokens, manifest } = record;
     const stage = async (name, fn) => {
       await this.status.resultStage(classHash, packageName, name);
-      return timed(`analyze.${name}`, {}, fn);
+      return timed(`package.${name}`, {}, fn);
     };
 
     // The runner pulls only what needs a credential the package must not hold, which
@@ -378,7 +378,7 @@ export class Runner {
         reportServerUrl: this.payload.report_server_url,
         bucket: this.payload.bucket,
         storagePrefix: researcherPrefix(this.payload.platform_user_id),
-        uid: this.env.analysisUid,
+        uid: this.env.packageUid,
         proxyUrl: this.proxyUrl
       })
     );
@@ -387,7 +387,7 @@ export class Runner {
     // directory, which is otherwise only visible as an errno from inside the package.
     try {
       const probe = await this.steps.probeWritable({
-        uid: this.env.analysisUid,
+        uid: this.env.packageUid,
         dir: prepared.paths.dataDir
       });
       log.info("package.write_probe", { output: String(probe?.stdout ?? probe ?? "").trim() });
@@ -400,8 +400,8 @@ export class Runner {
         manifest,
         paths: prepared.paths,
         env: prepared.env,
-        uid: this.env.analysisUid,
-        timeoutMs: this.env.analysisTimeoutMs,
+        uid: this.env.packageUid,
+        timeoutMs: this.env.packageTimeoutMs,
         proxyUrl: this.proxyUrl
       })
     );
@@ -445,10 +445,10 @@ export class Runner {
     this.#requireStarted();
     // A VM torn down mid-analysis leaves a document that would otherwise read
     // `running` forever, so it is failed here before the VM stops writing.
-    if (this.#analysis) {
-      const { classHash, packageName } = this.#analysis;
-      await this.status.resultFailed(classHash, packageName, "VM terminated during analysis");
-      this.#analysis = null;
+    if (this.#run) {
+      const { classHash, packageName } = this.#run;
+      await this.status.resultFailed(classHash, packageName, "VM terminated during the package run");
+      this.#run = null;
     }
 
     // Before the sync, because the sync can fail the hook and the credential should

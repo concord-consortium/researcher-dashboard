@@ -26,7 +26,7 @@ function fakeExec({ ranAs = "1000", imdsReachable = false, proxyReachable = true
   return { exec, calls };
 }
 
-test("a sandboxed command enters the prepared namespace as the analysis uid", () => {
+test("a sandboxed command enters the prepared namespace as the package uid", () => {
   const spec = sandboxCommand({ uid: 1000, command: "python3.11", args: ["run.py"] });
   // Absolute: the package's PATH excludes /usr/sbin on purpose, and this wrapper is
   // the runner's, so it must not be resolved through the environment handed to the
@@ -35,7 +35,7 @@ test("a sandboxed command enters the prepared namespace as the analysis uid", ()
   assert.deepEqual(spec.args, [
     "netns",
     "exec",
-    "analysis",
+    "package",
     "/usr/bin/setpriv",
     "--reuid=1000",
     "--regid=1000",
@@ -52,7 +52,7 @@ test("a sandboxed command enters the prepared namespace as the analysis uid", ()
 
 test("verification passes when the sandbox starts and cannot reach the metadata service", async () => {
   const { exec, calls } = fakeExec();
-  assert.deepEqual(await verifySandbox({ uid: 1000, exec }), { uid: 1000, netns: "analysis" });
+  assert.deepEqual(await verifySandbox({ uid: 1000, exec }), { uid: 1000, netns: "package" });
   assert.ok(calls.some((c) => c.includes("id -u")), "it must prove a process actually ran");
   assert.ok(calls.some((c) => c.includes(IMDS_ADDRESS)), "it must probe the metadata service");
 });
@@ -92,6 +92,6 @@ test("verification passes when the proxy answers and the metadata service does n
   const { exec, calls } = fakeExec();
   await verifySandbox({ uid: 1000, proxyUrl: "http://10.201.0.1:8123", exec });
   assert.ok(calls.some((c) => c.includes("10.201.0.1:8123")), "it must probe the proxy");
-  assert.ok(calls.every((c) => c.startsWith("/usr/sbin/ip netns exec analysis")),
+  assert.ok(calls.every((c) => c.startsWith("/usr/sbin/ip netns exec package")),
     "every probe runs inside the namespace, or it proves nothing about the package");
 });
