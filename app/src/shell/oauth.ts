@@ -11,6 +11,12 @@ export interface Pending extends Launch {
   verifier: string;
 }
 
+export interface Token {
+  accessToken: string;
+  expiresAt: number;
+  issuedAt: number;
+}
+
 function base64url(bytes: Uint8Array): string {
   let s = "";
   bytes.forEach((b) => { s += String.fromCharCode(b); });
@@ -55,4 +61,41 @@ export async function startAuthorization(
   const pending: Pending = { ...launch, state: randomValue(), verifier: randomValue() };
   storage.setItem(PENDING_KEY, JSON.stringify(pending));
   navigate(authorizeUrl(portalOrigin, launch, redirectUri, pending.state, await challengeFor(pending.verifier)));
+}
+
+// The pending launch whose state this callback carries, or null. Removed either way, so a
+// replayed callback finds nothing.
+export function takePending(storage: Storage, state: string): Pending | null {
+  const raw = storage.getItem(PENDING_KEY);
+  storage.removeItem(PENDING_KEY);
+  if (!raw) return null;
+  try {
+    const pending = JSON.parse(raw) as Pending;
+    return pending.state === state ? pending : null;
+  } catch {
+    return null;
+  }
+}
+
+export class TokenError extends Error {}
+
+export async function exchangeCode(
+  portalOrigin: string, code: string, verifier: string, redirectUri: string,
+  fetchImpl: typeof fetch, now: number
+): Promise<Token> {
+  const response = await fetchImpl(`${portalOrigin}/oauth/token`, {
+    method: "POST",
+    body: new URLSearchParams({
+      grant_type: "authorization_code",
+      client_id: CLIENT_ID,
+      code,
+      code_verifier: verifier,
+      redirect_uri: redirectUri
+    })
+  });
+  const body = await response.json().catch(() => null);
+  if (!response.ok || typeof body?.access_token !== "string" || typeof body?.expires_in !== "number") {
+    throw new TokenError(body?.error ?? `the token endpoint answered ${response.status}`);
+  }
+  return { accessToken: body.access_token, issuedAt: now, expiresAt: now + body.expires_in * 1000 };
 }

@@ -1,87 +1,72 @@
 import { describe, expect, it, vi } from "vitest";
-import { Portal, PortalError } from "../src/shell/portal";
+import { Api, ApiError, Portal, SessionExpired } from "../src/shell/portal";
 
-const ORIGIN = "https://portal.test";
-const TOKEN = "grant-abc";
+const TOKEN = { accessToken: "at-1", issuedAt: 0, expiresAt: 8 * 3600 * 1000 };
 
-function jsonResponse(body: unknown, status = 200) {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    json: async () => body
-  } as unknown as Response;
+function respond(body: unknown, status = 200) {
+  return { ok: status >= 200 && status < 300, status, json: async () => body } as unknown as Response;
 }
 
-function portalWith(response: Response) {
-  const calls: Array<[string, RequestInit | undefined]> = [];
-  const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
-    calls.push([url, init]);
-    return response;
-  }) as unknown as typeof fetch;
-  return { portal: new Portal(ORIGIN, TOKEN, fetchImpl), calls };
+function apiWith(response: Response, now = 10 * 60 * 1000) {
+  const fetchImpl = vi.fn(async () => response);
+  return { api: new Api("https://portal.test", TOKEN, fetchImpl as unknown as typeof fetch, () => now), fetchImpl };
 }
 
-describe("Portal", () => {
-  it("sends the grant as the bearer", async () => {
-    const { portal, calls } = portalWith(jsonResponse({ token: "custom" }));
-    await portal.firebaseToken("report-service-dev", "the-hash");
-    const headers = calls[0][1]?.headers as Record<string, string>;
-    expect(headers.Authorization).toBe(`Bearer ${TOKEN}`);
+function call(fetchImpl: ReturnType<typeof vi.fn>) {
+  return fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+}
+
+describe("Api", () => {
+  it("sends the access token as the bearer", async () => {
+    const { api, fetchImpl } = apiWith(respond({}));
+    await new Portal(api).scope();
+    expect(call(fetchImpl)[0]).toBe("https://portal.test/api/v1/researcher_dashboard/scope");
+    expect((call(fetchImpl)[1].headers as Record<string, string>).Authorization).toBe("Bearer at-1");
   });
 
-  describe("firebaseToken", () => {
-    it("names the app, the class and the researcher flag", async () => {
-      const { portal, calls } = portalWith(jsonResponse({ token: "custom" }));
-      const token = await portal.firebaseToken("report-service-dev", "the-hash");
-
-      expect(token).toBe("custom");
-      const url = new URL(calls[0][0]);
-      expect(url.origin).toBe(ORIGIN);
-      expect(url.pathname).toBe("/api/v1/jwt/firebase");
-      expect(url.searchParams.get("firebase_app")).toBe("report-service-dev");
-      expect(url.searchParams.get("class_hash")).toBe("the-hash");
-      // Without this the portal mints a plain token and the class-scoped rules refuse it.
-      expect(url.searchParams.get("researcher")).toBe("true");
-    });
+  it("asks for a new token rather than send one about to expire", async () => {
+    const { api, fetchImpl } = apiWith(respond({}), TOKEN.expiresAt - 30_000);
+    await expect(api.request("/x")).rejects.toEqual(new SessionExpired(false));
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  describe("when the portal refuses", () => {
-    it("carries the portal's own message rather than inventing one", async () => {
-      const { portal } = portalWith(
-        jsonResponse({ message: "You do not have access to the requested class_hash as a researcher" }, 400)
-      );
-      await expect(portal.firebaseToken("report-service-dev", "h")).rejects.toThrow(/do not have access/);
-    });
+  it("tells a 401 on a fresh token from one on an old token", async () => {
+    await expect(apiWith(respond({}, 401), 10_000).api.request("/x")).rejects.toMatchObject({ young: true });
+    await expect(apiWith(respond({}, 401)).api.request("/x")).rejects.toMatchObject({ young: false });
+  });
 
-    it("still fails when the body is not json", async () => {
-      const broken = {
-        ok: false, status: 502,
-        json: async () => { throw new Error("not json"); }
-      } as unknown as Response;
-      const { portal } = portalWith(broken);
-      await expect(portal.firebaseToken("report-service-dev", "h")).rejects.toThrow(PortalError);
-    });
+  it("keeps the server's message on a refusal", async () => {
+    await expect(apiWith(respond({ message: "You do not have access" }, 403)).api.request("/x"))
+      .rejects.toEqual(new ApiError("You do not have access", 403));
+  });
+
+  it("still fails when the body is not json", async () => {
+    const broken = { ok: false, status: 502, json: async () => { throw new Error("not json"); } } as unknown as Response;
+    await expect(apiWith(broken).api.request("/x")).rejects.toEqual(new ApiError("/x failed", 502));
   });
 });
 
-// The default fetch is the one path no other test here covers, because every one of them
-// injects a stub. Calling a bare `fetch` reference as a method of the Portal instance is
+describe("Portal", () => {
+  it("asks for a Firebase token for the scope's class, as a researcher", async () => {
+    const { api, fetchImpl } = apiWith(respond({ token: "custom" }));
+    expect(await new Portal(api).firebaseToken("report-service-dev", "hash1")).toBe("custom");
+    const url = new URL(call(fetchImpl)[0]);
+    expect(url.pathname).toBe("/api/v1/jwt/firebase");
+    expect(Object.fromEntries(url.searchParams)).toEqual({ firebase_app: "report-service-dev", class_hash: "hash1", researcher: "true" });
+  });
+});
+
+// Every other test injects a stub. Calling a bare `fetch` reference as a method of the Api is
 // rejected by browsers with "Illegal invocation", which only shows up in a real one.
 describe("the default fetch", () => {
   it("calls the global fetch with the global as its receiver", async () => {
-    const calls: string[] = [];
-    const stub = vi.fn(function (this: unknown, url: string) {
-      // A real browser fetch throws unless `this` is the window; asserting the receiver is
-      // what makes this test fail when the implementation stores a bare reference.
+    const stub = vi.fn(function (this: unknown) {
       if (this !== globalThis && this !== undefined) throw new TypeError("Illegal invocation");
-      calls.push(url);
-      return Promise.resolve(jsonResponse({ token: "custom" }));
+      return Promise.resolve(respond({}));
     });
     vi.stubGlobal("fetch", stub);
-
-    await new Portal(ORIGIN, TOKEN).firebaseToken("report-service-dev", "h");
-
-    expect(calls).toHaveLength(1);
+    await new Api("https://portal.test", TOKEN, undefined, () => 0).request("/x");
+    expect(stub).toHaveBeenCalledTimes(1);
     vi.unstubAllGlobals();
   });
 });

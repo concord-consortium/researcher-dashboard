@@ -1,13 +1,29 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { start, type StartDeps } from "../src/shell/start";
 
 const STAGING = "https://learn.portal.staging.concord.org";
 const PAGE = { origin: "https://models-resources.concord.org", pathname: "/researcher-dashboard/branch/main/index.html" };
 const LINK = `?authDomain=${encodeURIComponent(`${STAGING}/`)}&classId=223&loginHint=200`;
 
-function deps(search: string, storage: Storage = sessionStorage): StartDeps & { navigated: string[] } {
-  const navigated: string[] = [];
-  return { search, location: PAGE, storage, navigated, navigate: (u) => navigated.push(u), devPortal: null };
+type Deps = StartDeps & { navigated: string[]; replaced: string[] };
+
+function deps(
+  search: string,
+  { storage = sessionStorage, body = { access_token: "at", expires_in: 28800 } as unknown, ok = true } = {}
+): Deps {
+  const navigated: string[] = [], replaced: string[] = [];
+  return {
+    search, location: PAGE, storage, navigated, replaced,
+    navigate: (u) => navigated.push(u), replaceUrl: (u) => replaced.push(u),
+    fetchImpl: vi.fn(async () => ({ ok, status: ok ? 200 : 400, json: async () => body })) as unknown as typeof fetch,
+    now: () => 5000, devPortal: null
+  };
+}
+
+async function launch(): Promise<string> {
+  const out = deps(LINK);
+  expect(await start(out)).toEqual({ kind: "redirecting" });
+  return new URL(out.navigated[0]).searchParams.get("state")!;
 }
 
 afterEach(() => sessionStorage.clear());
@@ -22,14 +38,6 @@ describe("start", () => {
     expect(url.searchParams.get("context")).toBe("class:223");
   });
 
-  it("keeps the state it sent, to check the portal's answer against", async () => {
-    const out = deps(LINK);
-    await start(out);
-    const pending = JSON.parse(sessionStorage.getItem("researcher-dashboard:pending-launch")!);
-    expect(pending).toMatchObject({ authDomain: `${STAGING}/`, classId: "223", loginHint: "200" });
-    expect(new URL(out.navigated[0]).searchParams.get("state")).toBe(pending.state);
-  });
-
   it("requests nothing for a portal outside the allowlist", async () => {
     const out = deps("?authDomain=https%3A%2F%2Fevil.test%2F&classId=1");
     expect(await start(out)).toEqual({ kind: "info", reason: "unknown-portal" });
@@ -42,8 +50,41 @@ describe("start", () => {
 
   it("renders the sign-in page, not a blank one, when the launch throws", async () => {
     const refusing = { setItem() { throw new DOMException("denied", "SecurityError"); } } as unknown as Storage;
-    const out = deps(LINK, refusing);
+    const out = deps(LINK, { storage: refusing });
     expect(await start(out)).toEqual({ kind: "info", reason: "sign-in-failed" });
     expect(out.navigated).toEqual([]);
+  });
+
+  it("redeems the code it was sent back with, then clears it from the address bar", async () => {
+    const state = await launch();
+    const back = deps(`?code=c1&response_type=code&state=${state}`);
+    expect(await start(back)).toMatchObject({ kind: "ready", launch: { classId: "223" }, token: { accessToken: "at" } });
+    expect(back.replaced).toEqual([`${PAGE.pathname}${LINK}`]);
+  });
+
+  it("keeps the token out of every Web Storage", async () => {
+    const state = await launch();
+    await start(deps(`?code=c1&state=${state}`));
+    expect(sessionStorage.length).toBe(0);
+    expect(localStorage.length).toBe(0);
+  });
+
+  it("refuses a callback whose state it did not send", async () => {
+    await launch();
+    const back = deps("?code=c1&state=forged");
+    expect(await start(back)).toEqual({ kind: "info", reason: "sign-in-failed" });
+    expect(back.fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("reads access_denied as no research access, and names any other error", async () => {
+    expect(await start(deps(`?error=access_denied&state=${await launch()}`))).toEqual({ kind: "info", reason: "access-denied" });
+    expect(await start(deps(`?error=server_error&state=${await launch()}`)))
+      .toEqual({ kind: "info", reason: "authorize-error", detail: "server_error" });
+  });
+
+  it("reports a refused exchange", async () => {
+    const state = await launch();
+    expect(await start(deps(`?code=c1&state=${state}`, { body: { error: "invalid_grant" }, ok: false })))
+      .toEqual({ kind: "info", reason: "sign-in-failed", detail: "invalid_grant" });
   });
 });

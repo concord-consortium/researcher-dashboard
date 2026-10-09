@@ -3,13 +3,19 @@ import type { InfoReason } from "../shell/start";
 
 const REASONS: Record<Exclude<InfoReason, "no-launch">, string> = {
   "unknown-portal": "This link is for a portal this dashboard does not serve.",
-  "sign-in-failed": "This sign-in could not be completed. Launch the dashboard again from the portal."
+  "sign-in-failed": "This sign-in could not be completed. Launch the dashboard again from the portal.",
+  "access-denied": "You do not have research access to this class.",
+  "authorize-error": "The portal could not sign you in to the dashboard.",
+  withdrawn: "Your research access to this class has been withdrawn.",
+  "class-gone": "This class no longer exists.",
+  "unsupported-scope": "This dashboard opens classes only, and this link is for something else.",
+  expired: "Your sign-in has expired and could not be renewed. Launch the dashboard again from the portal."
 };
 
 // Deliberately not a demo. portal-report has a fake-data mode and copying it here would put
 // invented results in front of a researcher, which read as real ones. This page says what
 // the dashboard is, why it is showing instead, and how to get in, and nothing else.
-export function Info({ reason }: { reason: InfoReason }) {
+export function Info({ reason, detail }: { reason: InfoReason; detail?: string }) {
   return (
     <main className="info">
       <h1>Researcher Dashboard</h1>
@@ -20,7 +26,10 @@ export function Info({ reason }: { reason: InfoReason }) {
           to a class you research.
         </p>
       ) : (
-        <p className="notice" role="status">{REASONS[reason]}</p>
+        <p className="notice" role="status">
+          {REASONS[reason]}
+          {detail && <> (<code>{detail}</code>)</>}
+        </p>
       )}
 
       <h2>How to open it</h2>

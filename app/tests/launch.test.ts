@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseLaunch } from "../src/shell/launch";
+import { launchQuery, parseCallback, parseLaunch } from "../src/shell/launch";
 import { devPortal, portalFor } from "../src/shell/portals";
 
 const STAGING = "https://learn.portal.staging.concord.org";
@@ -25,6 +25,19 @@ describe("parseLaunch", () => {
 
   it("drops a login hint that is not a user id", () => {
     expect(parseLaunch(`?authDomain=${STAGING}&classId=1&loginHint=x`)?.loginHint).toBeNull();
+  });
+
+  it("round-trips through launchQuery", () => {
+    expect(parseLaunch(launchQuery(parseLaunch(LINK)!))).toEqual(parseLaunch(LINK));
+  });
+});
+
+describe("parseCallback", () => {
+  it("reads a code or an error, each with its state", () => {
+    expect(parseCallback("?code=c&response_type=code&state=s")).toEqual({ state: "s", code: "c" });
+    expect(parseCallback("?error=access_denied&state=s")).toEqual({ state: "s", error: "access_denied" });
+    expect(parseCallback("?code=c")).toBeNull();
+    expect(parseCallback(LINK)).toBeNull();
   });
 });
 
