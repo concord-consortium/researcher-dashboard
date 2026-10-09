@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -8,6 +8,7 @@ import { loadEnv } from "../server/config.js";
 import { makeSteps } from "../server/steps.js";
 import { HookError, Runner } from "../server/runner.js";
 import { buildRunner } from "../server/index.js";
+import { packageKey } from "../server/package-fetch.js";
 import { MemoryStore, resultPath, researcherPath } from "../server/status.js";
 import { DirBackend, Syncer } from "../server/sync/index.js";
 
@@ -73,7 +74,7 @@ function steps(overrides = {}) {
   };
 }
 
-function build({ stepOverrides = {}, now, envOverrides = {}, makeStore, revokeReportServerToken } = {}) {
+function build({ stepOverrides = {}, now, envOverrides = {}, makeStore, makePackageBackend, revokeReportServerToken } = {}) {
   const env = {
     ...loadEnv({ SYNC_BACKEND: "DIR", SYNC_DIR: path.join(work, "remote") }),
     dataRoot: path.join(work, "data"),
@@ -88,7 +89,7 @@ function build({ stepOverrides = {}, now, envOverrides = {}, makeStore, revokeRe
   return new Runner({
     env,
     makeStore: makeStore ?? (() => store),
-    makePackageBackend: () => ({ async get() {} }),
+    makePackageBackend: makePackageBackend ?? (() => ({ async get() {} })),
     unzip: async () => {},
     makeSyncer: ({ root }) =>
       new Syncer({ backend: new DirBackend(path.join(work, "remote")), root }),
@@ -820,4 +821,43 @@ test("/run-package is refused until /run has finished", async () => {
 
   release();
   await running;
+});
+
+test("a package run fetches from the payload's bucket at the package's key", async () => {
+  const asked = [];
+  const runner = await started({
+    makePackageBackend: ({ bucket }) => ({ async get(key) { asked.push({ bucket, key }); throw new Error("stop"); } }),
+    stepOverrides: { resolvePackage: makeSteps().resolvePackage }
+  });
+  await runner.startPackage({
+    scope: { kind: "class", class_hash: CLASS, class_id: 111 },
+    package: { name: "class-counts", version: "1.0.6", checksum: "sha256:abc" },
+    class_tokens: CLASS_TOKENS
+  }).catch(() => {});
+  await runner.currentAnalysis?.done;
+
+  assert.deepEqual(asked, [{ bucket: "researcher-dashboard-runner-staging", key: "class-counts/1.0.6.zip" }]);
+});
+
+test("packages are fetched from the packages/ prefix of the bucket", async () => {
+  const runner = buildRunner(loadEnv({ SYNC_BACKEND: "S3" }));
+  const backend = runner.makePackageBackend({ bucket: "researcher-dashboard-runner-staging" });
+  const sent = [];
+  backend.client = { send: async (cmd) => { sent.push(cmd.input); throw new Error("stop"); } };
+
+  await assert.rejects(() => backend.get(packageKey("class-counts", "1.0.6"), path.join(work, "a.zip")), /stop/);
+  assert.deepEqual(sent, [{ Bucket: "researcher-dashboard-runner-staging", Key: "packages/class-counts/1.0.6.zip" }]);
+});
+
+// DIR mode mirrors the bucket's layout under SYNC_DIR, so a laptop run needs its
+// packages at <SYNC_DIR>/packages/<name>/<version>.zip.
+test("DIR mode fetches packages from <SYNC_DIR>/packages", async () => {
+  const syncDir = path.join(work, "remote");
+  mkdirSync(path.join(syncDir, "packages", "class-counts"), { recursive: true });
+  writeFileSync(path.join(syncDir, "packages", "class-counts", "1.0.6.zip"), "archive-bytes");
+  const runner = buildRunner(loadEnv({ SYNC_BACKEND: "DIR", SYNC_DIR: syncDir }));
+
+  const dest = path.join(work, "fetched.zip");
+  await runner.makePackageBackend({ bucket: "local" }).get(packageKey("class-counts", "1.0.6"), dest);
+  assert.equal(readFileSync(dest, "utf8"), "archive-bytes");
 });

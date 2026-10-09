@@ -5,7 +5,7 @@ import { redact } from "../server/log.js";
 // Whatever a step throws ends up in the result document, which every researcher of the
 // class reads. These are the shapes that actually turn up in this runner's errors.
 test("strips the signature from a presigned S3 URL", () => {
-  const msg = "fetch failed: https://bucket.s3.amazonaws.com/scripts/demo/1.0.0.zip" +
+  const msg = "fetch failed: https://bucket.s3.amazonaws.com/packages/demo/1.0.0.zip" +
     "?X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20260918&X-Amz-Signature=abc123def456&X-Amz-Expires=900";
   const out = redact(msg);
   assert.ok(!out.includes("abc123def456"), "signature must not survive");

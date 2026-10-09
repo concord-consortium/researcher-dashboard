@@ -23,7 +23,7 @@ Parameters:
     Default: concord-devops
   CodeArtifactKey:
     Type: String
-    Description: Key of the runner code artifact zip within CodeArtifactBucket, as `make artifact-uri` in runner/ prints it
+    Description: Key of the runner code artifact zip within CodeArtifactBucket, as `make artifact-key` in runner/ prints it
     Default: researcher-dashboard-runner/runner-0.1.0.zip
   BaseImageArn:
     Type: String

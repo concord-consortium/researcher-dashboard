@@ -3,7 +3,7 @@
 #
 #   publish-package.sh <study-dir> <version> <bucket>
 #
-# Writes <version>.zip and <version>.sha256 under scripts/<name>/, where <name> comes
+# Writes <version>.zip and <version>.sha256 under packages/<name>/, where <name> comes
 # from the study's own manifest.json rather than the directory, so the key a runner
 # fetches and the name the manifest declares cannot drift apart: the runner refuses a
 # package whose manifest names something else.
@@ -67,9 +67,9 @@ fi
 checksum="sha256:$(sha256sum "$archive" | cut -d' ' -f1)"
 echo "$checksum" > "$work/$version.sha256"
 
-aws s3 cp "$archive" "s3://$bucket/scripts/$name/$version.zip"
-aws s3 cp "$work/$version.sha256" "s3://$bucket/scripts/$name/$version.sha256"
+aws s3 cp "$archive" "s3://$bucket/packages/$name/$version.zip"
+aws s3 cp "$work/$version.sha256" "s3://$bucket/packages/$name/$version.sha256"
 
 echo "published $name $version"
-echo "  s3://$bucket/scripts/$name/$version.zip"
+echo "  s3://$bucket/packages/$name/$version.zip"
 echo "  $checksum"
