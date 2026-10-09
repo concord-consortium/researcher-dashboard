@@ -87,8 +87,15 @@ A `MicrovmImage` change starts an image build. VMs already running keep their ve
 
 A runner change reaches a stack only through a new image: publish the artifact, then update the stack with `CodeArtifactKey` pointing at it and every other parameter unchanged. A new package version needs no release; a change to the runner's own code does. "Updating a stack" cannot do this, since it carries `CodeArtifactKey` over with its previous value. Each release takes a `VERSION` never published before, so each has its own key: `publish-artifact` refuses one already in the bucket.
 
+Publish the artifact first, and stop if it fails or refuses the version, since everything after it would release whatever is already at that key. The bucket is the one "Before a stack is created in an account" names: `concordqa-devops` for staging, `concord-devops` for production.
+
 ```sh
 cd ../runner && make publish-artifact VERSION=<x.y.z> ARTIFACT_BUCKET=<bucket in the stack's account>
+```
+
+Then create the change set:
+
+```sh
 KEY=$(make -s artifact-key VERSION=<x.y.z>)
 cd ../cloudformation
 STACK=researcher-dashboard-runner-staging
@@ -101,7 +108,7 @@ aws cloudformation create-change-set --stack-name "$STACK" --change-set-name "gi
   --parameters $PARAMS ParameterKey=CodeArtifactKey,ParameterValue="$KEY"
 ```
 
-The bucket is the one "Before a stack is created in an account" names: `concordqa-devops` for staging, `concord-devops` for production. Review, diff and execute the change set as in "Updating a stack"; the update builds the new image. Then terminate the suspended VMs on an older version, since nothing else retires them, with your own credentials, since the launcher cannot list VMs. A VM already on the new version is left alone, and so is a running one on an older version, which may be in the middle of a researcher's run: it suspends once it is idle, so run the loop again later until it terminates nothing.
+Review, diff and execute the change set as in "Updating a stack"; the update builds the new image. Then terminate the suspended VMs on an older version, since nothing else retires them, with your own credentials, since the launcher cannot list VMs. A VM already on the new version is left alone, and so is a running one on an older version, which may be in the middle of a researcher's run: it suspends once it is idle, so run the loop again later until it terminates nothing. Each VM's state is read again just before it is terminated, since the function may have resumed it after the listing. That narrows the race rather than closing it: a resume landing between the read and the terminate is still lost, and only the function replacing old VMs itself, instead of resuming them, removes it.
 
 ```sh
 IMAGE=$(aws cloudformation describe-stacks --stack-name "$STACK" \
@@ -110,11 +117,21 @@ ACTIVE=$(aws lambda-microvms get-microvm-image --image-identifier "$IMAGE" \
   --query latestActiveImageVersion --output text)
 for VM in $(aws lambda-microvms list-microvms --image-identifier "$IMAGE" \
     --query "items[?imageVersion!='$ACTIVE' && state=='SUSPENDED'].microvmId" --output text); do
+  STATE=$(aws lambda-microvms get-microvm --microvm-identifier "$VM" --query state --output text)
+  [ "$STATE" = SUSPENDED ] && aws lambda-microvms terminate-microvm --microvm-identifier "$VM"
+done
+```
+
+**When the change needs a grant the stack lacks, the grant goes in the same change set, applied from the same commit**: a stack with the new runner and the old grant, or the reverse, fails at the first call. Once the update is complete, terminate every VM on an older version, running ones included, since each would make the old call against the new grant:
+
+```sh
+for VM in $(aws lambda-microvms list-microvms --image-identifier "$IMAGE" \
+    --query "items[?imageVersion!='$ACTIVE' && state!='TERMINATING' && state!='TERMINATED'].microvmId" --output text); do
   aws lambda-microvms terminate-microvm --microvm-identifier "$VM"
 done
 ```
 
-**When the change needs a grant the stack lacks, the grant goes in the same change set, applied from the same commit**: a stack with the new runner and the old grant, or the reverse, fails at the first call. Once the update is complete, terminate every VM on an older version, running ones included (the same loop with `state!='TERMINATING' && state!='TERMINATED'` in place of `state=='SUSPENDED'`), since each would make the old call against the new grant. Runs can fail while the update is in progress: until the new image is active, a run request can still launch a VM on the old one. Nothing in this repository can hold new runs back for the length of an update.
+Runs can fail while the update is in progress: until the new image is active, a run request can still launch a VM on the old one. Nothing in this repository can hold new runs back for the length of an update.
 
 ## What goes where after a create or update
 
