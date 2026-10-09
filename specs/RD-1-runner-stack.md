@@ -66,11 +66,11 @@ RD-1 was first spec'd (2026-09-25) as three passes, so that no running VM would 
 
 - **R20.** After the QA stack is created, its grants are checked with real calls, not `simulate-principal-policy`, by `cloudformation/README.md`'s "Checking the grants on a live stack":
   - The writer's key: a put under `packages/` succeeds; a put under `researchers/` and a get and a list under `packages/` are refused. *(Passed 2026-10-08.)*
-  - As the function: a Google ID token for `researcher-dashboard@report-service-dev` with the stack's name as its audience, minted with report-service's `setup-researcher-dashboard-iam.sh id-token` while the operator holds OpenID Token Creator from its `grant-operator` (revoked afterward), is exchanged for `LauncherRole`, and `GetMicrovmImage` on the stack's image succeeds. A token for another audience is refused. *(Pending, see "Not Yet Implemented".)*
-  - The broker, with the same kind of token: a session with the whole ceiling reads the probe archive and is refused a write, delete and list under `packages/`; a session under R12's policy for a test id writes and lists its own prefix, reads the archive, and is refused another prefix that holds an object. *(Pending, see "Not Yet Implemented".)*
+  - As the function: a Google ID token for `researcher-dashboard@report-service-dev` with the stack's name as its audience, minted with report-service's `setup-researcher-dashboard-iam.sh id-token` while the operator holds OpenID Token Creator from its `grant-operator` (revoked afterward), is exchanged for `LauncherRole`, and `GetMicrovmImage` on the stack's image succeeds. A token for another audience is refused. *(Passed 2026-10-09, before the merge: the token was minted through `generateIdToken` with `grant-operator`'s role, which is all `id-token` wraps.)*
+  - The broker, with the same kind of token: a session with the whole ceiling reads the probe archive and is refused a write, delete and list under `packages/`; a session under R12's policy for a test id writes and lists its own prefix, reads the archive, and is refused another prefix that holds an object. *(Passed 2026-10-09, before the merge: the token was minted through `generateIdToken` with `grant-operator`'s role, which is all `id-token` wraps.)*
   - The execution role's only inline policy is `runtime` with R13's statement, and it has no attached policy. *(Passed 2026-10-08.)*
   - A VM's endpoint, on the stack's first VM: as the launcher, `create-microvm-auth-token` is refused, and the endpoint answers `403, Request missing authentication`. *(Pending, see "Not Yet Implemented".)*
-- **R21.** The rollout also audits who can act as the function in GCP IAM in report-service-dev and report-service-pro: holders of OpenID Token Creator or Token Creator on the `researcher-dashboard` account, and who may deploy functions that run as it. *(Pending, see "Not Yet Implemented".)*
+- **R21.** The rollout also audits who can act as the function in GCP IAM in report-service-dev and report-service-pro: holders of OpenID Token Creator or Token Creator on the `researcher-dashboard` account, and who may deploy functions that run as it. *(Done 2026-10-09; one finding is open, see "Not Yet Implemented".)*
 
 ### Deployment and documentation
 
@@ -80,8 +80,9 @@ RD-1 was first spec'd (2026-09-25) as three passes, so that no running VM would 
   3. The QA stack created by change set `git-742f98f`, `CREATE_COMPLETE`, image version 1.0. A first attempt an hour earlier rolled back on `DataBucket` with a 409 because S3 had not yet released the name, though `head-bucket` already answered 404; the README now says so.
   4. report-service-dev repointed by report-service #433 (merged as `688819a`). *(Not deployed: `researcherDashboard` is not deployed on report-service-dev, and its first deploy belongs to REPORT-143, which adds the broker's setting.)*
   5. `report-service-qa` given `PackageBuckets` (`{"learn.portal.staging.concord.org": "researcher-dashboard-runner-staging"}`, keyed by portal host) and the writer's key by a parameter-only update; task definition `report-server:100` rolled out and the server answers 200.
-  6. R20's writer and execution-role checks passed. *(R20's other checks and R21's audit are pending.)*
+  6. R20's writer and execution-role checks passed. *(The rest of R20 except the endpoint check, and R21's audit, ran 2026-10-09; see item 8.)*
   7. After review, 2026-10-09: change set `git-5947976` updated the stack in place (versioning and `ExpireOldVersions` on `DataBucket`, the execution role's log-stream ARN; the other three IAM principals only re-evaluated, nothing replaced), `UPDATE_COMPLETE`, and the writer and execution-role checks passed again. The writer's probe object, put before and after, now has two versions.
+  8. 2026-10-09, as the function (`grant-operator` taken and revoked around it): the token's claims are `aud` the stack's name and `azp` and `sub` both `101230238764588293065`. The launcher reads the image and is refused `list-microvms` and S3; a token for `not-researcher-dashboard-runner-staging` is refused by both roles; the broker's whole-ceiling session and its session under R12's policy pass every check, and the ceiling session is also refused deleting an object version. The probe objects and all their versions were then removed. R21's audit found the finding under "Not Yet Implemented".
 - **R23.** The repository README's layout lists `cloudformation/`.
 
 ## Technical Notes
@@ -108,11 +109,10 @@ RD-1 was first spec'd (2026-09-25) as three passes, so that no running VM would 
 
 ## Not Yet Implemented
 
-These run after the merge (Doug, 2026-10-08, "When does the branch merge"), with `cloudformation/README.md`'s "Checking the grants on a live stack", and their results are recorded on RD-1 in Jira. A problem they find is fixed by a follow-up pull request, applied from its branch before it merges.
+The endpoint check runs after the merge (Doug, 2026-10-08, "When does the branch merge"), with `cloudformation/README.md`'s "Checking the grants on a live stack", and its result is recorded on RD-1 in Jira. A problem it finds is fixed by a follow-up pull request, applied from its branch before it merges.
 
-- **R20, the checks as the function** (the launcher: `GetMicrovmImage` succeeds and a token for another audience is refused; the broker: the whole-ceiling session and the session under R12's policy): waiting for report-service's `setup-researcher-dashboard-iam.sh id-token`, added by REPORT-143's step 3, which waits for REPORT-167 to merge. The writer's probe object `packages/_probe/0.0.0.txt` was left in the bucket for these checks; remove `packages/_probe/`, `researchers/_probe/` and `researchers/999999999/` afterward.
 - **R20, a VM's endpoint** (`create-microvm-auth-token` refused as the launcher, and the endpoint answering `403, Request missing authentication`): waiting for the stack's first VM, which RD-4 pass 2's runner brings when it is released to the QA stack.
-- **R21, the GCP IAM audit** of who can act as the function in report-service-dev and report-service-pro: not run during the rollout; it needs a current `gcloud` login.
+- **R21's finding: the Firebase Admin SDK account can mint the function's tokens** (audit 2026-10-09, decision open). In both projects, `firebase-adminsdk-…` holds `roles/iam.serviceAccountTokenCreator` project-wide (Firebase's default grant), which includes `getOpenIdToken` on every account in the project, and it has user-managed JSON keys: three in report-service-dev (2019 to 2022) and five in report-service-pro (2020 to 2022). Anyone holding one of those keys can mint a token for the stack's audience and assume `BrokerRole` without a session policy, which is every researcher's data. Otherwise only the owners (`developer@`, `scytacki@`) can mint tokens or grant themselves the role, and the editors (`dmartin@`, `emcelroy@`, plus `kswenson@` in dev) and Google's default compute and App Engine accounts can deploy code that runs as the account. Nobody holds a role on the account itself but the account. Fixing it is report-service IAM, not this stack, and must happen before the production stack trusts report-service-pro.
 - **`BuildRole`'s logs grant narrowed** from `/aws/lambda-microvms/*` to this stack's log group: deferred from review (Doug, 2026-10-09). QA shows only the stack's own group, but only an image build proves the build writes nowhere else, and a wrong guess fails the next runner release.
 - **The production stack** (R2): deferred to the RD-1 production line, from the same README with `FunctionServiceAccountUniqueId` from report-service-pro (`114768968256413137012` on 2026-10-07).
 
@@ -149,7 +149,7 @@ These run after the merge (Doug, 2026-10-08, "When does the branch merge"), with
 - B) Hold the branch until the checks as the function pass.
 - C) Hold it until every check passes.
 
-**Decision**: A (Doug, 2026-10-08). The create and the checks that can run catch replacements, malformed grants and a failed build; the trust conditions are pinned by the template tests; nothing uses the roles until REPORT-143 is deployed; and holding would hold RD-4 behind REPORT-167.
+**Decision**: A (Doug, 2026-10-08). The create and the checks that can run catch replacements, malformed grants and a failed build; the trust conditions are pinned by the template tests; nothing uses the roles until REPORT-143 is deployed; and holding would hold RD-4 behind REPORT-167. In the event, the checks as the function ran before the merge too (2026-10-09), once it was clear they need only `generateIdToken` and `grant-operator`, both available on report-service's `master`.
 
 ---
 
@@ -173,7 +173,7 @@ These run after the merge (Doug, 2026-10-08, "When does the branch merge"), with
 - A) Keep the check; if the token is not refused, the trust is wrong.
 - B) Drop it and rely on the template test.
 
-**Decision**: A. The test proves what the policy says, not what AWS does with it, and the check costs one command.
+**Decision**: A. The test proves what the policy says, not what AWS does with it, and the check costs one command. Confirmed 2026-10-09: both roles refuse a token for another audience.
 
 ---
 

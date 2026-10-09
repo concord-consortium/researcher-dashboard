@@ -107,7 +107,7 @@ The function refuses to mint unless `<id>` is a positive decimal integer, since 
 
 ## Checking the grants on a live stack
 
-With real calls: a policy simulation evaluates the action string it is handed, so it passes a misspelled action against a policy granting the same misspelling, which is how the spike shipped a launcher policy where every action was wrong. Run these with credentials for the stack's account (`out` reads its outputs). Each block below runs in a subshell, so the credentials it sets end with it.
+With real calls: a policy simulation evaluates the action string it is handed, so it passes a misspelled action against a policy granting the same misspelling, which is how the spike shipped a launcher policy where every action was wrong. Run these with credentials for the stack's account (`out` reads its outputs). Each block below runs in a subshell, so the credentials it sets end with it. A block whose role refuses the token stops there, rather than running its checks as you.
 
 ```sh
 STACK=researcher-dashboard-runner-staging
@@ -133,11 +133,12 @@ echo probe > /tmp/probe
 ```sh
 setup-researcher-dashboard-iam.sh grant-operator report-service-dev user:<you>@concord.org
 TOKEN=$(setup-researcher-dashboard-iam.sh id-token report-service-dev $STACK)
-assume() {  # assume <role arn> [session policy]: prints the exports for that session
-  aws sts assume-role-with-web-identity --role-arn "$1" --role-session-name probe \
+assume() {  # assume <role arn> [session policy]: prints the exports for that session, or fails
+  local creds
+  creds=$(aws sts assume-role-with-web-identity --role-arn "$1" --role-session-name probe \
     --web-identity-token "$TOKEN" --duration-seconds 3600 ${2:+--policy "$2"} \
-    --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' --output text |
-    awk '{print "export AWS_ACCESS_KEY_ID=" $1 " AWS_SECRET_ACCESS_KEY=" $2 " AWS_SESSION_TOKEN=" $3}'
+    --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' --output text) || return 1
+  echo "$creds" | awk '{print "export AWS_ACCESS_KEY_ID=" $1 " AWS_SECRET_ACCESS_KEY=" $2 " AWS_SESSION_TOKEN=" $3}'
 }
 LAUNCHER=$(out LauncherRoleArn) BROKER=$(out BrokerRoleArn) IMAGE=$(out MicrovmImageArn)
 ```
@@ -145,7 +146,7 @@ LAUNCHER=$(out LauncherRoleArn) BROKER=$(out BrokerRoleArn) IMAGE=$(out MicrovmI
 The launcher can read the image, and a token minted for any other audience is refused:
 
 ```sh
-( eval "$(assume $LAUNCHER)"; unset AWS_PROFILE
+( creds=$(assume $LAUNCHER) || exit; eval "$creds"; unset AWS_PROFILE
   aws lambda-microvms get-microvm-image --image-identifier $IMAGE --query latestActiveImageVersion )   # succeeds
 TOKEN=$(setup-researcher-dashboard-iam.sh id-token report-service-dev not-$STACK) \
   assume $LAUNCHER                                                                                     # AccessDenied
@@ -154,7 +155,7 @@ TOKEN=$(setup-researcher-dashboard-iam.sh id-token report-service-dev not-$STACK
 A broker session holding the whole ceiling, which is what a session without a session policy gets. Every refusal below is of an object that exists: without a list grant, S3 refuses a read of a missing key whatever the grant, so a missing key proves nothing.
 
 ```sh
-( eval "$(assume $BROKER)"; unset AWS_PROFILE
+( creds=$(assume $BROKER) || exit; eval "$creds"; unset AWS_PROFILE
   aws s3api put-object --bucket $B --key researchers/_probe/a.txt --body /tmp/probe      # succeeds
   aws s3api get-object --bucket $B --key packages/_probe/0.0.0.txt /tmp/out              # succeeds
   aws s3api put-object --bucket $B --key packages/_probe/1.0.0.txt --body /tmp/probe     # AccessDenied
@@ -174,7 +175,7 @@ POLICY=$(cat <<EOF
 ]}
 EOF
 )
-( eval "$(assume $BROKER "$POLICY")"; unset AWS_PROFILE
+( creds=$(assume $BROKER "$POLICY") || exit; eval "$creds"; unset AWS_PROFILE
   aws s3api put-object --bucket $B --key researchers/$ID/a.txt --body /tmp/probe         # succeeds
   aws s3api list-objects-v2 --bucket $B --prefix researchers/$ID/                        # succeeds
   aws s3api get-object --bucket $B --key packages/_probe/0.0.0.txt /tmp/out              # succeeds
@@ -198,7 +199,7 @@ aws iam list-attached-role-policies --role-name $R             # []
 
 ```sh
 VM=$(aws lambda-microvms list-microvms --image-identifier $IMAGE --query 'items[0].microvmId' --output text)
-( eval "$(assume $LAUNCHER)"; unset AWS_PROFILE
+( creds=$(assume $LAUNCHER) || exit; eval "$creds"; unset AWS_PROFILE
   aws lambda-microvms create-microvm-auth-token --microvm-identifier $VM \
     --expiration-in-minutes 5 --allowed-ports port=8080                              # AccessDenied
   ENDPOINT=$(aws lambda-microvms get-microvm --microvm-identifier $VM --query endpoint --output text)
