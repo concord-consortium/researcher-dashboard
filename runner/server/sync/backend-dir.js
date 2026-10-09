@@ -3,7 +3,7 @@ import path from "node:path";
 
 // The DIR backend copies to a local directory instead of S3. It exists so the
 // hooks, the scheduler and the flush-and-verify contract can be driven end to end
-// with `make run-hook` and in tests, with no AWS credentials and no network.
+// in tests, with no AWS credentials and no network.
 export class DirBackend {
   constructor(root) {
     this.root = root;

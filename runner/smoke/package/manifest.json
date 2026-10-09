@@ -1,0 +1,9 @@
+{
+  "name": "runner-smoke",
+  "title": "Runner smoke check",
+  "version": "1.0.0",
+  "description": "Pulls a class's student answers and checks the columns the official packages read.",
+  "clue_prepull": false,
+  "entrypoint": "run.py",
+  "expected_duration_seconds": 300
+}

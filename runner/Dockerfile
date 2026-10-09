@@ -6,7 +6,7 @@ ARG AL2023_TAG=2023
 ARG RUNTIME_IMAGE=public.ecr.aws/lambda/microvms:al2023-minimal
 ARG GO_VERSION=1.27.1
 ARG DUCKDB_VERSION=1.5.5
-ARG CC_DATA_REF=v0.2.0
+ARG CC_DATA_REF=v0.3.0-pre.1
 
 # cc-data-cli embeds DuckDB through cgo, so it is compiled rather than downloaded:
 # there is no linux_arm64 release, and a published linux binary carries the glibc

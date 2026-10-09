@@ -1,0 +1,31 @@
+# Runner
+
+The MicroVM image that runs a researcher's packages. It answers Lambda's lifecycle hooks, asks report-service's `researcherDashboard` function for its work (`POST /work`), its storage credentials (`POST /storage-credentials`) and its suspend (`POST /idle`), and makes no AWS call on the execution role: every S3 client is built from the storage broker's credentials, and the SDK's default credential chain is switched off in the process at start (`final-design.md` sections 7, 10 and 11.3).
+
+## Configuration
+
+Everything per VM arrives in `runHookPayload` at `/run`. The image's environment carries only what every VM shares, and these have code defaults, so none is a stack parameter; changing one is a runner release.
+
+| Variable | Default | What it bounds |
+|---|---|---|
+| `PACKAGE_MAX_DURATION_SECONDS` | 7200 | A manifest declaring more is refused. The default is report-server's publish limit (the contract fixture's `limits.max_duration_seconds`); a value below it or above 28800 stops the runner at startup |
+| `PACKAGE_TIMEOUT_MS` | unset | Unset, a package's process is bounded at its declared duration plus 10 minutes |
+| `IDLE_PERIOD_MS` | 300000 | How long a drained VM keeps asking for work before it asks to be suspended; under the watchdog's 30 minutes |
+| `IDLE_POLL_MS` | 30000 | How often it asks meanwhile |
+| `PACKAGE_UID` | 1000 | The package user, which the image creates first |
+
+## Tests
+
+`npm test` on Node 24 or later, which `.github/workflows/runner.yml` runs on every push touching `runner/` or `fixtures/`. `make test-emulator` runs `test/firestore.emulator.test.js` against the Firestore and Auth emulators; run with report-service's rules loaded, it shows the runner's writes are the ones those rules accept.
+
+`fixtures/package-contract.json` is a copy of report-service's package contract (the catalog's identity and version grammar, the package key, and `limits`), which the runner's grammar and duration ceiling are tested against. `npm run contract:check` fetches report-service's file from GitHub (`master`, or `--ref <ref>` through `node scripts/contract.mjs check --ref <ref>`) and fails if the copy differs; `npm run contract:sync` rewrites the copy, to be committed with whatever the change breaks in the runner's tests.
+
+## The smoke gate
+
+`smoke/smoke.mjs` gates the image: it runs `smoke/package/`, which pulls a class's student answers and checks the columns the official packages read, so a report-service or cc-data change fails here rather than in a researcher's result. The column list is cc-data's contract columns on `answers` and the `run_answers` columns `wildfire-responses` counts through, and the package also checks that `run_answers` holds the run's answers. It stays on a Student Answers run, because `report_prompts` is built only from those.
+
+- **`node smoke/smoke.mjs build [--any <pattern>]...`** builds the smoke package's zip reproducibly (sorted files, fixed timestamps) into `smoke/dist/` and prints its checksum. `--any` writes the manifest's `urls.any`, so the package is offered only on the smoke class. Publish the zip with report-server's `POST /api/v1/packages` (`Content-Type: application/zip`, the publisher's cc-data token as the bearer).
+- **`node smoke/smoke.mjs image --class-id <id> --class-hash <hash>`** builds the image (`make build`, `linux/arm64`, about 45 minutes emulated on an x86 host after `docker run --privileged --rm tonistiigi/binfmt --install arm64`) and runs the smoke package inside it against staging's report-server, logged in with `RD_SMOKE_REPORT_SERVER_TOKEN`, a report-server token for a researcher who reaches the class. It first checks that the image's `cc-data version` is the Dockerfile's `CC_DATA_REF`. It needs no AWS account and no stack, so it can run before any stack exists.
+- **`node smoke/smoke.mjs stack --identity <origin>/runner-smoke --version <v> --class-hash <hash> [--terminate]`** runs the published smoke package on a stack. `RD_SMOKE_ACCESS_TOKEN` is a scoped access token for the smoke class carrying `class:researcher-run` and `class:researcher-read`: complete the dashboard's launch for the class on staging and copy the `access_token` from the `/oauth/token` response in the browser's network panel. It lives eight hours. It asks rigse to run the package, reads the result document with a researcher Firebase token from `jwt/firebase?researcher=true`, waits up to 10 minutes for `done`, checks the display, and prints the VM's id with the `terminate-microvm` command, running it with `--terminate` when an AWS CLI holding the stack's launcher credentials is present: an ID token for the function's account from report-service's `setup-researcher-dashboard-iam.sh id-token` (after its `grant-operator`, revoked afterward), exchanged with `aws sts assume-role-with-web-identity` for the stack's `LauncherRole`. It needs the runner stack, report-service's VM endpoints deployed against it, rigse's dashboard API on the portal, and the smoke package published and runnable.
+
+A runner release (`cloudformation/README.md`, "Releasing the runner") is made from the PR branch before review and merge, and is gated by `stack` once the new image is active; a failure is rolled back by deactivating that image version, since launches take the latest active one. Both the release and the monthly rebuild, which picks up the base image, cc-data-cli, DuckDB, Python and Node, run `npm run contract:check` and `image` before they publish and `stack` after. Nothing schedules the monthly rebuild: whoever maintains the runner does it by hand once a month, and that is also when `contract:check` catches a change to report-service's contract made between releases.
