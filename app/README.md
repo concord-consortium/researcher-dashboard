@@ -86,7 +86,7 @@ emulator that is fine, because an emulator accepts any signature.
 
 `.github/workflows/deploy-app.yml` publishes to `models-resources/researcher-dashboard/` on
 every push that touches `app/`, assuming an AWS role through OIDC rather than storing a key.
-A branch lands at `branch/<name>/`, a tag at `version/<tag>/`.
+A branch lands at `branch/<name>/`, less a leading ticket key such as `RD-3-`, and a tag at `version/<tag>/`.
 
 A branch build can be launched on staging only once its URL is among the staging
 `researcher-dashboard` `Client`'s redirect URIs; an unregistered redirect URI is a portal
