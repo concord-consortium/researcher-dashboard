@@ -81,6 +81,7 @@ RD-1 was first spec'd (2026-09-25) as three passes, so that no running VM would 
   4. report-service-dev repointed by report-service #433 (merged as `688819a`). *(Not deployed: `researcherDashboard` is not deployed on report-service-dev, and its first deploy belongs to REPORT-143, which adds the broker's setting.)*
   5. `report-service-qa` given `PackageBuckets` (`{"learn.portal.staging.concord.org": "researcher-dashboard-runner-staging"}`, keyed by portal host) and the writer's key by a parameter-only update; task definition `report-server:100` rolled out and the server answers 200.
   6. R20's writer and execution-role checks passed. *(R20's other checks and R21's audit are pending.)*
+  7. After review, 2026-10-09: change set `git-5947976` updated the stack in place (versioning and `ExpireOldVersions` on `DataBucket`, the execution role's log-stream ARN; the other three IAM principals only re-evaluated, nothing replaced), `UPDATE_COMPLETE`, and the writer and execution-role checks passed again. The writer's probe object, put before and after, now has two versions.
 - **R23.** The repository README's layout lists `cloudformation/`.
 
 ## Technical Notes
