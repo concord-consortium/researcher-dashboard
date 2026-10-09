@@ -66,7 +66,7 @@ artifact:
 	mkdir -p $(dir $(ARTIFACT))
 	zip -r $(ARTIFACT) Dockerfile package.json package-lock.json server
 
-# The CodeArtifactKey in cloud-formation's create-stack config must match this.
+# The runner stack's CodeArtifactKey parameter is this key (cloudformation/README.md).
 artifact-uri:
 	@echo $(ARTIFACT_URI)
 

@@ -81,7 +81,29 @@ aws cloudformation execute-change-set --stack-name "$STACK" --change-set-name "g
 aws cloudformation wait stack-update-complete --stack-name "$STACK"
 ```
 
-A `MicrovmImage` change starts an image build. VMs already running keep their version, and the function relaunches a VM that is not on the latest one at its next run request.
+A `MicrovmImage` change starts an image build. VMs already running keep their version: the function resumes a suspended VM and leaves a running one alone whatever its image (`ensure-vm.ts`), so a VM picks up a new image only once it is terminated and the next run request launches another.
+
+## Releasing the runner
+
+A runner change reaches a stack only through a new image: publish the artifact, then update the stack with `CodeArtifactKey` pointing at it and every other parameter unchanged. A new package version needs no release; a change to the runner's own code does. "Updating a stack" cannot do this, since it carries `CodeArtifactKey` over with its previous value.
+
+```sh
+cd ../runner && make publish-artifact VERSION=<x.y.z> ARTIFACT_BUCKET=<bucket in the stack's account>
+KEY=$(make -s artifact-uri VERSION=<x.y.z> ARTIFACT_BUCKET=<same> | sed 's#^s3://[^/]*/##')
+cd ../cloudformation
+STACK=researcher-dashboard-runner-staging
+SHA=$(git rev-parse --short HEAD)
+PARAMS=$(aws cloudformation describe-stacks --stack-name "$STACK" \
+  --query 'Stacks[0].Parameters[].ParameterKey' --output text \
+  | tr '\t' '\n' | grep -vx CodeArtifactKey | sed 's/.*/ParameterKey=&,UsePreviousValue=true/' | tr '\n' ' ')
+aws cloudformation create-change-set --stack-name "$STACK" --change-set-name "git-$SHA" \
+  --template-body file://researcher-dashboard-runner.yml --capabilities CAPABILITY_NAMED_IAM \
+  --parameters $PARAMS ParameterKey=CodeArtifactKey,ParameterValue="$KEY"
+```
+
+The bucket is the one "Before a stack is created in an account" names: `concordqa-devops` for staging, `concord-devops` for production. Review, diff and execute the change set as in "Updating a stack"; the update builds the new image. Then terminate the VMs still running the old one, since nothing else retires them.
+
+**When the change needs a grant the stack lacks, the grant goes in the same change set, applied from the same commit**: a stack with the new runner and the old grant, or the reverse, fails at the first call. Terminate the running VMs before applying a change like that, or they will make the old call against the new grant.
 
 ## What goes where after a create or update
 

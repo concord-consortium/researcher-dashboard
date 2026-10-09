@@ -211,6 +211,8 @@ terminated, so terminate them before a change like that, or they will make the o
 grant.
 ````
 
+**As built** (2026-10-09): the section follows RD-1's README as merged rather than the block above, which predates it: the change set is named `git-$SHA` and made from the branch head, it is reviewed, diffed and executed as "Updating a stack" says, and the VMs on the old image are terminated after the update. Writing it showed that "Updating a stack" said the function relaunches a VM not on the latest image; `ensure-vm.ts` resumes or leaves a VM whatever its image, so that sentence was corrected in the same commit.
+
 **Verified**: the parameter pipeline was run over the ten parameter names of RD-1's template (`0cf3f1c`: the spike's nine without `StatusBackend`, plus `FunctionServiceAccountUniqueId`). It produced nine `UsePreviousValue` entries and left out `CodeArtifactKey`. `make -n publish-artifact VERSION=0.23.0 ARTIFACT_BUCKET=qa-bucket` and `make -s artifact-uri` print `s3://qa-bucket/researcher-dashboard-runner/runner-0.23.0.zip`, from which the `sed` leaves the key. The `aws` calls themselves were not run: this machine has no AWS CLI or credentials.
 
 ---
