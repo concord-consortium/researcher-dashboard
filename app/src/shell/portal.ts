@@ -64,15 +64,19 @@ export class Api {
     private readonly now: () => number = Date.now
   ) {}
 
+  // A token refused or already near expiry moments after it was issued would only be issued
+  // again the same way, so the page stops rather than looping through the portal.
+  private young(): boolean {
+    return this.now() - this.token.issuedAt < EXPIRY_MARGIN_MS;
+  }
+
   async request<T>(path: string, init: RequestInit = {}): Promise<T> {
-    if (this.now() > this.token.expiresAt - EXPIRY_MARGIN_MS) throw new SessionExpired(false);
+    if (this.now() > this.token.expiresAt - EXPIRY_MARGIN_MS) throw new SessionExpired(this.young());
     const response = await this.fetchImpl(`${this.origin}${path}`, {
       ...init,
       headers: { ...(init.headers ?? {}), Authorization: `Bearer ${this.token.accessToken}` }
     });
-    if (response.status === 401) {
-      throw new SessionExpired(this.now() - this.token.issuedAt < EXPIRY_MARGIN_MS);
-    }
+    if (response.status === 401) throw new SessionExpired(this.young());
     const body = await response.json().catch(() => null);
     if (!response.ok) {
       // The server's own message says which of several refusals this is.

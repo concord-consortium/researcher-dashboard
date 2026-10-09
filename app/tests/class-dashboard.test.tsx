@@ -136,7 +136,7 @@ describe("ClassDashboard", () => {
     expect(screen.queryByText(/reading this class's activities/i)).toBeNull();
   });
 
-  it("says the profile could not be read when the listener is refused", async () => {
+  it("says the profile could not be read when the listener is refused, and does not take that for a missing profile", async () => {
     const s = services();
     await mounted(s);
     await s.refuse();
@@ -149,9 +149,17 @@ describe("ClassDashboard", () => {
     expect(await screen.findByText("This class's profile could not be read.")).toBeDefined();
   });
 
-  it("shows the Firebase token's refusal rather than the withdrawn page", async () => {
-    await mounted(services({ watch: async () => { throw new ApiError("Missing firebase_app parameter", 403); } }));
-    expect(await screen.findByText("Missing firebase_app parameter")).toBeDefined();
+  // jwt/firebase answers the researcher check with a 400 and keeps 403 for a token it will not
+  // take at all, so neither is the withdrawn page.
+  it("shows the Firebase token call's refusals as its messages", async () => {
+    await mounted(services({ watch: async () => {
+      throw new ApiError("You do not have access to the requested class_hash as a researcher", 400);
+    } }));
+    expect(await screen.findByText(/do not have access to the requested class_hash/)).toBeDefined();
+    cleanup();
+    await mounted(services({ watch: async () => { throw new ApiError("This token may not be used here", 403); } }));
+    expect(await screen.findByText("This token may not be used here")).toBeDefined();
+    expect(screen.queryByText(/withdrawn/)).toBeNull();
   });
 
   it("lists nothing until the profile exists, then lists with its URLs", async () => {
@@ -239,5 +247,27 @@ describe("ClassDashboard", () => {
     await s.refuse();
     expect(screen.getByText("This class's profile could not be read.")).toBeDefined();
     expect(screen.queryByText("Wildfire open responses")).toBeNull();
+  });
+
+  it("says it is reading the class before the first snapshot arrives", async () => {
+    await mounted(services());
+    expect(screen.getByText(/reading this class's activities/i)).toBeDefined();
+  });
+
+  it("announces the packages' status lines politely", async () => {
+    await mounted(services());
+    const line = screen.getByText(/reading this class's activities/i);
+    expect(line.closest("[aria-live]")?.getAttribute("aria-live")).toBe("polite");
+  });
+
+  it("takes the old list away while the list for new URLs is pending, and says so", async () => {
+    let calls = 0;
+    const s = services({ list: async () => (++calls === 1 ? [row({ title: "Old", official: true })] : new Promise<PackageRow[]>(() => {})) });
+    await mounted(s);
+    await s.snapshot(CURRENT);
+    await screen.findByText("Old");
+    await s.snapshot({ ...CURRENT, interactive_urls: [] });
+    expect(screen.queryByText("Old")).toBeNull();
+    expect(screen.getByText(/listing the packages that apply/i)).toBeDefined();
   });
 });

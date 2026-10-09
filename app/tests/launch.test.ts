@@ -63,4 +63,11 @@ describe("portalFor", () => {
     expect(portalFor("http://localhost:3000/", local)?.reportServer).toBe("http://localhost:4000");
     expect(portalFor("http://localhost:3000/")).toBeNull();
   });
+
+  it("takes no local portal from a setting that is not a URL, and keeps only origins", () => {
+    const env = { DEV: true, VITE_DEV_REPORT_SERVER: "http://localhost:4000/", VITE_DEV_FIREBASE_PROJECT: "demo" };
+    expect(devPortal({ ...env, VITE_DEV_PORTAL: "localhost:3000" })).toBeNull();
+    expect(devPortal({ ...env, VITE_DEV_PORTAL: "127.0.0.1:3000" })).toBeNull();
+    expect(devPortal({ ...env, VITE_DEV_PORTAL: "http://localhost:3000/" })?.reportServer).toBe("http://localhost:4000");
+  });
 });

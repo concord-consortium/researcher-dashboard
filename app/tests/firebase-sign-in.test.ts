@@ -28,4 +28,13 @@ describe("watchDoc", () => {
     (onSnapshot.mock.calls[0] as unknown as [unknown, unknown, (e: Error) => void])[2](refused);
     expect(onError).toHaveBeenCalledWith(refused);
   });
+
+  it("reads a missing document as null, which is what asks for a refresh", async () => {
+    const { watchDoc } = await import("../src/shell/firebase");
+    const onValue = vi.fn();
+    watchDoc({} as never, "a/b", onValue, vi.fn());
+    const call = onSnapshot.mock.calls.at(-1) as unknown as [unknown, (s: unknown) => void];
+    call[1]({ exists: () => false, data: () => undefined });
+    expect(onValue).toHaveBeenCalledWith(null);
+  });
 });

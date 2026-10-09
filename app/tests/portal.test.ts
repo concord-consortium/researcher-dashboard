@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
-import { Api, ApiError, Portal, ReportServer, SessionExpired } from "../src/shell/portal";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { Api, ApiError, Portal, ReportServer } from "../src/shell/portal";
 
 const TOKEN = { accessToken: "at-1", issuedAt: 0, expiresAt: 8 * 3600 * 1000 };
 
@@ -26,7 +26,17 @@ describe("Api", () => {
 
   it("asks for a new token rather than send one about to expire", async () => {
     const { api, fetchImpl } = apiWith(respond({}), TOKEN.expiresAt - 30_000);
-    await expect(api.request("/x")).rejects.toEqual(new SessionExpired(false));
+    await expect(api.request("/x")).rejects.toMatchObject({ young: false });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  // A portal issuing tokens that expire within the margin would otherwise send the browser back
+  // to it for another such token forever.
+  it("stops rather than authorizing again when a fresh token is already near expiry", async () => {
+    const short = { accessToken: "at-1", issuedAt: 0, expiresAt: 30_000 };
+    const fetchImpl = vi.fn();
+    const api = new Api("https://portal.test", short, fetchImpl as unknown as typeof fetch, () => 1_000);
+    await expect(api.request("/x")).rejects.toMatchObject({ young: true });
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
@@ -78,6 +88,8 @@ describe("ReportServer", () => {
 // Every other test injects a stub. Calling a bare `fetch` reference as a method of the Api is
 // rejected by browsers with "Illegal invocation", which only shows up in a real one.
 describe("the default fetch", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
   it("calls the global fetch with the global as its receiver", async () => {
     const stub = vi.fn(function (this: unknown) {
       if (this !== globalThis && this !== undefined) throw new TypeError("Illegal invocation");
@@ -86,6 +98,5 @@ describe("the default fetch", () => {
     vi.stubGlobal("fetch", stub);
     await new Api("https://portal.test", TOKEN, undefined, () => 0).request("/x");
     expect(stub).toHaveBeenCalledTimes(1);
-    vi.unstubAllGlobals();
   });
 });

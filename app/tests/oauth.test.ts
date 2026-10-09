@@ -70,4 +70,11 @@ describe("exchangeCode", () => {
     const fetchImpl = vi.fn(async () => ({ ok: false, status: 400, json: async () => ({ error: "invalid_grant" }) }));
     await expect(exchangeCode("https://p", "c", "v", "r", fetchImpl as unknown as typeof fetch, 0)).rejects.toEqual(new TokenError("invalid_grant"));
   });
+
+  it("refuses a 200 that carries no usable token", async () => {
+    for (const body of [{ access_token: "at" }, { expires_in: 28800 }]) {
+      const fetchImpl = vi.fn(async () => ({ ok: true, status: 200, json: async () => body }));
+      await expect(exchangeCode("https://p", "c", "v", "r", fetchImpl as unknown as typeof fetch, 0)).rejects.toBeInstanceOf(TokenError);
+    }
+  });
 });

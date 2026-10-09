@@ -9,7 +9,7 @@ describe("portalSegment", () => {
       .toBe("learn_portal_staging_concord_org");
   });
 
-  it("drops the port, which is not part of the segment CLUE writes", () => {
+  it("keeps the port, as report-service's own segment does", () => {
     expect(portalSegment("http://localhost:3000")).toBe("localhost:3000");
   });
 });

@@ -31,7 +31,18 @@ export function devPortal(env: Record<string, string | boolean | undefined>): Po
   if (typeof origin !== "string" || typeof reportServer !== "string" || typeof firebaseProject !== "string") {
     return null;
   }
-  return { origin: new URL(origin).origin, reportServer, firebaseProject };
+  const portal = httpOrigin(origin), server = httpOrigin(reportServer);
+  return portal && server ? { origin: portal, reportServer: server, firebaseProject } : null;
+}
+
+// "localhost:3000" parses as a URL whose scheme is "localhost:" and whose origin is "null".
+function httpOrigin(value: string): string | null {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.origin : null;
+  } catch {
+    return null;
+  }
 }
 
 export function portalFor(authDomain: string, extra: PortalConfig | null = null): PortalConfig | null {

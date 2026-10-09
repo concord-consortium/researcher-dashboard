@@ -62,9 +62,16 @@ async function resolveStart(deps: StartDeps): Promise<Start> {
   return { kind: "redirecting" };
 }
 
+// The callback leaves the address bar and the history before anything else, whatever happens
+// next, so a reload starts a fresh launch rather than replaying a spent code.
 async function finishAuthorization(deps: StartDeps, callback: Callback): Promise<Start> {
   const pending = takePending(deps.storage, callback.state);
-  if (!pending) return { kind: "info", reason: "sign-in-failed" };
+  if (!pending) {
+    deps.replaceUrl(deps.location.pathname);
+    return { kind: "info", reason: "sign-in-failed" };
+  }
+  const launch: Launch = { authDomain: pending.authDomain, classId: pending.classId, loginHint: pending.loginHint };
+  deps.replaceUrl(`${deps.location.pathname}${launchQuery(launch)}`);
   if ("error" in callback) {
     return callback.error === "access_denied"
       ? { kind: "info", reason: "access-denied" }
@@ -76,12 +83,8 @@ async function finishAuthorization(deps: StartDeps, callback: Callback): Promise
     const token = await exchangeCode(
       portal.origin, callback.code, pending.verifier, redirectUriFor(deps.location), deps.fetchImpl, deps.now()
     );
-    const launch: Launch = { authDomain: pending.authDomain, classId: pending.classId, loginHint: pending.loginHint };
-    // The code leaves the address bar and the history; a reload starts a fresh launch.
-    deps.replaceUrl(`${deps.location.pathname}${launchQuery(launch)}`);
     return { kind: "ready", portal, launch, token };
   } catch (error) {
-    if (error instanceof TokenError) return { kind: "info", reason: "sign-in-failed", detail: error.message };
-    return { kind: "info", reason: "sign-in-failed" };
+    return { kind: "info", reason: "sign-in-failed", detail: error instanceof TokenError ? error.message : undefined };
   }
 }

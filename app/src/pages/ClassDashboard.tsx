@@ -9,7 +9,7 @@ import { Info } from "./Info";
 
 type Source = "portal" | "report-server" | "firebase";
 
-// What to say when a source fails without answering.
+// What to say when a call fails with no message of its own to show.
 const UNREACHABLE: Record<Source, string> = {
   portal: "The portal could not be reached.",
   "report-server": "The package catalog could not be reached.",
@@ -32,8 +32,8 @@ export function ClassDashboard({ services, onExpired }: {
   const [listProblem, setListProblem] = useState<string | null>(null);
   const refreshed = useRef(false);
 
-  // The one place a refusal becomes page state. Only the portal's 403 means the researcher
-  // check failed.
+  // How a refused call becomes page state. Only a 403 from the portal's dashboard endpoints
+  // means the researcher check failed; its Firebase token answers that check with a 400.
   function refused(error: unknown, show: (message: string) => void, from: Source) {
     if (error instanceof SessionExpired) return error.young ? setInfo("expired") : onExpired();
     if (error instanceof ApiError && error.status === 403 && from === "portal") return setInfo("withdrawn");
@@ -81,8 +81,10 @@ export function ClassDashboard({ services, onExpired }: {
   useEffect(() => {
     if (!urlsKey) return;
     let current = true;
+    setRows(null);
+    setListProblem(null);
     services.reportServer.listPackages(JSON.parse(urlsKey) as string[])
-      .then((listed) => { if (current) { setRows(listed); setListProblem(null); } })
+      .then((listed) => { if (current) setRows(listed); })
       .catch((error) => { if (current) refused(error, setListProblem, "report-server"); });
     return () => { current = false; };
   }, [urlsKey, services]);
@@ -122,7 +124,7 @@ export function ClassDashboard({ services, onExpired }: {
         <h2 id="packages-heading">Packages</h2>
         <div className="status" aria-live="polite">
           {profileProblem && <p className="error">{profileProblem}</p>}
-          {!profileProblem && profile === null && !refreshProblem && <p>Reading this class's activities…</p>}
+          {!profileProblem && !profile && !refreshProblem && <p>Reading this class's activities…</p>}
           {refreshProblem && <p className="error">{refreshProblem}</p>}
           {profile?.truncated && (
             <p className="notice">
@@ -130,6 +132,7 @@ export function ClassDashboard({ services, onExpired }: {
             </p>
           )}
           {listProblem && <p className="error">{listProblem}</p>}
+          {profile && !rows && !listProblem && !profileProblem && <p>Listing the packages that apply…</p>}
         </div>
         {profile && rows && !listProblem && !profileProblem && <PackageList rows={rows} scope={scope} />}
       </section>

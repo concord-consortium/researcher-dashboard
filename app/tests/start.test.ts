@@ -69,11 +69,22 @@ describe("start", () => {
     expect(localStorage.length).toBe(0);
   });
 
-  it("refuses a callback whose state it did not send", async () => {
+  it("refuses a callback whose state it did not send, and clears it from the address bar", async () => {
     await launch();
     const back = deps("?code=c1&state=forged");
     expect(await start(back)).toEqual({ kind: "info", reason: "sign-in-failed" });
     expect(back.fetchImpl).not.toHaveBeenCalled();
+    expect(back.replaced).toEqual([PAGE.pathname]);
+  });
+
+  // A reload then starts a fresh launch instead of replaying a spent code.
+  it("puts the launch back in the address bar when the sign-in fails", async () => {
+    const denied = deps(`?error=access_denied&state=${await launch()}`);
+    await start(denied);
+    expect(denied.replaced).toEqual([`${PAGE.pathname}${LINK}`]);
+    const refused = deps(`?code=c1&state=${await launch()}`, { body: { error: "invalid_grant" }, ok: false });
+    await start(refused);
+    expect(refused.replaced).toEqual([`${PAGE.pathname}${LINK}`]);
   });
 
   it("reads access_denied as no research access, and names any other error", async () => {

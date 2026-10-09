@@ -16,8 +16,8 @@ export function needsRefresh(profile: Profile | null, scope: Scope, now: number,
   return derived === undefined || now - derived > maxAgeMs;
 }
 
-// The same set the runner sends to report-server's applies, so a package offered here is not
-// refused there for a difference in URLs.
+// The profile's URLs as stored, assignment URLs first, which report-server matches each package
+// against.
 export function scopeUrls(profile: Profile): string[] {
   return [...(profile.assignment_urls ?? []), ...(profile.interactive_urls ?? [])];
 }

@@ -14,7 +14,7 @@ const REASONS: Record<Exclude<InfoReason, "no-launch">, string> = {
 
 // Deliberately not a demo. portal-report has a fake-data mode and copying it here would put
 // invented results in front of a researcher, which read as real ones. This page says what
-// the dashboard is, why it is showing instead, and how to get in, and nothing else.
+// the dashboard is, why it is showing instead, and how to get in, and never shows class data.
 export function Info({ reason, detail }: { reason: InfoReason; detail?: string }) {
   return (
     <main className="info">

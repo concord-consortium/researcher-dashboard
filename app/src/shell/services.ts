@@ -4,8 +4,8 @@ import type { Profile } from "./packages";
 import { Api, Portal, ReportServer, type Scope } from "./portal";
 import type { PortalConfig } from "./portals";
 
-// Everything the dashboard page calls out to, gathered so a test can hand it fakes. The page
-// gets these and never the launch, so nothing after the redirect can read `classId`.
+// Everything the dashboard page calls out to, gathered so a test can hand it fakes. The page is
+// given these and never the launch, so it cannot read `classId`.
 export interface DashboardServices {
   portal: Portal;
   reportServer: ReportServer;
