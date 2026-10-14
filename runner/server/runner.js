@@ -5,7 +5,6 @@ import { STATES, VmState } from "./state.js";
 import { ClassDocuments, RunnerStatus, bounded } from "./status.js";
 import { askApplies, revokeOwnToken } from "./report-server.js";
 import { CHECKSUM, declaresPatterns, IDENTITY, VERSION, packageDocId } from "./package-fetch.js";
-import { CLUE_SOURCE } from "./steps.js";
 
 const EIGHT_HOURS_MS = 8 * 60 * 60 * 1000;
 // Kept back from the window for the last flush and the /terminate hook at the VM's cap.
@@ -582,8 +581,7 @@ export class Runner {
         timer = setTimeout(() => reject(new Error(`the package ran past its ${Math.round(timeoutMs / 1000)}s bound`)), timeoutMs);
       });
       try {
-        const classTokens = request.scopes[entry.class_hash]?.class_tokens;
-        const result = await Promise.race([this.#steps({ entry, docId, docs, scope, manifest, classTokens, timeoutMs }), timeout]);
+        const result = await Promise.race([this.#steps({ entry, docId, docs, scope, manifest, timeoutMs }), timeout]);
         try {
           await docs.counts(result.counts);
         } catch (err) {
@@ -610,24 +608,11 @@ export class Runner {
     }
   }
 
-  async #steps({ entry, docId, docs, scope, manifest, classTokens, timeoutMs }) {
+  async #steps({ entry, docId, docs, scope, manifest, timeoutMs }) {
     const stage = async (name, fn) => {
       await docs.stage(docId, name);
       return timed(`package.${name}`, {}, fn);
     };
-    const pulled = await stage("pull", () =>
-      this.steps.pullData({
-        classHash: entry.class_hash,
-        classTokens,
-        manifest,
-        portal: this.payload.portal,
-        dataRoot: this.env.dataRoot,
-        makeStore: this.makeStore,
-        firebaseProject: this.payload.firebase_project,
-        now: this.now
-      })
-    );
-
     const prepared = await stage("prepare_package", () =>
       this.steps.preparePackage({
         workRoot: this.env.workRoot,
@@ -636,7 +621,6 @@ export class Runner {
         docId,
         scope,
         catalogId: entry.catalog_id,
-        clueSource: CLUE_SOURCE,
         portal: this.payload.portal,
         token: this.payload.report_server_token,
         reportServerUrl: this.payload.report_server_url,
@@ -666,8 +650,7 @@ export class Runner {
       })
     );
 
-    // The package made the AP and log pulls, so it knows those counts; clue_documents is
-    // the runner's own and a package does not get to claim it.
+    // The package made the pulls, so it is the one that knows the counts.
     const reported = await this.steps.readPackageCounts({ outputDir: prepared.paths.outputDir });
     return {
       summary: written.summary,
@@ -675,8 +658,7 @@ export class Runner {
       counts: {
         answers: reported.answers,
         logs: reported.logs,
-        logFreshnessAt: reported.log_freshness_at,
-        clueDocuments: pulled.clue_documents
+        logFreshnessAt: reported.log_freshness_at
       }
     };
   }

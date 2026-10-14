@@ -20,6 +20,7 @@ const CLASS = "7be899cf".repeat(6);
 const OTHER_CLASS = "64727df0".repeat(6);
 const PLATFORM_ID = "https://learn.portal.staging.concord.org";
 const PROJECT = "report-service-dev";
+// rigse also sends a CLUE class token for a package declaring clue_prepull; the runner reads none.
 const CLUE_ROW = "collaborative-learning-staging";
 const CHECKSUM = `sha256:${"ab".repeat(32)}`;
 
@@ -113,7 +114,6 @@ function steps(record, overrides = {}) {
   return {
     installCredential: async () => {},
     resolvePackage: async ({ pkg }) => { record.resolved.push(pkg); return record.manifests[pkg.identity] ?? manifestFor(pkg.identity); },
-    pullData: async (args) => { record.pulled.push(args); return { clue_documents: 12 }; },
     preparePackage: async (args) => {
       record.prepared.push(args);
       const dataDir = path.join(args.dataRoot, "classes", args.classHash);
@@ -136,7 +136,7 @@ function steps(record, overrides = {}) {
 function build({ stepOverrides = {}, envOverrides = {}, makeStore, wrapStore = (store) => store, makePackageBackend, revoke, applies, clock = { t: Date.parse("2026-09-26T12:00:00Z") } } = {}) {
   const docs = new Map();
   const fn = fakeFunction(docs);
-  const record = { resolved: [], pulled: [], prepared: [], stores: [], manifests: {}, sleeps: [], revoked: [], applies: [], timers: [] };
+  const record = { resolved: [], prepared: [], stores: [], manifests: {}, sleeps: [], revoked: [], applies: [], timers: [] };
   const env = {
     ...loadEnv({ SYNC_BACKEND: "DIR", SYNC_DIR: path.join(work, "remote") }),
     dataRoot: path.join(work, "data"),
@@ -302,7 +302,7 @@ test("a queued package is claimed, run and finished, and the counts land on the 
   const scopeDoc = docs.get(scopePath(PORTAL, CLASS, USER));
   assert.equal(scopeDoc.data.answers, 201);
   assert.equal(scopeDoc.data.logs, 490);
-  assert.equal(scopeDoc.data.clue_documents, 12);
+  assert.equal("clue_documents" in scopeDoc.data, false);
   assert.equal(scopeDoc.data.last_pull_at, SERVER_TIME);
   assert.equal(scopeDoc.data.log_freshness_at, "2026-08-26T00:00:00.000Z");
   assert.equal(scopeDoc.data.learners, undefined);
@@ -311,7 +311,7 @@ test("a queued package is claimed, run and finished, and the counts land on the 
 
 // A package that reports only some counts must not inherit another run's others.
 test("the counts replace the scope document's last counts rather than merging into them", async () => {
-  const built = build({ stepOverrides: { pullData: async () => ({}), readPackageCounts: async () => ({ answers: 3 }) } });
+  const built = build({ stepOverrides: { readPackageCounts: async () => ({ answers: 3 }) } });
   built.docs.set(scopePath(PORTAL, CLASS, USER), { platform_id: PLATFORM_ID, data: { answers: 1, logs: 9, log_freshness_at: "2026-01-01T00:00:00.000Z", clue_documents: 4 } });
   built.fn.queue({ identity: "users/1/wildfire-responses" });
   await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
@@ -352,7 +352,7 @@ test("two packages named alike from different origins run in one queue without s
   assert.deepEqual([...new Set(built.record.resolved.map((p) => p.identity))], ["users/1/counts", "projects/20/counts"]);
 });
 
-test("the package is handed its scope, its dataset's catalog id and the CLUE source", async () => {
+test("the package is handed its scope and its dataset's catalog id", async () => {
   const built = build();
   built.fn.queue({ identity: "users/1/counts", catalogId: 77 });
   await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
@@ -360,11 +360,27 @@ test("the package is handed its scope, its dataset's catalog id and the CLUE sou
 
   const prepared = built.record.prepared[0];
   assert.equal(prepared.catalogId, 77);
-  assert.equal(prepared.clueSource, "firebase");
   assert.deepEqual(prepared.scope, scopeBlock(CLASS));
   assert.equal(prepared.docId, "users__1__counts");
-  assert.equal(built.record.pulled[0].firebaseProject, PROJECT);
-  assert.ok(built.record.pulled[0].classTokens[CLUE_ROW], "the CLUE class token reaches the pre-pull");
+});
+
+test("a run writes its stages in order, with no pull stage of its own", async () => {
+  const built = build();
+  built.fn.queue({ identity: "users/1/counts" });
+  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+  await built.runner.loop;
+  const stages = writesTo(built.record, resultPath(PORTAL, CLASS, USER, "users__1__counts")).map((w) => w.stage).filter(Boolean);
+  assert.deepEqual(stages, ["starting", "prepare_package", "run_package", "done"]);
+});
+
+test("a CLUE class token from rigse signs nothing in", async () => {
+  const built = build();
+  built.fn.queue({ identity: "users/1/counts" });
+  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+  await built.runner.loop;
+  assert.equal(result(built.docs, "users/1/counts").status, "done");
+  assert.ok(built.fn.state.scopes[CLASS].class_tokens[CLUE_ROW], "the answer carried one");
+  assert.deepEqual([...new Set(built.record.stores.map((store) => store.projectId))], [PROJECT]);
 });
 
 // The last of the three places applicability is evaluated, and the only boundary.
@@ -1442,7 +1458,7 @@ test("in S3 mode /run fetches the broker's credentials before its first S3 call"
     makePackageBackend: () => ({ async get() {} }),
     unzip: async () => {},
     netGuard: async () => ({}),
-    steps: steps({ resolved: [], pulled: [], prepared: [], manifests: {} }),
+    steps: steps({ resolved: [], prepared: [], manifests: {} }),
     sleep: async () => {},
     now: (() => { let t = Date.now(); return () => (t += 60_000); })(),
     processEnv: disableDefaultCredentialChain({ AWS_ACCESS_KEY_ID: "AKIA-EXECUTION-ROLE" })

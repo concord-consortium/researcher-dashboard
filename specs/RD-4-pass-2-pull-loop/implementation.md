@@ -419,7 +419,7 @@ idleSince = this.now();
 
 **Tests**: `scope.json` carries `clue_source: "cc-data"`; a run writes the stages `starting`, `prepare_package`, `run_package` and `done`, in that order; the counts' `data` holds no `clue_documents`; a `/work` answer whose class tokens include a CLUE row runs its package with no extra store signed in; `knownProjects()` is exactly `report-service-dev` and `report-service-pro`; `preparePackage` chowns every entry of the class data directory, a `clue-documents` directory included.
 
-**Verified**: not built. `grep -rni clue runner --exclude-dir=node_modules` should then find only `clue_source` (`package-env.js`, its test, and `smoke.mjs`'s scope) and `runner.test.js`'s CLUE token row.
+**Verified**: `grep -rni clue runner --exclude-dir=node_modules` (the lockfile aside) finds only `clue_source` (`package-env.js`, its test, and `smoke.mjs`'s scope, which imports the runner's constant), `runner.test.js`'s CLUE token row, and two `package-env.test.js` fixtures: a `clue_documents` key `counts.json` ignores, and a `clue-documents` directory the package is now handed. `customTokenClaims` and `customTokenPayload` stay in `status.js` for `MemoryStore`, no longer exported. `npm test` passes 203; the emulator suite passes 5 of 5 against REPORT-143's rules on `master`.
 
 ---
 

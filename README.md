@@ -8,7 +8,7 @@ One repository holds both halves because they share the result a package writes,
 
 - `app/`: the React dashboard a researcher lands on from the portal's Research Classes table. Built and
   deployed to S3 behind CloudFront.
-- `runner/`: the container image that runs packages. An HTTP server on 8080 answering the MicroVM lifecycle hooks, a loop that asks report-service for its work and its storage credentials, storage sync (S3 on the broker's credentials in AWS, a directory locally), the CLUE reader, and the tooling packages need. No package is baked into the image; packages are fetched from S3 when the runner takes them. `runner/README.md` covers its configuration and its smoke gate.
+- `runner/`: the container image that runs packages. An HTTP server on 8080 answering the MicroVM lifecycle hooks, a loop that asks report-service for its work and its storage credentials, storage sync (S3 on the broker's credentials in AWS, a directory locally), and the tooling packages need. No package is baked into the image; packages are fetched from S3 when the runner takes them. `runner/README.md` covers its configuration and its smoke gate.
 - `fixtures/`: a copy of report-service's package contract fixture (identity, version and package-key cases, and the limits), which the runner's grammar and duration ceiling are tested against.
 - `cloudformation/`: the runner stack's template, one stack per environment, applied by hand as its README
   describes, with tests of what it grants.

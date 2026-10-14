@@ -191,9 +191,6 @@ export function readManifest(dir) {
   if (!Number.isInteger(declared) || declared < 1) {
     throw new Error("manifest.json's expected_duration_seconds is not a positive integer");
   }
-  if (manifest.clue_prepull !== undefined && typeof manifest.clue_prepull !== "boolean") {
-    throw new Error("manifest.json's clue_prepull is not a boolean");
-  }
   if (manifest.urls !== undefined) {
     if (typeof manifest.urls !== "object" || manifest.urls === null || Array.isArray(manifest.urls)) {
       throw new Error("manifest.json's urls is not an object");

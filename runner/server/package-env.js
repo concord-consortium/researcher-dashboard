@@ -4,12 +4,10 @@ import { log } from "./log.js";
 
 // What a package is handed, and where its credential lives.
 //
-// The package makes its own AP and log pulls with cc-data,
+// The package makes its own pulls with cc-data, CLUE's included,
 // which is only safe because the credential is the requesting researcher's own rather
 // than a shared site admin's: a package that leaks it reaches what its researcher could
-// already download to their laptop, and nothing else. CLUE reads stay in the runner,
-// because those need the class runner token, a Firebase credential the design says must
-// never reach package code.
+// already download to their laptop, and nothing else.
 //
 // The package's HOME sits outside the synced data root, so the credential is never
 // written to S3, the same reason the runner's own is under $HOME rather than /data.
@@ -48,16 +46,19 @@ export function packagePaths({ workRoot, dataRoot, classHash, docId }) {
   };
 }
 
+// Who fetches a package's CLUE data: the package, through cc-data.
+export const CLUE_SOURCE = "cc-data";
+
 // The file a package writes its filters from. Everything but clue_source, dataset and
 // output_dir comes from the scope block rigse sent, which
 // /work returns: the runner holds no portal bearer and cannot build it any other way.
-export function scopeFile({ scope, clueSource, dataset, outputDir }) {
+export function scopeFile({ scope, dataset, outputDir }) {
   return {
     kind: scope.kind,
     id: scope.id,
     classes: scope.classes.map(({ class_hash, class_id }) => ({ class_hash, class_id })),
     assignments: scope.assignments.map(({ offering_id, runnable_id, name, url }) => ({ offering_id, runnable_id, name, url })),
-    clue_source: clueSource,
+    clue_source: CLUE_SOURCE,
     dataset,
     output_dir: outputDir
   };
@@ -97,17 +98,11 @@ export function packageEnvironment({ paths, portalHost, dataset, proxyUrl, repor
   };
 }
 
-// The home is rebuilt per preparation and belongs entirely to the package, so it is
-// handed over whole. The CLUE corpus is the runner's: the package reads it and must not
-// be able to rewrite it.
-export const RUNNER_OWNED = "clue-documents";
-
-function chownTree(dir, uid, skip = null, chown = fs.chownSync) {
+function chownTree(dir, uid, chown = fs.chownSync) {
   chown(dir, uid, uid);
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (skip && entry.name === skip) continue;
     const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) chownTree(full, uid, skip, chown);
+    if (entry.isDirectory()) chownTree(full, uid, chown);
     else chown(full, uid, uid);
   }
 }
@@ -129,7 +124,7 @@ function parentsBetween(root, leaf) {
 // Everything the package needs, prepared and owned by the package uid.
 // `chown` is a seam: the effect it has cannot be observed by a test, which runs as the
 // uid it would be chowning to, so what a test can check is that it was asked for.
-export async function preparePackage({ workRoot, dataRoot, classHash, docId, scope, catalogId, clueSource, portalHost, token, uid, proxyUrl, reportServerUrl, bucket, storagePrefix, login, chown = fs.chownSync }) {
+export async function preparePackage({ workRoot, dataRoot, classHash, docId, scope, catalogId, portalHost, token, uid, proxyUrl, reportServerUrl, bucket, storagePrefix, login, chown = fs.chownSync }) {
   const dataset = datasetName(catalogId);
   const paths = packagePaths({ workRoot, dataRoot, classHash, docId });
 
@@ -143,29 +138,28 @@ export async function preparePackage({ workRoot, dataRoot, classHash, docId, sco
   }
 
   // Root-owned and world-readable: the package reads its scope and cannot rewrite it.
-  const scopeJson = scopeFile({ scope, clueSource, dataset, outputDir: paths.outputDir });
+  const scopeJson = scopeFile({ scope, dataset, outputDir: paths.outputDir });
   fs.writeFileSync(path.join(paths.inputDir, "scope.json"), JSON.stringify(scopeJson, null, 2), { mode: 0o644 });
   fs.chmodSync(paths.inputDir, 0o755);
 
   // The credential is installed by cc-data itself, into the package's own HOME and as
   // the package's own uid. Its store has a version, a portals map and a backend that
   // may be a keyring or a file, and none of that is ours to reproduce.
-  if (typeof uid === "number") chownTree(paths.home, uid, null, chown);
+  if (typeof uid === "number") chownTree(paths.home, uid, chown);
   if (token && login) {
     await login({ token, portal: portalHost, home: paths.home, uid });
   }
 
   // The package runs as `uid`, so it has to own what it is expected to write.
   if (typeof uid === "number") {
-    chownTree(paths.home, uid, null, chown);
+    chownTree(paths.home, uid, chown);
     chown(paths.outputDir, uid, uid);
-    // The whole class directory except the CLUE corpus. Its contents come back from S3
-    // on every cold start, written by the syncer as root.
-    chownTree(paths.dataDir, uid, RUNNER_OWNED, chown);
-    chownTree(paths.ccDataRoot, uid, null, chown);
+    // The whole class directory. Its contents come back from S3 on every cold start,
+    // written by the syncer as root.
+    chownTree(paths.dataDir, uid, chown);
+    chownTree(paths.ccDataRoot, uid, chown);
     // Owning the leaf is not enough: creating a file in it also needs search permission
-    // on every directory above it, and those are made by the syncer and the CLUE reader
-    // as root.
+    // on every directory above it, and those are made by the syncer as root.
     for (const dir of [...parentsBetween(paths.dataRoot, paths.dataDir),
                        ...parentsBetween(paths.dataRoot, paths.ccDataRoot)]) {
       fs.chmodSync(dir, 0o755);
@@ -213,7 +207,7 @@ function readOwnFile(outputDir, name, limit) {
 }
 
 // What the package counted, because it makes the pulls and the runner writes Firestore.
-// Only the counts the scope document holds are read; the CLUE count is the runner's own. Absent or unreadable is not a failure.
+// Only the counts the scope document holds are read. Absent or unreadable is not a failure.
 export function readPackageCounts(outputDir) {
   try {
     const parsed = JSON.parse(readOwnFile(outputDir, "counts.json", DISPLAY_LIMIT_BYTES)?.text ?? "");

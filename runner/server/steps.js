@@ -1,17 +1,14 @@
 import { spawn } from "node:child_process";
-import { readClue } from "./clue-reader.js";
 import { portalHost } from "./config.js";
 import fs from "node:fs";
 import path from "node:path";
-import { clueProjectFor, portalFirebaseApp } from "./firebase-projects.js";
 import { preparePackage, readPackageCounts, readPackageResult } from "./package-env.js";
 import { fetchPackage } from "./package-fetch.js";
 import { killPackageProcesses, runSandboxed } from "./sandbox.js";
-import { customTokenClaims, customTokenPayload } from "./status.js";
 import { log } from "./log.js";
 
 // The things a package run does, kept behind one interface so the lifecycle, the pull
-// loop and the sync contract can be tested without cc-data, CLUE or a sandbox.
+// loop and the sync contract can be tested without cc-data or a sandbox.
 
 // `--token -` reads from stdin. The bare `--token <value>` form would put the
 // report-service token in the process list, where the package user could read it.
@@ -45,12 +42,6 @@ export function ccDataLogin({ token, portal, home, uid, spawnFn = spawn }) {
   });
 }
 
-// Who fetched the CLUE corpus, which a package branches on: the runner's pre-pull.
-export const CLUE_SOURCE = "firebase";
-
-// A CLUE token this close to its expiry is not worth a sign-in that will fail.
-export const CLUE_TOKEN_MARGIN_MS = 2 * 60_000;
-
 // Enough of a package's output to read a failure from, and bounded because it reaches
 // CloudWatch: a package that prints its whole corpus should cost a truncated log line
 // rather than the log group.
@@ -68,34 +59,7 @@ function logPackageOutput(identity, result, level) {
   });
 }
 
-// The CLUE class token for this environment, refused before a sign-in when it cannot
-// work. rigse mints it at the request and the function passes it through unchanged, so
-// work queued behind an hour of other packages finds it expired.
-export function clueToken({ classTokens, firebaseProject, now = Date.now() }) {
-  const project = clueProjectFor(firebaseProject);
-  const row = portalFirebaseApp(project);
-  const token = classTokens?.[row];
-  if (!token) throw new Error(`the package asks for the CLUE pre-pull but rigse sent no class token for ${row}`);
-  const exp = customTokenExpiry(token);
-  if (exp !== null && exp - now < CLUE_TOKEN_MARGIN_MS) {
-    const minutes = Math.round((now - (exp - 3600_000)) / 60_000);
-    throw new ClueTokenExpired(minutes);
-  }
-  return { project, token };
-}
-
-export class ClueTokenExpired extends Error {
-  constructor(minutes) {
-    super(`The CLUE credential for this run was issued when the run was requested, ${minutes} minutes ago, and has expired, since a CLUE credential lasts an hour. Run the package again.`);
-  }
-}
-
-function customTokenExpiry(token) {
-  const exp = customTokenPayload(token)?.exp;
-  return Number.isFinite(exp) ? exp * 1000 : null;
-}
-
-export function makeSteps({ login = ccDataLogin, readClueFn = readClue } = {}) {
+export function makeSteps({ login = ccDataLogin } = {}) {
   return {
     installCredential: async ({ token, portal }) => {
       if (token && portal) await login({ token, portal });
@@ -138,35 +102,6 @@ export function makeSteps({ login = ccDataLogin, readClueFn = readClue } = {}) {
       }
     },
 
-    // The one read the runner makes for a package, and only when it asks: cc-data cannot
-    // read CLUE yet, and the credential that can must never reach package code. The store
-    // is this package's alone and closed after the read.
-    pullData: async ({ classHash, classTokens, manifest, portal, dataRoot, makeStore, firebaseProject, now }) => {
-      if (manifest?.clue_prepull !== true) {
-        log.info("clue.skipped", { class_hash: classHash, reason: "the package does not ask for the CLUE pre-pull" });
-        return {};
-      }
-      const { project, token } = clueToken({ classTokens, firebaseProject, now: now?.() });
-      const store = makeStore({ projectId: project });
-      try {
-        try {
-          await store.signIn(token);
-        } catch (err) {
-          // Identity Toolkit refuses a custom token past its hour; the clock check above
-          // catches most of these, and this says the same when the VM's clock did not.
-          throw new Error(`The CLUE credential for this run could not be used, most likely because it was issued when the run was requested, over an hour ago, and a CLUE credential lasts an hour. Run the package again. (${err.code ?? err.message})`);
-        }
-        const claims = await store.claims();
-        if (claims?.class_hash && claims.class_hash !== classHash) {
-          throw new Error(`the CLUE class token names class ${claims.class_hash}, not ${classHash}`);
-        }
-        const read = await readClueFn({ store, portal, classHash, dataRoot });
-        return { clue_documents: read.clue_documents };
-      } finally {
-        await store.close?.().catch(() => {});
-      }
-    },
-
     // The entrypoint runs as the package uid in the sandbox, with the environment
     // package-env named and nothing inherited from the runner's own process.
     runPackage: async ({ manifest, paths, env, uid, timeoutMs, proxyUrl, exec }) => {
@@ -201,5 +136,3 @@ export function makeSteps({ login = ccDataLogin, readClueFn = readClue } = {}) {
     }
   };
 }
-
-export { customTokenClaims };

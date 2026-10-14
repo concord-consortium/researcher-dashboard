@@ -35,7 +35,6 @@ function prepare(overrides = {}) {
     docId: "users__1__counts",
     scope: SCOPE,
     catalogId: 1234,
-    clueSource: "firebase",
     portalHost: PORTAL_HOST,
     token: "ccd_secret",
     login: async (args) => { logins.push(args); },
@@ -97,7 +96,7 @@ test("scope.json carries the seven fields, and names the package's dataset and o
   assert.equal(scope.id, CLASS);
   assert.deepEqual(scope.classes, [{ class_hash: CLASS, class_id: 111 }]);
   assert.deepEqual(scope.assignments, SCOPE.assignments);
-  assert.equal(scope.clue_source, "firebase");
+  assert.equal(scope.clue_source, "cc-data", "packages read CLUE through cc-data");
   assert.equal(scope.dataset, "pkg-1234");
   assert.equal(scope.output_dir, paths.outputDir);
   assert.equal(fs.statSync(file).mode & 0o777, 0o644, "readable, not writable, by the package");
@@ -180,17 +179,17 @@ test("the home belongs to the package before cc-data is logged in", async () => 
 });
 
 // Everything in the class directory comes back from S3 on a cold start, written by the
-// syncer as root; the CLUE corpus stays the runner's.
-test("the package owns the files it wrote before, but not the CLUE corpus", async () => {
+// syncer as root, and all of it is the package's.
+test("the package owns every file of its class's data directory", async () => {
   const chowned = [];
   const first = await prepare({ uid: process.getuid() });
-  const corpus = path.join(first.paths.dataDir, "clue-documents");
-  fs.mkdirSync(corpus, { recursive: true });
-  fs.writeFileSync(path.join(corpus, "content.jsonl"), "{}");
+  const nested = path.join(first.paths.dataDir, "clue-documents");
+  fs.mkdirSync(nested, { recursive: true });
+  fs.writeFileSync(path.join(nested, "content.jsonl"), "{}");
   fs.writeFileSync(path.join(first.paths.dataDir, "runs.json"), "{}");
   await prepare({ uid: process.getuid(), chown: (target) => chowned.push(target) });
   assert.ok(chowned.includes(path.join(first.paths.dataDir, "runs.json")));
-  assert.ok(!chowned.includes(path.join(corpus, "content.jsonl")), "the CLUE corpus is not handed over");
+  assert.ok(chowned.includes(path.join(nested, "content.jsonl")), "a nested directory's files are the package's too");
 });
 
 // CC_DATA_ROOT is the only variable cc-data reads for its dataset root. Unset, it falls

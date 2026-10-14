@@ -79,7 +79,7 @@ describe("the runner's writes against the Firestore and Auth emulators", { skip:
     const docs = new ClassDocuments({ store: klass, portal: PORTAL, classHash: CLASS, platformUserId: USER, platformId: PLATFORM_ID });
     const pkg = { identity: "users/136/class-counts", version: "1.0.0", checksum: `sha256:${"ab".repeat(32)}` };
     await docs.claim("users__136__class-counts", { pkg, imageVersion: "24.0", microvmId: "mvm-emulator", expectedDurationSeconds: 120, heartbeatSeconds: HEARTBEAT_SECONDS });
-    await docs.stage("users__136__class-counts", "pull");
+    await docs.stage("users__136__class-counts", "prepare_package");
     const claimed = await klass.get(resultPath(PORTAL, CLASS, USER, "users__136__class-counts"));
     await docs.beat("users__136__class-counts");
     const beat = await klass.get(resultPath(PORTAL, CLASS, USER, "users__136__class-counts"));
@@ -105,7 +105,7 @@ describe("the runner's writes against the Firestore and Auth emulators", { skip:
 
   test("the counts land on the researcher's scope document", async () => {
     const docs = new ClassDocuments({ store: klass, portal: PORTAL, classHash: CLASS, platformUserId: USER, platformId: PLATFORM_ID });
-    await docs.counts({ answers: 201, logs: 490, clueDocuments: 22, logFreshnessAt: "2026-08-26T00:00:00Z" });
+    await docs.counts({ answers: 201, logs: 490, logFreshnessAt: "2026-08-26T00:00:00Z" });
     const doc = await klass.get(scopePath(PORTAL, CLASS, USER));
     assert.equal(doc.data.answers, 201);
     assert.ok(doc.data.last_pull_at instanceof Timestamp);

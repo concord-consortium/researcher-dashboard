@@ -190,10 +190,6 @@ test("a manifest's urls must be all, any and none lists", () => {
   assert.doesNotThrow(() => readManifest(writeManifest("u3", { ...MANIFEST, urls: { all: [], any: ["*x*"], none: [] } })));
 });
 
-test("clue_prepull must be a boolean when present", () => {
-  assert.throws(() => readManifest(writeManifest("c", { ...MANIFEST, clue_prepull: "yes" })), /clue_prepull/);
-});
-
 test("an entrypoint escaping the package directory is refused", () => {
   assert.throws(() => readManifest(writeManifest("e", { ...MANIFEST, entrypoint: "../../../usr/bin/env" })), /escapes the package directory/);
 });

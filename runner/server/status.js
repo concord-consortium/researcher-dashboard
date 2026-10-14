@@ -171,11 +171,10 @@ export class ClassDocuments {
 
   // This researcher's counts for this class. Nothing per researcher goes on the class's
   // own document, which holds the authored profile and nothing else.
-  async counts({ answers, logs, clueDocuments, logFreshnessAt }) {
+  async counts({ answers, logs, logFreshnessAt }) {
     const data = { last_pull_at: this.store.serverTimestamp() };
     if (answers !== undefined) data.answers = answers;
     if (logs !== undefined) data.logs = logs;
-    if (clueDocuments !== undefined) data.clue_documents = clueDocuments;
     const freshness = logFreshnessAt ? new Date(logFreshnessAt) : null;
     if (freshness && !Number.isNaN(freshness.getTime())) data.log_freshness_at = this.store.timestamp(freshness);
     // `data` is replaced whole, so a count this run did not report is absent rather than
@@ -250,7 +249,7 @@ export class LogStore {
 }
 
 // A Firebase custom token's payload, read without verifying it.
-export function customTokenPayload(token) {
+function customTokenPayload(token) {
   try {
     const [, payload] = String(token).split(".");
     if (!payload) return null;
@@ -262,7 +261,7 @@ export function customTokenPayload(token) {
 
 // The claims it carries. Only the in-memory store uses them, standing in for what
 // Firebase would verify at sign-in.
-export function customTokenClaims(token) {
+function customTokenClaims(token) {
   return customTokenPayload(token)?.claims ?? null;
 }
 

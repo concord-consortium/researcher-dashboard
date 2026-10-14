@@ -6,7 +6,7 @@ import path from "node:path";
 import { EventEmitter } from "node:events";
 import test from "node:test";
 import { portalHost } from "../server/config.js";
-import { CLUE_SOURCE, ClueTokenExpired, ccDataLogin, clueToken, makeSteps } from "../server/steps.js";
+import { ccDataLogin, makeSteps } from "../server/steps.js";
 
 // Stands in for the cc-data process: records how it was invoked and what was
 // written to its stdin, then closes with the given exit code.
@@ -31,10 +31,6 @@ function fakeSpawn({ code = 0, stderr = "" } = {}) {
   return { spawnFn, calls };
 }
 
-const b64 = (o) => Buffer.from(JSON.stringify(o)).toString("base64url");
-const token = (claims, expSeconds) => `${b64({ alg: "none" })}.${b64({ uid: "u", exp: expSeconds, claims })}.`;
-const nowS = () => Math.floor(Date.now() / 1000);
-
 test("portalHost restores the host from the Firestore path segment", () => {
   assert.equal(portalHost("learn_portal_staging_concord_org"), "learn.portal.staging.concord.org");
   assert.equal(portalHost("learn_concord_org"), "learn.concord.org");
@@ -58,10 +54,6 @@ test("installCredential installs the report-service token and nothing else", asy
   const steps = makeSteps({ login: async (args) => seen.push(args) });
   await steps.installCredential({ token: "report-token", portal: "learn_concord_org" });
   assert.deepEqual(seen, [{ token: "report-token", portal: "learn_concord_org" }]);
-});
-
-test("the CLUE source is the runner's pre-pull", () => {
-  assert.equal(CLUE_SOURCE, "firebase");
 });
 
 // ---- runPackage ----------------------------------------------------------------
@@ -197,87 +189,6 @@ test("a package that fails has its output logged before the failure is raised", 
     assert.equal(output.level, "error");
     assert.equal(output.stderr, "cc-data: NOT_AUTHENTICATED");
   });
-});
-
-// ---- the CLUE pre-pull ---------------------------------------------------------
-
-const CLASS = "abc";
-const rsClaims = { platform_user_id: 439, class_hash: CLASS };
-
-test("pullData reads CLUE with the class token for this environment's CLUE project", async () => {
-  const calls = [];
-  const signedIn = [];
-  let closed = false;
-  const steps = makeSteps({ readClueFn: async (args) => { calls.push(args); return { clue_documents: 22, clue_history_entries: 27135 }; } });
-  const counts = await steps.pullData({
-    classHash: CLASS,
-    classTokens: { "collaborative-learning-staging": token(rsClaims, nowS() + 3000), "report-service-dev": "rs-token" },
-    manifest: { clue_prepull: true },
-    portal: "learn_portal_staging_concord_org",
-    dataRoot: "/data",
-    firebaseProject: "report-service-dev",
-    makeStore: ({ projectId }) => ({ projectId, signIn: async (t) => signedIn.push([projectId, t]), claims: async () => rsClaims, close: async () => { closed = true; } })
-  });
-  assert.equal(signedIn[0][0], "collaborative-learning-staging");
-  assert.equal(calls.length, 1);
-  assert.deepEqual(counts, { clue_documents: 22 });
-  assert.ok(closed, "the CLUE store is this package's alone and closed after the read");
-});
-
-// Production's CLUE row is not its project id; the token is looked up by the row.
-test("on production the CLUE token is looked up by its portal row", () => {
-  const t = token(rsClaims, nowS() + 3000);
-  assert.deepEqual(clueToken({ classTokens: { "collaborative-learning": t }, firebaseProject: "report-service-pro" }), { project: "collaborative-learning-ec215", token: t });
-  assert.throws(() => clueToken({ classTokens: { "collaborative-learning-ec215": t }, firebaseProject: "report-service-pro" }), /no class token for collaborative-learning$/);
-});
-
-// rigse minted it at the request; work queued behind an hour of other packages finds it
-// expired.
-test("an expired CLUE token fails the pre-pull with a reason saying to run again", async () => {
-  const expired = token(rsClaims, nowS() - 600);
-  assert.throws(() => clueToken({ classTokens: { "collaborative-learning-staging": expired }, firebaseProject: "report-service-dev" }), (err) => err instanceof ClueTokenExpired && /70 minutes ago, and has expired.*Run the package again/.test(err.message));
-  const nearlyGone = token(rsClaims, nowS() + 60);
-  assert.throws(() => clueToken({ classTokens: { "collaborative-learning-staging": nearlyGone }, firebaseProject: "report-service-dev" }), ClueTokenExpired);
-});
-
-test("a refused CLUE sign-in is reported the same way", async () => {
-  const steps = makeSteps({ readClueFn: async () => assert.fail("must not read") });
-  await assert.rejects(
-    () => steps.pullData({
-      classHash: CLASS, classTokens: { "collaborative-learning-staging": token(rsClaims, nowS() + 3000) }, manifest: { clue_prepull: true },
-      portal: "p", dataRoot: "/data", firebaseProject: "report-service-dev",
-      makeStore: () => ({ signIn: async () => { throw Object.assign(new Error("x"), { code: "auth/invalid-custom-token" }); }, close: async () => {} })
-    }),
-    /CLUE credential for this run could not be used.*Run the package again.*auth\/invalid-custom-token/
-  );
-});
-
-test("pullData skips the CLUE read when the package does not ask for it", async () => {
-  let called = false;
-  const steps = makeSteps({ readClueFn: async () => { called = true; return {}; } });
-  const counts = await steps.pullData({ classHash: CLASS, classTokens: {}, manifest: { clue_prepull: false }, portal: "p", dataRoot: "/data", firebaseProject: "report-service-dev", makeStore: () => assert.fail("no store") });
-  assert.equal(called, false);
-  assert.deepEqual(counts, {});
-});
-
-test("pullData fails loudly when CLUE is asked for but its class token is missing", async () => {
-  const steps = makeSteps({ readClueFn: async () => assert.fail("must not read without a token") });
-  await assert.rejects(
-    () => steps.pullData({ classHash: CLASS, classTokens: { "report-service-dev": "rs" }, manifest: { clue_prepull: true }, portal: "p", dataRoot: "/data", firebaseProject: "report-service-dev", makeStore: () => assert.fail("no store") }),
-    /rigse sent no class token for collaborative-learning-staging/
-  );
-});
-
-test("a CLUE token for another class is refused before the read", async () => {
-  const steps = makeSteps({ readClueFn: async () => assert.fail("must not read") });
-  await assert.rejects(
-    () => steps.pullData({
-      classHash: CLASS, classTokens: { "collaborative-learning-staging": token(rsClaims, nowS() + 3000) }, manifest: { clue_prepull: true },
-      portal: "p", dataRoot: "/data", firebaseProject: "report-service-dev",
-      makeStore: () => ({ signIn: async () => {}, claims: async () => ({ class_hash: "other" }), close: async () => {} })
-    }),
-    /names class other/
-  );
 });
 
 test("STATUS_BACKEND selects the store and rejects anything else", async () => {
