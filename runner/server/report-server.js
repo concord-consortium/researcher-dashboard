@@ -24,12 +24,12 @@ export class ReportServerError extends Error {
   }
 }
 
+// No derivation is asked for, so an answer slower than this is a failed attempt, not a refusal.
+export const APPLIES_TIMEOUT_MS = 30_000;
+
 // Asks report-server, which holds the only glob matcher, whether a manifest's patterns
 // match a class's URLs. The scope URLs are the profile's, matched as given, so nothing
 // is derived and the answer comes back without waiting on report-service's deriver.
-// No derivation is asked for, so an answer that takes longer counts as a failed attempt.
-export const APPLIES_TIMEOUT_MS = 30_000;
-
 export async function askApplies({ baseUrl, token, urls, scopeUrls, fetchImpl = fetch, timeoutMs = APPLIES_TIMEOUT_MS }) {
   let response;
   try {

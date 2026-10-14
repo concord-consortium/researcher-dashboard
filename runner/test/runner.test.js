@@ -730,6 +730,26 @@ test("a package declaring patterns on a class with no profile is refused", async
   assert.match(result(built.docs, "users/1/ap").error, /profile has not been derived/);
 });
 
+test("a package refused on a drained VM is taken off the status document's queue", async () => {
+  const built = build();
+  built.record.manifests["users/1/x"] = manifestFor("users/1/x", { expected_duration_seconds: 36_000 });
+  const origSleep = built.runner.sleep;
+  let queued = false;
+  built.runner.sleep = async (ms) => {
+    if (!queued && runnerDoc(built.docs)?.state === "ready") {
+      queued = true;
+      built.fn.queue({ identity: "users/1/x" });
+      built.docs.set(runnerPath(PORTAL, USER), { ...runnerDoc(built.docs), queue: [{ class_hash: CLASS, package_key: packageDocId("users/1/x") }] });
+    }
+    await origSleep(ms);
+  };
+  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+  await built.runner.loop;
+  assert.ok(queued, "the package was queued after the VM drained");
+  assert.equal(result(built.docs, "users/1/x").status, "failed");
+  assert.deepEqual(runnerDoc(built.docs).queue, []);
+});
+
 test("a manifest declaring ten hours is refused by the runner's ceiling", async () => {
   const built = build();
   built.fn.queue({ identity: "users/1/long" });

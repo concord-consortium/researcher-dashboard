@@ -538,6 +538,9 @@ export class Runner {
     try {
       await bounded(docs.failed(docIdOf(entry), { pkg, error }));
       this.#resolved(entry, resolved);
+      // The function listed it in the status document's queue, so a drained VM writes
+      // ready again to take it off.
+      this.#lastWritten = null;
     } catch (err) {
       this.#noteClaimFailure(entry, err, epoch);
     }
