@@ -58,9 +58,8 @@ RUN curl -fsSL -o /tmp/duckdb.zip \
 
 COPY --from=ccdata /out/cc-data /usr/local/bin/cc-data
 
-# The package user runs fetched packages: no tokens, no credential store, a
-# read-only dataset and a writable output directory are handed to it per run. It is
-# the image's first user, so its uid is 1000, which PACKAGE_UID defaults to.
+# The package user runs fetched packages. It is the image's first user, so its uid is
+# 1000, which PACKAGE_UID defaults to.
 RUN useradd --create-home --shell /usr/sbin/nologin package
 
 WORKDIR /srv

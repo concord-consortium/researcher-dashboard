@@ -1,7 +1,7 @@
 import { log, setContext, timed } from "./log.js";
 import { defaultChainState, parseRunHookPayload, portalHost, researcherPrefix } from "./config.js";
 import { verifySandbox } from "./sandbox.js";
-import { STATES, VmState } from "./state.js";
+import { STATES, VmState, canTransition } from "./state.js";
 import { ClassDocuments, RunnerStatus, bounded } from "./status.js";
 import { askApplies, revokeOwnToken } from "./report-server.js";
 import { CHECKSUM, declaresPatterns, IDENTITY, PACKAGE_DOC_ID, VERSION, packageDocId } from "./package-fetch.js";
@@ -272,12 +272,14 @@ export class Runner {
 
       let request;
       try {
-        request = await this.#adopt(answer);
+        request = await this.#adopt(answer, epoch);
       } catch (err) {
         log.error("work.token_refused", { error: err.message });
         await this.sleep(this.env.idlePollMs);
         continue;
       }
+
+      if (!request) return;
 
       // After a resume: fresh credentials before the syncer ticks again, and nothing
       // claimed until a package the suspend interrupted has finished.
@@ -300,7 +302,8 @@ export class Runner {
       if (!this.#current(epoch)) return;
       if (next) {
         idleSince = null;
-        await this.#runPackage(request, next);
+        // A claim that could not be written is tried again after one idle poll, not at once.
+        if (!(await this.#runPackage(request, next))) await this.sleep(this.env.idlePollMs);
         continue;
       }
 
@@ -352,7 +355,7 @@ export class Runner {
   // Adopts a /work answer: a new session store and a new store per class, each signed
   // in with this answer's tokens and checked against this VM's researcher before its
   // first write. The last request's stores are closed, except one a package still uses.
-  async #adopt(answer) {
+  async #adopt(answer, epoch) {
     if (answer.firebase_project !== this.payload.firebase_project) {
       throw new Error(`/work names project ${answer.firebase_project}, not ${this.payload.firebase_project}`);
     }
@@ -372,6 +375,11 @@ export class Runner {
       }
     }
 
+    // A resume during the sign-ins has started a loop whose stores these must not replace.
+    if (!this.#current(epoch)) {
+      await Promise.all([session, ...classStores.values()].map((s) => s.close?.().catch(() => {})));
+      return null;
+    }
     const retiring = [this.#session, ...this.#classStores.values()].filter((s) => s && s !== this.#run?.store);
     this.#session = session;
     this.status.store = session;
@@ -550,10 +558,12 @@ export class Runner {
         await docs.claim(docId, { pkg, imageVersion: this.env.imageVersion, microvmId: this.microvmId, expectedDurationSeconds: declared, heartbeatSeconds: HEARTBEAT_SECONDS });
       } catch (err) {
         this.#noteClaimFailure(entry, err);
-        return;
+        return false;
       }
       this.#resolved(entry);
-      if (this.#vm.state !== STATES.RUNNING) this.#vm.to(STATES.RUNNING);
+      // A claim that lands while a hook is suspending or ending the VM runs on regardless;
+      // the hook's own state stands until the resume.
+      if (this.#vm.state !== STATES.RUNNING && canTransition(this.#vm.state, STATES.RUNNING)) this.#vm.to(STATES.RUNNING);
       // What is still queued: not the claimed entry, nor one this plan failed.
       const queue = request.packages
         .filter((p) => this.#claimKey(p) !== this.#claimKey(entry) && !resolved.has(this.#claimKey(p)))
@@ -591,6 +601,7 @@ export class Runner {
       } finally {
         clearTimeout(timer);
       }
+      return true;
     } finally {
       const run = this.#run;
       this.#run = null;

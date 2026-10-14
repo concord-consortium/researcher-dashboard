@@ -102,7 +102,7 @@ test("scope.json carries the seven fields, and names the package's dataset and o
   assert.equal(fs.statSync(file).mode & 0o777, 0o644, "readable, not writable, by the package");
 });
 
-// The singular class variables are deleted; scope.json replaces them.
+// The package learns its classes from scope.json, not from per-class variables.
 test("the environment names the paths and carries no class variable, AWS or Firebase credential", async () => {
   const { env } = await prepare();
   assert.equal(env.CC_DATA_PORTAL, PORTAL_HOST);
@@ -180,6 +180,23 @@ test("the home belongs to the package before cc-data is logged in", async () => 
 
 // Everything in the class directory comes back from S3 on a cold start, written by the
 // syncer as root, and all of it is the package's.
+// Root chowns a tree the package wrote to, so a link the package left there must not hand
+// it the link's target.
+test("a link the package left in its data directory is not followed", async () => {
+  const chowned = [];
+  const first = await prepare({ uid: process.getuid() });
+  const outside = path.join(root, "root-only");
+  fs.writeFileSync(outside, "secret");
+  fs.symlinkSync(outside, path.join(first.paths.dataDir, "planted"));
+  fs.symlinkSync(root, path.join(first.paths.ccDataRoot, "planted-dir"));
+  await prepare({ uid: process.getuid(), chown: (target) => chowned.push(target) });
+  for (const target of chowned) {
+    assert.ok(!target.includes("planted"), `chowned ${target}`);
+    assert.notEqual(target, outside);
+  }
+  assert.ok(chowned.includes(first.paths.dataDir), "the directory itself is still handed over");
+});
+
 test("the package owns every file of its class's data directory", async () => {
   const chowned = [];
   const first = await prepare({ uid: process.getuid() });

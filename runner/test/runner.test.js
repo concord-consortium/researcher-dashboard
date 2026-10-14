@@ -241,8 +241,7 @@ test("/run refuses a payload carrying no forwarded credential", async () => {
   assert.equal(runner.state, null);
 });
 
-// The check the deleted refresh endpoint made, moved to /run and every adopted token: the S3 prefix is
-// built from platform_user_id, so a token for someone else must never be used.
+// The S3 prefix is built from platform_user_id, so a token naming someone else is never used.
 test("/run refuses a session token that names another researcher", async () => {
   const { runner } = build();
   const other = JSON.stringify({ ...JSON.parse(PAYLOAD), session_token: sessionToken({ platform_user_id: 999 }) });
@@ -710,28 +709,30 @@ test("a class token that names another class leaves that class's packages unclai
 
 test("a claim that cannot be written is tried three times, then left, without a tight loop", async () => {
   const docs = new Map();
-  const stores = [];
+  const events = [];
   const built = build({
     makeStore: () => {
       const store = new MemoryStore({ docs });
       const merge = store.merge.bind(store);
       store.merge = async (p, fields) => {
+        if (fields.status === "running") events.push("claim");
         if (fields.status === "running" || fields.status === "failed") throw new Error("PERMISSION_DENIED");
         return merge(p, fields);
       };
-      stores.push(store);
       return store;
     }
   });
   built.fn.queue({ identity: "users/1/counts" });
   let polls = 0;
   const origSleep = built.runner.sleep;
-  built.runner.sleep = async (ms) => { polls += 1; if (polls > 20) built.runner.terminate().catch(() => {}); await origSleep(ms); };
+  built.runner.sleep = async (ms) => { events.push(ms); polls += 1; if (polls > 20) built.runner.terminate().catch(() => {}); await origSleep(ms); };
   await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
   await built.runner.loop;
-  const claims = stores.flatMap((s) => s.writes).filter((w) => w.doc.status === "running");
-  assert.equal(claims.length, 0);
-  assert.ok(polls > 3, "it waits between attempts");
+  const attempts = events.flatMap((e, i) => (e === "claim" ? [i] : []));
+  assert.equal(attempts.length, 3);
+  for (let i = 1; i < attempts.length; i++) {
+    assert.ok(events.slice(attempts[i - 1], attempts[i]).includes(built.env.idlePollMs), "an idle poll between attempts");
+  }
   // Left queued, the entry keeps the VM awake: /idle declines to suspend it, and the
   // runner goes back to /work.
   const routes = built.fn.routes();
@@ -1012,7 +1013,7 @@ test("a loop stood down by a resume during its pre-idle flush does not ask to be
   try {
     releaseFlush();
     await firstLoop;
-    assert.equal(built.fn.routes().filter((r) => r === "idle").length, 0, "REPORT-143's /idle would suspend the VM mid-run");
+    assert.equal(built.fn.routes().filter((r) => r === "idle").length, 0, "/idle suspends whenever nothing is queued, so this call would suspend the VM mid-run");
   } finally {
     releaseRun({ display: "x", summary: "y" });
   }
@@ -1294,6 +1295,58 @@ test("/suspend mid-run on an unverified flush names the outstanding run on its f
   assert.deepEqual(runnerDoc(built.docs).current_package, { class_hash: CLASS, package_key: SLOW_KEY });
   built.runner.syncer.flushAndVerify = flush;
   finish();
+  await built.runner.loop;
+});
+
+test("a claim that lands while /suspend runs still runs its package", async () => {
+  const g = gate((p, fields) => p.includes("/results/") && fields.status === "running");
+  const built = build({ wrapStore: g.wrap });
+  built.fn.queue({ identity: SLOW });
+  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+  await until(() => g.held.length, "the claim's write");
+  let flushed;
+  const flush = built.runner.syncer.flushAndVerify;
+  built.runner.syncer.flushAndVerify = () => new Promise((r) => { flushed = r; });
+  const suspending = built.runner.suspend();
+  await until(() => flushed, "the suspend's flush");
+  g.held[0].release();
+  await until(() => built.record.prepared.length, "the package's preparation");
+  built.runner.syncer.flushAndVerify = flush;
+  flushed({ ok: true });
+  await suspending;
+  built.runner.resume();
+  await built.runner.loop;
+  assert.equal(result(built.docs, SLOW).status, "done");
+});
+
+// A resume while the old loop is still signing in has started a new loop, whose stores
+// the old loop's late adoption must leave in place.
+test("an adoption a resume has overtaken closes its own stores, not the new loop's", async () => {
+  let signIns = 0;
+  let releaseOld;
+  const built = build({
+    wrapStore: (store) => {
+      const signIn = store.signIn.bind(store);
+      store.signIn = async (token) => {
+        signIns += 1;
+        if (signIns === 3) await new Promise((r) => { releaseOld = r; });
+        return signIn(token);
+      };
+      return store;
+    }
+  });
+  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+  await until(() => releaseOld, "the old loop's sign-in");
+  const oldLoop = built.runner.loop;
+  built.runner.resume();
+  await until(() => signIns >= 4, "the new loop's sign-in");
+  await settle(10);
+  const lateSession = built.record.stores[2];
+  releaseOld();
+  await oldLoop;
+  assert.equal(lateSession.closed, true, "the late adoption's own store is closed");
+  assert.notEqual(built.runner.status.store, lateSession, "the new loop's session stays the runner's");
+  assert.equal(built.runner.status.store.closed, false);
   await built.runner.loop;
 });
 

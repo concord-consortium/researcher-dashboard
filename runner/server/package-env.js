@@ -98,9 +98,12 @@ export function packageEnvironment({ paths, portalHost, dataset, proxyUrl, repor
   };
 }
 
-function chownTree(dir, uid, chown = fs.chownSync) {
+// Root walks a tree the package has written to, so it follows no link: a link left there
+// is skipped, and lchown never changes a link's target.
+function chownTree(dir, uid, chown = fs.lchownSync) {
   chown(dir, uid, uid);
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (entry.isSymbolicLink()) continue;
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) chownTree(full, uid, chown);
     else chown(full, uid, uid);
@@ -124,7 +127,7 @@ function parentsBetween(root, leaf) {
 // Everything the package needs, prepared and owned by the package uid.
 // `chown` is a seam: the effect it has cannot be observed by a test, which runs as the
 // uid it would be chowning to, so what a test can check is that it was asked for.
-export async function preparePackage({ workRoot, dataRoot, classHash, docId, scope, catalogId, portalHost, token, uid, proxyUrl, reportServerUrl, bucket, storagePrefix, login, chown = fs.chownSync }) {
+export async function preparePackage({ workRoot, dataRoot, classHash, docId, scope, catalogId, portalHost, token, uid, proxyUrl, reportServerUrl, bucket, storagePrefix, login, chown = fs.lchownSync }) {
   const dataset = datasetName(catalogId);
   const paths = packagePaths({ workRoot, dataRoot, classHash, docId });
 
