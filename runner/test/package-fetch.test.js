@@ -190,6 +190,24 @@ test("an unpacked package is writable by no one but root", { skip: !hasZip() }, 
   assert.equal(fs.statSync(path.join(unpacked, "run.py")).mode & 0o777, 0o755, "an executable stays executable");
 });
 
+test("a symbolic link deeper in the archive is refused too", { skip: !hasZip() }, async () => {
+  const dir = path.join(root, "n");
+  fs.mkdirSync(path.join(dir, "lib"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify(MANIFEST));
+  fs.writeFileSync(path.join(dir, "run.py"), "");
+  fs.symlinkSync("/etc/passwd", path.join(dir, "lib", "link"));
+  execFileSync("zip", ["-q", "-y", "-r", path.join(root, "nested.zip"), "manifest.json", "run.py", "lib"], { cwd: dir });
+  const bytes = fs.readFileSync(path.join(root, "nested.zip"));
+  const checksum = await checksumOf(bytes);
+  const workRoot = path.join(root, "work");
+  const unzip = async (archive, dest) => { execFileSync("unzip", ["-q", "-o", archive, "-d", dest]); };
+  await assert.rejects(
+    () => fetchPackage({ backend: backendWriting(bytes), pkg: { identity: IDENTITY, version: "1.0.0", checksum }, workRoot, unzip }),
+    /holds a symbolic link, lib\/link/
+  );
+  assert.ok(!fs.existsSync(path.join(workRoot, "packages", "users__136__class-counts", "1.0.0")));
+});
+
 function writeManifest(name, manifest) {
   const dir = path.join(root, name);
   fs.mkdirSync(dir, { recursive: true });

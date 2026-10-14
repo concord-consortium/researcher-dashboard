@@ -327,6 +327,14 @@ test("a queued package is claimed, run and finished, and the counts land on the 
   assert.equal(docs.has(classPath(PORTAL, CLASS)), false, "nothing per researcher on the class's own document");
 });
 
+test("a count the package did not report is absent, not zero", async () => {
+  const built = build({ stepOverrides: { readPackageCounts: async () => ({ logs: 4 }) } });
+  built.fn.queue({ identity: "users/1/logs-only" });
+  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+  await built.runner.loop;
+  assert.deepEqual(built.docs.get(scopePath(PORTAL, CLASS, USER)).data, { logs: 4, last_pull_at: SERVER_TIME });
+});
+
 test("an unparseable log_freshness_at is left out, and the counts still land", async () => {
   const built = build({ stepOverrides: { readPackageCounts: async () => ({ answers: 3, log_freshness_at: "not a date" }) } });
   built.fn.queue({ identity: "users/1/wildfire-responses" });
@@ -425,6 +433,7 @@ test("a package whose patterns do not match the class is refused, never claimed"
   const writes = writesTo(built.record, resultPath(PORTAL, CLASS, USER, "users__1__ap-only"));
   assert.ok(!writes.some((w) => w.status === "running"), "refused before any claim");
   const doc = result(built.docs, "users/1/ap-only");
+  assert.equal(doc.finished_at, SERVER_TIME, "a refusal is written with its finish time");
   assert.equal(doc.status, "failed");
   assert.equal(doc.error, `the package does not apply to this class: ${reason}`);
   assert.equal(built.record.prepared.length, 0);
@@ -864,6 +873,7 @@ test("a failed package fails its document, is redacted, and the VM goes back to 
   const doc = result(built.docs, "users/1/broken");
   assert.equal(doc.status, "failed");
   assert.match(doc.error, /package exited 1: Bearer \[redacted\]/);
+  assert.equal(doc.finished_at, SERVER_TIME, "a failed run is written with its finish time");
   assert.equal(built.runner.state, "ready");
 });
 
@@ -1027,7 +1037,8 @@ for (const [name, change] of [
 test("a /work answer whose session token names another researcher is not adopted", async () => {
   const built = build();
   built.fn.queue({ identity: "users/1/counts" });
-  built.fn.state.sessionToken = () => sessionToken({ platform_user_id: 999 });
+  const refused = sessionToken({ platform_user_id: 999 });
+  built.fn.state.sessionToken = () => refused;
   const run = built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
   await run;
   // Nothing it names runs; the loop keeps asking at the idle interval.
@@ -1037,6 +1048,9 @@ test("a /work answer whose session token names another researcher is not adopted
   await built.runner.loop;
   assert.equal(result(built.docs, "users/1/counts").status, "queued");
   assert.equal(built.record.prepared.length, 0);
+  const refusedStores = built.record.stores.filter((st) => st.signedInWith.includes(refused));
+  assert.ok(refusedStores.length >= 1);
+  assert.ok(refusedStores.every((st) => st.closed), "a refused token's store is closed");
 });
 
 test("a class token that names another class leaves that class's packages unclaimed", async () => {

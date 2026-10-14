@@ -79,7 +79,12 @@ test("a client it builds resolves the broker's credentials, whatever the environ
 test("with the default chain switched off, a client built without credentials cannot resolve any", async () => {
   const env = { ...process.env, AWS_ACCESS_KEY_ID: "AKIA", AWS_SECRET_ACCESS_KEY: "x", AWS_PROFILE: "default" };
   disableDefaultCredentialChain(env);
-  for (const name of DEFAULT_CHAIN_VARIABLES) assert.equal(env[name], undefined, name);
+  // R16's list, written out so the module's own list is checked against it.
+  const r16 = ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_PROFILE", "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI", "AWS_CONTAINER_CREDENTIALS_FULL_URI", "AWS_WEB_IDENTITY_TOKEN_FILE", "AWS_ROLE_ARN"];
+  assert.deepEqual([...DEFAULT_CHAIN_VARIABLES].sort(), [...r16].sort());
+  const sentinels = Object.fromEntries(r16.map((name) => [name, "sentinel"]));
+  const all = disableDefaultCredentialChain({ ...sentinels });
+  for (const name of r16) assert.equal(all[name], undefined, name);
   assert.equal(env.AWS_EC2_METADATA_DISABLED, "true");
 
   const saved = { ...process.env };

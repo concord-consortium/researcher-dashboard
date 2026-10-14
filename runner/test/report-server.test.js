@@ -19,8 +19,8 @@ test("asks the applies route with the bearer, the manifest's patterns and the sc
 
 test("a 400 or 422 is a refusal carrying report-server's message", async () => {
   for (const status of [400, 422]) {
-    await assert.rejects(ask(answer(status, { error: "BAD_REQUEST", message: "scope_urls[0] is longer than 2048 bytes" })),
-      (err) => err instanceof ReportServerError && err.refusal && err.status === status && /2048 bytes/.test(err.message));
+    await assert.rejects(ask(answer(status, { error: "BAD_REQUEST", message: "scope_urls[0] is longer than 2048 characters" })),
+      (err) => err instanceof ReportServerError && err.refusal && err.status === status && /2048 characters/.test(err.message));
   }
 });
 
