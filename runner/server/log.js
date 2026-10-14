@@ -51,10 +51,11 @@ export async function timed(event, fields, fn) {
 }
 
 // A result document and the runner document's recorded failures are read in the
-// researcher's browser, and the strings that reach them are whatever a step happened to throw: cc-data's stderr, a fetch error
-// carrying a presigned S3 URL, a stack trace. None of that is the researcher's to see,
-// and some of it is credential-shaped. So the document gets a redacted message and the
-// log keeps the original, which is where an engineer is looking anyway.
+// researcher's browser, and the strings that reach them are whatever a step happened to
+// throw: cc-data's stderr, a fetch error carrying a presigned S3 URL, a stack trace. None
+// of that is the researcher's to see, and some of it is credential-shaped. So the document
+// gets a redacted message and the log keeps the original, which is where an engineer is
+// looking anyway.
 const SECRETS = [
   // Presigned URLs and anything else carrying credentials in a query string.
   [/([?&](?:X-Amz-Signature|X-Amz-Credential|X-Amz-Security-Token|token|access_token|key)=)[^&\s]+/gi, "$1[redacted]"],
