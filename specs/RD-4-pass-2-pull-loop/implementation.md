@@ -7,12 +7,17 @@
 
 ## Implementation Plan
 
-Four steps, one commit each:
+Seven steps, one commit each:
 
 1. Section 3's renames (R47), identifiers only.
 2. Every S3 call on the broker's credentials, and the default chain switched off (R14 to R19), with the dispatch model still in place.
-3. The pull loop, the package contract and the documents (R1 to R13, R20 to R46a with R28a, R49, R50, R56, R57, R57a), which replace the dispatch.
+3. The pull loop, the package contract and the documents (R1 to R13, R20 to R46a with R28a, R49, R50, R56, and the CLUE pre-pull step 6 deletes), which replace the dispatch.
 4. The smoke gate, the cc-data pin, the READMEs, the Makefile, the test workflow, and `publish-package.sh` deleted (R51 to R55, R54b, R60, R48's README half).
+5. The runner's side of REPORT-143's lease: the heartbeat, the settled final write, `/terminate`'s reason and guarded write, and `/idle`'s declined answer (R8, R11, R23, R27, R43, R44 to R44b).
+6. The CLUE pre-pull deleted (R37, R43's stages, R46, R56, R56a).
+7. The release's version and the smoke package's long-run variant (R52, R58).
+
+Steps 1 to 4 are built (`0573728`, `c197a2f`, `1dab9c3`, `8aba088`, then `e6319cd` and `6006fe9`); their sections below describe them as built, including the CLUE code step 6 deletes. Steps 5 to 7 were added on 2026-10-14 from REPORT-143's merged contract and Doug's decision to remove the pre-pull, and are not built. `npm test` passes 198 tests on `6006fe9` (Node 24.14); the step 1 to 4 counts below are the throwaway build's.
 
 **Why step 3 is one commit.** The dispatch it replaces (`POST /run-package`) carries a name, no identity, no catalog id and no scope block, so the package contract of R28 to R41a cannot be built against it without inventing an intermediate dispatch body that step 3 would then delete, and the pull loop cannot be built without the contract, since `/work` hands out identities. Its production code is about 1,200 lines and its tests about the same, the same order as the 2026-09-26 plan: the re-spec swaps the local matcher (about 60 lines and its 40-line test) for a report-server client of about the same size; `runner.test.js` is rewritten rather than edited, because every test in it drove the dispatch. The parts that do stand alone (the contract fixture and script, `askApplies`, the production Firebase rows, the new settings and the grammar exports) were built as their own step on step 2 and passed, 162 tests, but came to 471 lines that nothing calls until step 3, so they stay in it (second review).
 
@@ -268,7 +273,7 @@ async done(docId, { pkg, imageVersion, summary, display }) {   // every field of
 - The logs (S8-Q1): every `package.*` line of a run carries `researcher`, `microvm_id`, `scope` and `package`, and the line after the run has `scope` and `package` null; `package.failed`, `status.write_failed`, `sync.failed` and `report_server.refused` (the revocation's, with `call: "revoke"`) are each logged on their trigger, and `hook.failed` on a refused hook (`server.test.js`).
 - S3: `/run` in S3 mode fetching credentials before its first `ListObjectsV2`; RD-4 pass 1's two prefix tests on `packages/<identity>/<version>.zip`.
 - `server.test.js`: the hooks route through, `/run-package` and `/refresh-token` answer 404, a hook before `/run` is 409, a non-JSON `/run` is 400, `GET /` reports `current_package`.
-- `package-fetch`, `package-env`, `steps`, `firebase-projects`: each clause of R28 to R41a, R56 and R57 named above, the package uid's processes killed after a run and before its output is read (again until none is left, also after a failed or timed-out run, and failing when they survive five kills or `pgrep` cannot run), a `display.md` link and a swapped output directory refused and a `counts.json` link not read, and `inflatedSize` and the symlink check against real `zip` archives.
+- `package-fetch`, `package-env`, `steps`, `firebase-projects`: each clause of R28 to R41a and R56 named above, and the CLUE token's expiry step 6 deletes, the package uid's processes killed after a run and before its output is read (again until none is left, also after a failed or timed-out run, and failing when they survive five kills or `pgrep` cannot run), a `display.md` link and a swapped output directory refused and a `counts.json` link not read, and `inflatedSize` and the symlink check against real `zip` archives.
 - `package-contract.test.js`: `IDENTITY`, `VERSION` and `packageDocId` against every case of `fixtures/package-contract.json`, each list asserted non-empty first, and the ceiling's default against `limits.max_duration_seconds`.
 - `config.test.js`: the ceiling's default, its cap at 28,800 and its floor at the default, and a non-integer refused.
 - `report-server.test.js`: `askApplies`'s request (path, bearer, body of exactly `urls` and `scope_urls`), a 400 and a 422 as refusals with the server's message, and a 503, a 401, a 404, an answer without `applies`, a timeout and a failed connection as not.
@@ -303,6 +308,124 @@ The smoke package declares no `urls`; `build --any <pattern>` writes them at bui
 
 ---
 
+### Step 5: the runner's side of REPORT-143's lease
+
+**Summary**: The claim writes `heartbeat_seconds: 60`, and a heartbeat merges `{platform_id, updated_at}` into the result every 60 seconds until the final write (R43, R44a). The final write is awaited until the SDK settles it, with no local bound, and nothing else is written until it has (R44b). `/terminate` stops the beat, writes REPORT-143's one lost-VM reason, and writes the runner document only while it records this VM (R23). An `/idle` answer that neither queues nor suspends restarts the idle period (R11, landing tracker 3.2a). R8's `current_package` rule needs no code: the hooks already write `state` alone, and the claim and the drained `ready` already follow the run's end; the tests pin it.
+
+**Files affected**:
+- `runner/server/runner.js`: `HEARTBEAT_SECONDS`; the heartbeat in `#runPackage`; the final write unbounded; `terminate()`'s reason, beat stop and guarded write; the idle loop's declined branch
+- `runner/server/status.js`: `ClassDocuments.claim` writes `heartbeat_seconds`; `beat(docId)`; `done` and `failed` no longer bounded inside (callers that need a bound wrap them); `RunnerStatus.writeFromHook(hook, fields, { onlyIf })`; `MemoryStore.mergeIf`
+- `runner/server/firestore.js`: `mergeIf(path, test, fields)` through `runTransaction`
+- `runner/server/index.js`: the default heartbeat timer
+- Tests: `runner.test.js`, `memory-store.test.js`, `firestore.emulator.test.js`
+
+**Estimated diff size**: ~450 lines, two thirds of it tests
+
+```js
+// runner.js
+// The claim's heartbeat_seconds and the beat's interval, one value. REPORT-143's rules bound it at 30 to 120.
+export const HEARTBEAT_SECONDS = 60;
+export const LOST_RUN_REASON = "The machine running it stopped before the run finished; run it again.";
+
+// Injected so the tests fire beats by hand: the loop's `sleep` advances a shared clock and
+// records every call, which a timer running beside the loop would disturb.
+// constructor: startTimer = (ms, fn) => { const t = setInterval(fn, ms); return () => clearInterval(t); }
+
+#startHeartbeat(docs, docId) {
+  let inFlight = null;
+  const cancel = this.startTimer(HEARTBEAT_SECONDS * 1000, () => {
+    if (inFlight) return;                                   // the last beat is unsettled
+    inFlight = docs.beat(docId)
+      .catch((err) => log.warn("heartbeat.failed", { error: err.message }))
+      .finally(() => { inFlight = null; });
+  });
+  return { cancel, settled: async () => { cancel(); await inFlight; } };
+}
+
+// #runPackage, after the claim and the status document:
+this.#run.heartbeat = this.#startHeartbeat(docs, docId);
+...
+  await heartbeat.settled();                                // stopped, and a beat in flight awaited
+  await docs.done(docId, { … });                            // no bound: settled by the SDK (R44b)
+} catch (err) {
+  await heartbeat.settled();
+  await docs.failed(docId, { pkg, error: err.message }).catch(…);   // likewise unbounded
+}
+// finally: the store is closed and `done` resolved only after the line above has settled.
+```
+
+```js
+// terminate(), with a run outstanding:
+this.#run.heartbeat.cancel();                               // no wait: one store sends its writes in order
+await bounded(docs.failed(docId, { pkg, error: LOST_RUN_REASON }));
+...
+await this.status.writeFromHook("terminate", { state }, { onlyIf: (doc) => doc?.microvm_id === this.microvmId });
+// writeFromHook logs terminate.runner_doc_skipped when the test fails, bounded at 10 s as before (R21).
+
+// #workLoop, after the suspended branch:
+log.warn("idle.declined", { answer: idle });
+idleSince = this.now();
+```
+
+`#plan`'s refusals keep their 10-second bound by wrapping `docs.failed` in `bounded`, since a refusal is no run's final write.
+
+**Tests** (`runner.test.js` unless named; the fake timer records each `startTimer` and fires its callback on demand):
+- The claim carries `heartbeat_seconds` equal to `HEARTBEAT_SECONDS`, and the timer is started at `HEARTBEAT_SECONDS * 1000`.
+- Three ticks during a run write three merges holding exactly `platform_id` and `updated_at`; the result stays `running` at its stage.
+- A tick while the last beat's merge is pending writes nothing; one after it settles writes again.
+- A beat pending when the package finishes: `done` is not issued until the beat settles, and a tick after `done` writes nothing.
+- With `mock.timers` on `setTimeout`, a `done` merge held pending past the 10-second status bound is still awaited: no runner-document write, no `/work` call, and the class store still open until it is released; then `ready` is written and the store closed.
+- A `done` the store rejects is followed by `failed`, awaited the same way.
+- A failed beat logs `heartbeat.failed` and the run ends `done`.
+- `previous` on the queued result survives the claim (read mid-run), the finish, and a second run that fails, in that order.
+- `/terminate` mid-run: the result reads the one reason, no tick writes after it, and the runner document reads `terminated` with `current_package` still naming the run; with the runner document's `microvm_id` set to another VM first, it is left as it was and `terminate.runner_doc_skipped` is logged.
+- `/suspend` mid-run leaves `current_package` naming the run (the existing test, kept).
+- `/idle` answering `run_in_progress` through two idle periods: `/idle` is called twice, eleven `/work` polls apart, with an `idle.declined` line each time, where without the reset it is called on every pass with no sleep.
+- `memory-store.test.js`: `mergeIf` writes when its test passes and leaves the document when it fails.
+- `firestore.emulator.test.js`: the claim with `heartbeat_seconds`, a beat, the finish, and `mergeIf` on the runner document both ways, against REPORT-143's rules as on `master`.
+
+**Mutations to run**: the claim without `heartbeat_seconds` (the emulator suite); no skip while a beat is unsettled; the timer not cancelled before the final write; a beat in flight not awaited; the final write bounded; the store closed or `ready` written before the final write settles; the claim written with `set`, losing `previous`; `/terminate` without its `onlyIf`; the old terminate string; `idleSince` not reset on a declined answer.
+
+**Verified**: not built. The writes it adds were run against REPORT-143's merged rules (requirements, "Against REPORT-143's merged rules").
+
+---
+
+### Step 6: the CLUE pre-pull deleted
+
+**Summary**: R56a's list, and what it leaves behind. With `pullData` gone the `pull` stage runs nothing, so `#steps` writes `prepare_package` and `run_package` only, and `makeStore`, `classTokens`, `firebaseProject` and `now` no longer reach the steps. `scope.json`'s `clue_source` is `"cc-data"` (R37), a constant in `package-env.js`. The counts write loses `clueDocuments` (R46). `preparePackage` hands the package uid its whole class data directory. `firebase-projects.js` keeps the two report-service projects (R56), and its header comment drops the CLUE pairing it used as its example.
+
+**Files affected**:
+- `runner/server/clue-reader.js`, `runner/test/clue-reader.test.js`: deleted
+- `runner/server/steps.js`: `CLUE_SOURCE`, `CLUE_TOKEN_MARGIN_MS`, `clueToken`, `ClueTokenExpired`, `customTokenExpiry`, `pullData` and the `readClue` import deleted
+- `runner/server/runner.js`: the `pull` stage, the `CLUE_SOURCE` import and the CLUE count
+- `runner/server/status.js`: `counts` without `clueDocuments`
+- `runner/server/package-env.js`: `CLUE_SOURCE = "cc-data"`; `RUNNER_OWNED` and `chownTree`'s skip deleted; the comments that name the CLUE reader
+- `runner/server/package-fetch.js`: the `clue_prepull` type check deleted
+- `runner/server/firebase-projects.js`: the two CLUE projects, `clueProject` and `clueProjectFor` deleted
+- `runner/server/firestore.js`: the `rtdb` getter, its emulator connection and the `firebase/database` import deleted
+- `README.md`: the runner's line no longer names a CLUE reader
+- Tests: `steps.test.js`, `firebase-projects.test.js`, `package-env.test.js`, `package-fetch.test.js`, `runner.test.js`, `firestore.emulator.test.js` (its `pull` stage write becomes `prepare_package`)
+
+**Estimated diff size**: ~650 lines, almost all removed
+
+**Tests**: `scope.json` carries `clue_source: "cc-data"`; a run writes the stages `starting`, `prepare_package`, `run_package` and `done`, in that order; the counts' `data` holds no `clue_documents`; a `/work` answer whose class tokens include a CLUE row runs its package with no extra store signed in; `knownProjects()` is exactly `report-service-dev` and `report-service-pro`; `preparePackage` chowns every entry of the class data directory, a `clue-documents` directory included.
+
+**Verified**: not built. `grep -rni clue runner --exclude-dir=node_modules` should then find only `scope.json`'s `clue_source` and its test.
+
+---
+
+### Step 7: the release's version, and the long-run smoke variant
+
+**Summary**: `runner/package.json`'s version goes to `0.2.0`, and the Makefile's `VERSION` default reads it (`VERSION ?= $(shell node -p "require('./package.json').version")`), so the release needs no `VERSION=` and the number lives once (R58, landing tracker 3.3a). `smoke.mjs build --hold <seconds>` writes the hold into a `hold.txt` beside `run.py` and adds it to `expected_duration_seconds`, and `run.py` sleeps that long after its checks when the file is there (R52), for the run-over-65-minutes check.
+
+**Files affected**: `runner/package.json`, `runner/Makefile`, `runner/smoke/smoke.mjs`, `runner/smoke/package/run.py`, `runner/README.md` (where the version comes from, and `--hold`). `cloudformation/README.md`'s `VERSION=<x.y.z>` still overrides the default and stays as it is, so this pass still changes nothing in `cloudformation/` (R58).
+
+**Estimated diff size**: ~40 lines
+
+**Checks**: `make -n publish-artifact` names `runner-0.2.0.zip`; `smoke.mjs build --hold 4200` twice gives one checksum, and its manifest declares the smoke package's duration plus 4,200.
+
+---
+
 ## Rollout
 
 By whoever releases the runner (the specs name no one beyond "the operator", RD-4 pass 1), **from the PR branch, before review and merge**, so anything the live stack shows is fixed in the same PR (requirements R58; Doug, 2026-10-08, channel #27). The PR is reviewed and merged after the checks below are recorded. Nothing here can be run from this machine, which has no AWS CLI and no credentials (`speccing.md`).
@@ -312,27 +435,29 @@ By whoever releases the runner (the specs name no one beyond "the operator", RD-
 1. RD-1's rollout has created `researcher-dashboard-runner-staging` in the QA account, with the broker's `packages-read` and the execution role at its logs from the start. Done 2026-10-08 (channel #32).
 2. cc-data's `v0.3.0-pre.1` exists (REPORT-146 merged and tagged; it is in review as cc-data-cli PR #18). Until it does, the artifact's image build fails at `git clone --branch`.
 3. REPORT-167 is deployed: the function 1.9.0, then report-server 1.13.0 to `report-server.concordqa.org` (its R28 order). Until then every patterned package is a failed claim attempt, since `applies` answers 404 (R35).
-4. REPORT-143 is deployed to `report-service-dev` against the stack: `firestore:rules`, `firestore:indexes`, `functions:researcherDashboard`, `functions:researcherDashboardWatchdog` and `functions:deriveProfileWorker`, with `functions:api` on dev's first deploy, the indexes built before the watchdog runs (REPORT-143's rollout). Its live broker check passed and recorded. `report-service-dev` has the IAM Service Account Credentials API enabled and `researcher-dashboard@report-service-dev` holds `roles/iam.serviceAccountTokenCreator` on itself (report-service's `setup-researcher-dashboard-iam.sh apply`); until then `/work` answers 502 and this runner takes no work (REPORT-143 Q1).
-5. RIGSE-367 and RIGSE-368 are on the staging portal with `RESEARCHER_DASHBOARD_FUNCTION_URL`, `RESEARCHER_DASHBOARD_FIREBASE_APP=report-service-dev` and `RESEARCHER_DASHBOARD_CLUE_FIREBASE_APP=collaborative-learning-staging` (rows 1 and 8, `spike-plan.md` 3), and report-server staging carries cloud-formation PR #94's settings with `PackageBuckets` mapping the staging portal to the QA bucket and RD-1's packages writer key (RD-1's README, "What goes where"). `PackageBuckets` and the writer key were set 2026-10-08 (channel #34).
+4. REPORT-143 is deployed from `master` to `report-service-dev` against the stack, by the one `firebase deploy` its functions README gives (`firestore:rules`, `firestore:indexes`, `functions:researcherDashboard`, `functions:researcherDashboardWatchdog` and `functions:deriveProfileWorker`; no `functions:api`), with `RD_BROKER_ROLE_ARN` set, the indexes built before the watchdog runs (landing tracker 2.6). Its live broker check passed and recorded. `report-service-dev` has the IAM Service Account Credentials API enabled and `researcher-dashboard@report-service-dev` holds `roles/iam.serviceAccountTokenCreator` on itself (report-service's `setup-researcher-dashboard-iam.sh apply`); until then `/work` answers 502 and this runner takes no work (REPORT-143 Q1).
+5. RIGSE-367 and RIGSE-368 are on the staging portal with `RESEARCHER_DASHBOARD_FUNCTION_URL`, `RESEARCHER_DASHBOARD_FIREBASE_APP=report-service-dev` (row 1, `spike-plan.md` 3), and report-server staging carries cloud-formation PR #94's settings with `PackageBuckets` mapping the staging portal to the QA bucket and RD-1's packages writer key (RD-1's README, "What goes where"). `PackageBuckets` and the writer key were set 2026-10-08 (channel #34).
 6. `node smoke/smoke.mjs image --class-id 590 --class-hash dca466d3fcb3322466b467c98c4d307c1871608cd9096e82`, from the branch head, with researcher A's report-server token, passes against staging's report-server. It needs no stack. It is also the check that material 604 is still in one of researcher A's projects (cohort 12): without that, report-server's Student Answers run never starts, and cc-data waits out its 30 minutes on a null state rather than failing (R53). Passed 2026-10-09.
 7. The smoke package is built with `--any "*authoring.lara.staging.concord.org%2Fapi%2Fv1%2Factivities%2F1518.json"`, which matches only class 590's assignment URL, and published to staging's catalog as `official` by a portal site admin (`?official=true`), so it is runnable at once (Q11, Q15). First check that report-server staging's running image carries REPORT-142's publish code: it ran `1.12.0-pre.2` on 2026-10-08 (channel #34). Done 2026-10-09: report-server staging ran `1.13.0-pre.1`, where `wildfire-responses` had already published `official`. The publisher was `rd-release`, which holds the publisher role, with origin `projects/20`. The result is `projects/20/runner-smoke` 1.0.0, `catalog_id` 3, `sha256:250ccbe1…`, public and `official`; report-server's applies route offers it on class 590's URL and refuses it on class 223's.
 
-CLUE-692 is not among these: its staging deploy precedes the first `clue_prepull` package run on staging, not this release (requirements Q12).
-
-**The release**, per `cloudformation/README.md`'s "Releasing the runner" (RD-4 pass 1) and "Updating a stack" (RD-1): terminate every live staging VM, publish the artifact from the branch head (`make publish-artifact VERSION=<x.y.z> ARTIFACT_BUCKET=concordqa-devops`), and apply a change set that overrides only `CodeArtifactKey` in `$PARAMS`, every other parameter keeping its value. The template is unchanged, since RD-1 created the broker's grant, so this is a runner release and nothing else.
+**The release**, per `cloudformation/README.md`'s "Releasing the runner" (RD-4 pass 1) and "Updating a stack" (RD-1): terminate every live staging VM, publish the artifact from the branch head (`make publish-artifact ARTIFACT_BUCKET=concordqa-devops`, which publishes `runner-0.2.0.zip`, the version in `runner/package.json`), and apply a change set that overrides only `CodeArtifactKey` in `$PARAMS`, every other parameter keeping its value. The template is unchanged, since RD-1 created the broker's grant, so this is a runner release and nothing else.
 
 **After the release**, recorded against this spec:
 
-1. `RD_SMOKE_ACCESS_TOKEN=<token> node smoke/smoke.mjs stack --identity <origin>/runner-smoke --version <v> --class-hash <hash> --terminate` ends `done`, with launcher credentials for `--terminate` (requirements R52). The runner's log group shows `aws.default_chain_disabled`, `storage.credentials_fetched` and no `CredentialsProviderError`, and every line carries a non-null `microvm_id`, which answers whether `/run`'s body carries `microvmId`.
+1. `RD_SMOKE_ACCESS_TOKEN=<token> node smoke/smoke.mjs stack --identity <origin>/runner-smoke --version <v> --class-hash <hash> --terminate` ends `done`, with launcher credentials for `--terminate` (requirements R52). The runner's log group shows `aws.default_chain_disabled`, `storage.credentials_fetched` and no `CredentialsProviderError`, and every line carries a non-null `microvm_id`, which answers whether `/run`'s body carries `microvmId`. That id equals `vms/{platform_user_id}`'s `microvm_id` and the claimed result's (morning review item 2b; `/work`'s 409 already requires it, requirements Technical Notes).
 2. A VM left to drain logs `idle.suspended`, and its `/suspend` hook's lines follow. That answers REPORT-143's R1 (an API `SuspendMicrovm` delivers `/suspend`), if REPORT-143's own check has not already, to be written into REPORT-143's spec and `final-design.md` 7.2(b). A `lifecycle.resume_without_suspend` line would say it does not.
 3. The Done-when, on staging: a VM suspended for more than an hour takes a new run and writes its result, with no `work.failed` 401 (the refresh token surviving the suspend); a suspend mid-run (`aws lambda-microvms suspend-microvm` with launcher credentials) leaves `current_package` set, and an idle one leaves it null; the smoke package published under two origins (`?origin=projects/<id>` and a user) runs in one queue; the smoke package rebuilt with `--any '*no-such-url*'` as a new version is refused with "does not apply to this class" and report-server's reason; two researchers of the smoke class each get their own result, and the counts land on each one's scope document while `classes/{class_hash}` holds only the profile; a log line from a run names the researcher, the scope and the package. The ten-hour sentence is the runner's tests only: report-server refuses more than 7,200 seconds at publish, so no version over the ceiling can be queued on staging.
 4. `smoke.mjs image` with a column the dataset lacks added to the package's list fails, which shows the gate fails when a column goes.
+5. **Terminated mid-run** (REPORT-143's lease, Q13): a package running, `aws lambda-microvms terminate-microvm` with launcher credentials, and `get-microvm` polled every few seconds with its states and times recorded against the hook's log lines. The VM reads `TERMINATING` while the `/terminate` hook writes; the result reads `failed` with the one reason, written by the hook; the runner document reads `terminated` (or `failed` with an incomplete-sync reason) with `current_package` naming the run; and no later watchdog pass rewrites either.
+6. **A run longer than 65 minutes**: the smoke package built with `--hold 3900` as a new version and run. Its result's `updated_at` keeps moving past the session's first hour, so the class store refreshed its token for the beats, and it ends `done` with no `watchdog.result_failed`.
+7. **Suspended mid-run, resumed from the dashboard**: the `--hold` variant, `suspend-microvm` while it runs, then RD-3's Resume. `vms/`'s `resumed_at` is written before the resume, beats resume after it, and the result ends `done` with no `watchdog.vm_terminated` for that VM.
+8. **`design.md` criterion 11 again**: terminated during a run, the next run launches a new VM and ends `done`.
 
 Then the PR is reviewed and merged. A problem found above is fixed on the branch and the release repeated from its new head.
 
 **What RD-1 then checks** (its R20, the one check RD-1 left open when it was marked Done, channel #50): this release's first VM is the stack's first working one, so RD-1's endpoint check runs on it, by `cloudformation/README.md`'s "A VM's endpoint": find the VM with your own credentials (the launcher cannot list VMs), then as the launcher `create-microvm-auth-token` must be refused and the endpoint must answer `403, Request missing authentication`. The result is recorded in `specs/RD-1-runner-stack.md` on `main` (its R20 item, pending under "Not Yet Implemented") and on RD-1 in Jira.
 
-**Production** has no stack until RD-1 production. Before its first launch, production rigse needs `RESEARCHER_DASHBOARD_FIREBASE_APP=report-service-pro` and `RESEARCHER_DASHBOARD_CLUE_FIREBASE_APP=collaborative-learning`, the runner's pairing for `report-service-pro` (R56); `report-service-pro` needs the same IAM change as step 4 above; and CLUE-692's rules go to `collaborative-learning-ec215` before a `clue_prepull` package runs there.
+**Production** has no stack until RD-1 production. Before its first launch, production rigse needs `RESEARCHER_DASHBOARD_FIREBASE_APP=report-service-pro`, the runner's entry for that project (R56), and `report-service-pro` needs the same IAM change as step 4 above.
 
 ## Verification
 
@@ -524,7 +649,10 @@ Checked in both directions (2026-09-26, and again for the re-spec on 2026-10-08)
 | R51 to R54, R54a, R54b | Step 4 | `build` run; `image` and `stack` not run (Verification); the workflow parsed, not executed |
 | R60 | Step 4 (`Dockerfile`, `smoke.mjs image`'s version check) | not run: the tag does not exist (Verification) |
 | R55 | Step 4 | the deletion |
-| R56, R57, R57a | Step 3 (`firebase-projects.js`, `steps.js`) | `firebase-projects.test.js`, `steps.test.js` |
+| R56 | Step 3 (`firebase-projects.js`), step 6 (the CLUE projects removed) | `firebase-projects.test.js` |
+| R56a, R37's `clue_source`, R46 without the CLUE count | Step 6 | the step's tests and its `grep` |
+| R8's `current_package` rule, R11's declined answer, R23, R27, R43's `heartbeat_seconds`, R44's `previous`, R44a, R44b | Step 5 | step 5's tests; `firestore.emulator.test.js` against REPORT-143's rules on `master` |
+| R52's `--hold`, R58's version | Step 7 | step 7's checks |
 | R58, R59 | The Rollout section; no code | not runnable from here |
 
 **R25's second check.** The requirement says the window is checked up front and "again before each claim". The plan re-plans every package after each `/work`, and `/work` is asked after every package (R7), so the check before each claim is the up-front check of the answer that claim comes from. It fails the package and the rest of that answer, as R25 says. This is by construction, not a gap.
@@ -533,8 +661,11 @@ Checked in both directions (2026-09-26, and again for the re-spec on 2026-10-08)
 |---|---|
 | Step 1 | R47, R48 |
 | Step 2 | R1 (`function_url`), R2's bound, R14 to R19 |
-| Step 3 | R1 to R13, R20 to R46a, R28a, R49, R50, R56, R57, R57a |
+| Step 3 | R1 to R13, R20 to R46a, R28a, R49, R50, R56 |
 | Step 4 | R48 (README), R51 to R55, R54a, R54b, R60 |
+| Step 5 | R8, R11, R23, R27, R43, R44, R44a, R44b |
+| Step 6 | R37, R43's stages, R46, R56, R56a |
+| Step 7 | R52, R58 |
 
 ### RESOLVED: S8-Q3 (re-spec). `report_server.refused` is pinned only on the revocation
 **Context**: R50 now names two report-server calls under one event, with `call` saying which. The event-name test triggered it only through a failed revocation, and the applies tests asserted the result document, so removing or renaming the applies path's log line left all 187 tests passing.
