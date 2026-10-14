@@ -205,3 +205,21 @@ test("pullDown on an empty prefix is the normal first session, not an error", as
   const s = syncer();
   assert.deepEqual(await s.pullDown(), { files: 0 });
 });
+
+// A log-based metric counts sync.failed, so a failed tick is logged under it too.
+test("a tick whose flush fails is logged as sync.failed", async () => {
+  await write("answers.v1.jsonl", "a");
+  const s = syncer({ backend: { put: async () => { throw new Error("AccessDenied"); }, list: async () => [] }, intervalMs: 5 });
+  const lines = [];
+  const original = process.stdout.write;
+  process.stdout.write = (chunk) => { lines.push(String(chunk)); return true; };
+  try {
+    s.start();
+    for (let i = 0; i < 100 && !lines.some((l) => l.includes("sync.failed")); i++) await new Promise((r) => setTimeout(r, 5));
+  } finally {
+    s.stop();
+    process.stdout.write = original;
+  }
+  const line = lines.flatMap((l) => l.split("\n")).filter(Boolean).map((l) => JSON.parse(l)).find((l) => l.event === "sync.failed");
+  assert.deepEqual({ hook: line?.hook, error: line?.error }, { hook: "tick", error: "AccessDenied" });
+});

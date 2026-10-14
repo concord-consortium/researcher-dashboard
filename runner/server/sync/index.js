@@ -96,7 +96,7 @@ export class Syncer {
   start() {
     if (this.#timer) return;
     this.#timer = setInterval(() => {
-      this.flush().catch((err) => log.warn("sync.tick_failed", { error: err.message }));
+      this.flush().catch((err) => log.error("sync.failed", { hook: "tick", error: err.message }));
     }, this.intervalMs);
     // The timer must not hold the process open: the VM's lifetime is Lambda's to
     // decide, not the scheduler's.

@@ -4,7 +4,7 @@ import { verifySandbox } from "./sandbox.js";
 import { STATES, VmState } from "./state.js";
 import { ClassDocuments, RunnerStatus, bounded } from "./status.js";
 import { askApplies, revokeOwnToken } from "./report-server.js";
-import { CHECKSUM, declaresPatterns, IDENTITY, VERSION, packageDocId } from "./package-fetch.js";
+import { CHECKSUM, declaresPatterns, IDENTITY, PACKAGE_DOC_ID, VERSION, packageDocId } from "./package-fetch.js";
 
 const EIGHT_HOURS_MS = 8 * 60 * 60 * 1000;
 // Kept back from the window for the last flush and the /terminate hook at the VM's cap.
@@ -416,8 +416,8 @@ export class Runner {
 
       if (!IDENTITY.test(entry.identity ?? "") || !VERSION.test(entry.version ?? "") || !CHECKSUM.test(entry.checksum ?? "")
           || !Number.isInteger(entry.catalog_id) || entry.catalog_id < 1) {
-        if (IDENTITY.test(entry.identity ?? "")) await refuse("the queued package does not match the catalog's grammar");
-        else log.error("package.refused", { error: `unusable identity ${entry.identity}` });
+        if (PACKAGE_DOC_ID.test(docIdOf(entry) ?? "")) await refuse("the queued package does not match the catalog's grammar");
+        else log.error("package.refused", { error: `unusable identity ${entry.identity} and package key ${entry.package_key}` });
         continue;
       }
       const docId = packageDocId(entry.identity);
@@ -450,19 +450,13 @@ export class Runner {
       }
       const appliesKey = `${entry.class_hash}/${entry.identity}@${entry.version}`;
       if (declaresPatterns(manifest.urls) && !this.#applies.has(appliesKey)) {
-        let profile;
-        try {
-          profile = await docs.profile();
-        } catch (err) {
-          this.#noteClaimFailure(entry, err);
-          continue;
-        }
-        if (!profile) {
-          await refuse("this class's authored profile has not been derived yet; open the dashboard for it and run the package again");
-          continue;
-        }
         let verdict;
         try {
+          const profile = await docs.profile();
+          if (!profile) {
+            await refuse("this class's authored profile has not been derived yet; open the dashboard for it and run the package again");
+            continue;
+          }
           verdict = await this.askApplies({
             baseUrl: this.payload.report_server_url,
             token: this.payload.report_server_token,

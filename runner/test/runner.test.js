@@ -451,6 +451,28 @@ test("report-server unavailable for three attempts fails the package so the VM c
   assert.ok(!writesTo(built.record, resultPath(PORTAL, CLASS, USER, "users__1__ap")).some((w) => w.status === "running"));
 });
 
+test("a class profile that cannot be read three times fails the package so the VM can suspend", async () => {
+  const built = build({
+    wrapStore: (store) => {
+      const get = store.get.bind(store);
+      store.get = (p) => (p === classPath(PORTAL, CLASS) ? Promise.reject(new Error("UNAVAILABLE")) : get(p));
+      return store;
+    }
+  });
+  built.fn.queue({ identity: "users/1/ap" });
+  built.record.manifests["users/1/ap"] = manifestFor("users/1/ap", { urls: { any: ["*x*"] } });
+  stopAfter(built, 40);
+  const lines = await captured(async () => {
+    await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+    await built.runner.loop;
+  });
+  assert.equal(lines.filter((l) => l.event === "report_server.refused" && l.call === "applies").length, 3);
+  const doc = result(built.docs, "users/1/ap");
+  assert.equal(doc.status, "failed");
+  assert.match(doc.error, /could not say whether the package applies.*UNAVAILABLE.*run it again/);
+  assert.equal(built.record.applies.length, 0, "report-server is not asked without a profile");
+});
+
 test("a request report-server refuses outright refuses the package with its message", async () => {
   const built = build({ applies: async () => { throw new ReportServerError("scope_urls[3] is longer than 2048 bytes", { status: 400, refusal: true }); } });
   built.fn.queue({ identity: "users/1/ap" });
@@ -623,6 +645,26 @@ test("a queued entry whose package_key disagrees with its identity is refused", 
   await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
   await built.runner.loop;
   assert.match(result(built.docs, "users/1/counts").error, /named this package users__1__other/);
+});
+
+// The result's address is the package key /work named, the one place it is used, and only
+// when it is itself well formed.
+test("a queued entry whose identity is unusable is failed at its package key", async () => {
+  const built = build();
+  built.fn.queue({ identity: "users/1/counts" });
+  const call = built.fn.makeFunctionClient();
+  built.runner.makeFunctionClient = () => async (route, args) => {
+    const answer = await call(route, args);
+    if (route === "work") answer.packages = answer.packages.map((p) => ({ ...p, identity: "Users/1/counts" }));
+    return answer;
+  };
+  stopAfter(built, 40);
+  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+  await built.runner.loop;
+  const doc = result(built.docs, "users/1/counts");
+  assert.equal(doc.status, "failed");
+  assert.match(doc.error, /does not match the catalog's grammar/);
+  assert.equal(built.fn.routes().at(-1), "idle", "the queue drains and the VM can suspend");
 });
 
 // ---- tokens and stores ---------------------------------------------------------
@@ -1449,6 +1491,7 @@ test("in S3 mode /run fetches the broker's credentials before its first S3 call"
     makeFunctionClient: () => async (route, args) => {
       events.push(route);
       if (route === "storage-credentials") {
+        events.push(`id-token:${args.idToken}`);
         return { success: true, access_key_id: "ASIAX", secret_access_key: "s", session_token: "t", expiration: new Date(Date.now() + 3600e3).toISOString(), bucket: "researcher-dashboard-runner-staging", prefix: `researchers/${USER}/`, region: "us-east-1" };
       }
       return call(route, args);
@@ -1469,6 +1512,8 @@ test("in S3 mode /run fetches the broker's credentials before its first S3 call"
   runner.terminate().catch(() => {});
   const first = events.indexOf("ListObjectsV2Command");
   assert.ok(first > 0);
+  assert.equal(events[0], "storage-credentials", "no other call to the function comes first");
+  assert.equal(events[1], `id-token:id-token-for:${JSON.parse(PAYLOAD).session_token}`, "it carries the session's ID token");
   assert.ok(events.indexOf("storage-credentials") < first && events.indexOf("client:ASIAX") < first);
   // Each VM's log says the default chain is off, with the VM's id on the line.
   assert.equal(lines.find((l) => l.event === "aws.default_chain_disabled")?.microvm_id, "mvm-1");

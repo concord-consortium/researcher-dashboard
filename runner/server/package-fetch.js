@@ -19,6 +19,8 @@ import { log } from "./log.js";
 export const IDENTITY = /^(users|projects)\/[1-9][0-9]{0,17}\/[a-z0-9][a-z0-9-]{0,62}$/;
 export const VERSION = /^(?=.{1,64}$)(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$/;
 export const CHECKSUM = /^sha256:[0-9a-f]{64}$/;
+// A result document id: the identity with each / as __.
+export const PACKAGE_DOC_ID = new RegExp(IDENTITY.source.replaceAll("\\/", "__"));
 
 // The most report-server accepts as an archive's declared unpacked size. The runner,
 // which unpacks everything, bounds the bytes actually produced.
