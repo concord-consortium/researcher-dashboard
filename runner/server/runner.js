@@ -493,7 +493,6 @@ export class Runner {
           }
           continue;
         }
-        if (!this.#current(epoch)) return null;
         if (!verdict.applies) {
           await refuse(`the package does not apply to this class: ${verdict.reason}`);
           continue;

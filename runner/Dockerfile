@@ -38,11 +38,12 @@ ARG DUCKDB_VERSION
 # Node is pinned to a major line rather than taking the `nodejs` default, so a later
 # rebuild cannot change the runtime under a shared VM snapshot. 24 is the current LTS
 # line; the Firebase client SDK declares no engine ceiling and firebase-admin wants >=22.
-# util-linux supplies setpriv and iproute supplies `ip netns`, which the runner uses to
+# util-linux supplies setpriv and kill, and iproute supplies `ip netns`, which the runner uses to
 # run a package as an unprivileged uid inside a network namespace whose only
 # route out is the egress proxy. iptables is what keeps the runner's own HTTP server
 # off the one address that namespace can reach. procps-ng supplies sysctl, which is how
-# IPv6 is disabled inside the namespace; the base image does not carry it.
+# IPv6 is disabled inside the namespace, and pgrep; the base image carries neither. The
+# runner ends a package's leftover processes with kill and pgrep after every run.
 RUN dnf -y install python3.11 nodejs24 nodejs24-npm unzip tar gzip shadow-utils ca-certificates \
       util-linux \
       iproute \

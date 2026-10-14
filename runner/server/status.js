@@ -54,18 +54,20 @@ export class RunnerStatus {
   // `onlyIf` is tested against the stored document in a transaction, and the write is
   // skipped, returning null, when it fails.
   async write(fields, { onlyIf } = {}) {
+    const sent = this.#failures;
     const doc = {
       platform_id: this.platformId,
       ...fields,
       updated_at: this.store.serverTimestamp(),
-      ...(this.#failures.length ? { status_write_failures: this.#failures } : {})
+      ...(sent.length ? { status_write_failures: sent } : {})
     };
     if (onlyIf) {
       if (!(await bounded(this.store.mergeIf(this.path, onlyIf, doc)))) return null;
     } else {
       await bounded(this.store.merge(this.path, doc));
     }
-    if (this.#failures.length) this.#failures = [];
+    // Only what this write carried: a failure recorded while it was in flight waits for the next.
+    this.#failures = this.#failures.filter((failure) => !sent.includes(failure));
     log.info("status.runner", { state: doc.state ?? null });
     return doc;
   }
@@ -192,57 +194,8 @@ function deepMerge(existing, fields) {
   return merged;
 }
 
-// What the in-memory and log stores write where Firestore would put the server's time.
+// What the in-memory store writes where Firestore would put the server's time.
 export const SERVER_TIME = Object.freeze({ serverTime: true });
-
-// Writes every status document to the structured log instead of Firestore. It exists
-// for looking at a VM's state sequence in CloudWatch without a sign-in; it cannot bring
-// a VM to ready, since every call to the function needs the session's ID token.
-export class LogStore {
-  async signIn(customToken) {
-    log.warn("status.sign_in_skipped", { token_length: customToken?.length ?? 0 });
-    return null;
-  }
-
-  async claims() {
-    return {};
-  }
-
-  async idToken() {
-    throw new Error("the log store signs nothing in, so it has no ID token");
-  }
-
-  async get() {
-    return null;
-  }
-
-  async set(path, doc) {
-    log.info("status.write", { op: "set", path, doc });
-  }
-
-  async merge(path, fields) {
-    log.info("status.write", { op: "merge", path, doc: fields });
-  }
-
-  async replaceFields(path, fields) {
-    log.info("status.write", { op: "replaceFields", path, doc: fields });
-  }
-
-  async mergeIf(path, test, fields) {
-    log.info("status.write", { op: "mergeIf", path, doc: fields });
-    return true;
-  }
-
-  serverTimestamp() {
-    return SERVER_TIME;
-  }
-
-  timestamp(date) {
-    return date.toISOString();
-  }
-
-  async close() {}
-}
 
 // A Firebase custom token's payload, read without verifying it.
 function customTokenPayload(token) {

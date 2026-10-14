@@ -32,6 +32,8 @@ export const IMDS_ADDRESS = "169.254.169.254";
 // than anything the package is entitled to resolve for itself.
 const IP = "/usr/sbin/ip";
 const SETPRIV = "/usr/bin/setpriv";
+// setpriv's arguments that drop to the package uid with no groups, capabilities or way back.
+const dropTo = (uid) => [`--reuid=${uid}`, `--regid=${uid}`, "--clear-groups", "--no-new-privs", "--bounding-set", "-all"];
 const KILL = "/usr/bin/kill";
 const PGREP = "/usr/bin/pgrep";
 // Every state but a zombie's. A killed process stays a zombie until its parent reaps it,
@@ -47,12 +49,7 @@ export function sandboxCommand({ uid, command, args = [], netns = NETNS }) {
       "exec",
       netns,
       SETPRIV,
-      `--reuid=${uid}`,
-      `--regid=${uid}`,
-      "--clear-groups",
-      "--no-new-privs",
-      "--bounding-set",
-      "-all",
+      ...dropTo(uid),
       command,
       ...args
     ]
@@ -135,7 +132,7 @@ async function reachable({ uid, netns, exec, url, acceptRefusal = false }) {
 export async function killPackageProcesses({ uid, exec = run, attempts = 5 }) {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     // Exits non-zero when nothing was left to signal, which is the outcome wanted.
-    await exec(SETPRIV, [`--reuid=${uid}`, `--regid=${uid}`, "--clear-groups", "--no-new-privs", "--bounding-set", "-all", KILL, "-KILL", "-1"], { timeout: 5_000 })
+    await exec(SETPRIV, [...dropTo(uid), KILL, "-KILL", "-1"], { timeout: 5_000 })
       .catch(() => {});
     let left;
     try {

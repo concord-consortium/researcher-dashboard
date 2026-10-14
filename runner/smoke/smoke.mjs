@@ -19,7 +19,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { firebaseConfig } from "../server/firebase-projects.js";
 import { CLUE_SOURCE } from "../server/package-env.js";
-import { VERSION } from "../server/package-fetch.js";
+import { VERSION, packageDocId } from "../server/package-fetch.js";
+import { resultPath, runnerPath } from "../server/status.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PACKAGE = path.join(HERE, "package");
@@ -137,7 +138,12 @@ async function stack(opts) {
   const bearer = { Authorization: `Bearer ${access}` };
   const uid = JSON.parse(Buffer.from(access.split(".")[1], "base64url").toString("utf8")).uid;
   const portal = new URL(portalUrl).host.replaceAll(".", "_");
-  const docId = opts.identity.replaceAll("/", "__");
+  let docId;
+  try {
+    docId = packageDocId(opts.identity);
+  } catch (err) {
+    fail(err.message);
+  }
 
   const queued = await json(`${portalUrl}/api/v1/researcher_dashboard/run_package`, {
     method: "POST", headers: { ...bearer, "Content-Type": "application/json" },
@@ -174,14 +180,14 @@ async function stack(opts) {
     if (!res.ok) throw new Error(`reading ${docPath} answered ${res.status}: ${await res.text()}`);
     return res.json();
   };
-  const resultPath = `researcher_dashboard/${portal}/classes/${opts.classHash}/researchers/${uid}/results/${docId}`;
+  const resultDoc = resultPath(portal, opts.classHash, uid, docId);
   const deadline = Date.now() + waitMinutes * 60_000;
   // A read that fails is reported and retried: the VM block below must still print.
   let fields = null;
   let lastError = null;
   while (Date.now() < deadline) {
     try {
-      fields = (await read(resultPath))?.fields ?? null;
+      fields = (await read(resultDoc))?.fields ?? null;
       lastError = null;
     } catch (err) {
       lastError = err.message;
@@ -193,7 +199,7 @@ async function stack(opts) {
     await new Promise((r) => setTimeout(r, 10_000));
   }
   console.log();
-  const runner = (await read(`researcher_dashboard/${portal}/runners/${uid}`).catch((err) => {
+  const runner = (await read(runnerPath(portal, uid)).catch((err) => {
     console.error(err.message);
     return null;
   }))?.fields;

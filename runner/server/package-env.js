@@ -98,15 +98,16 @@ export function packageEnvironment({ paths, portalHost, dataset, proxyUrl, repor
   };
 }
 
-// Root walks a tree the package has written to, so it follows no link: a link left there
-// is skipped, and lchown never changes a link's target.
+// Root walks a tree the package has written to, so it follows no link: a symbolic link
+// left there is skipped, lchown never changes a link's target, and a file with another
+// hard link, which could be a file of root's, is left alone.
 function chownTree(dir, uid, chown = fs.lchownSync) {
   chown(dir, uid, uid);
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     if (entry.isSymbolicLink()) continue;
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) chownTree(full, uid, chown);
-    else chown(full, uid, uid);
+    else if (fs.lstatSync(full).nlink === 1) chown(full, uid, uid);
   }
 }
 
@@ -201,6 +202,7 @@ function readOwnFile(outputDir, name, limit) {
   try {
     const stat = fs.fstatSync(fd);
     if (!stat.isFile()) throw new Error(`the package's ${name} is not a file`);
+    if (stat.nlink !== 1) throw new Error(`the package's ${name} is linked from elsewhere`);
     const buffer = Buffer.alloc(Math.min(stat.size, limit + 1));
     const read = fs.readSync(fd, buffer, 0, buffer.length, 0);
     return { size: stat.size, text: buffer.subarray(0, read).toString("utf8") };

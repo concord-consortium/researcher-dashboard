@@ -3,7 +3,7 @@ import { disableDefaultCredentialChain, loadEnv } from "./config.js";
 import { FirestoreStore } from "./firestore.js";
 import { log } from "./log.js";
 import { HookError, Runner } from "./runner.js";
-import { LogStore, MemoryStore } from "./status.js";
+import { MemoryStore } from "./status.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { createEgressProxy } from "./egress-proxy.js";
@@ -99,7 +99,6 @@ export function buildRunner(env, { fetchImpl } = {}) {
   return new Runner({
     env,
     makeStore: ({ projectId }) => {
-      if (env.statusBackend === "LOG") return new LogStore();
       if (env.statusBackend === "MEMORY" || dir) return new MemoryStore({ docs: memoryDocs });
       return new FirestoreStore({ projectId });
     },

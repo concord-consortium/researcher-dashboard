@@ -58,11 +58,9 @@ export function loadEnv(env = process.env) {
   if (backend === "DIR" && !env.SYNC_DIR) {
     throw new Error("SYNC_BACKEND=DIR requires SYNC_DIR");
   }
-  // LOG writes the status documents to the log instead of Firestore. It cannot bring a
-  // VM to ready, since every call to the function needs the session.
   const statusBackend = (env.STATUS_BACKEND ?? "FIRESTORE").toUpperCase();
-  if (!["FIRESTORE", "LOG", "MEMORY"].includes(statusBackend)) {
-    throw new Error(`STATUS_BACKEND must be FIRESTORE, LOG or MEMORY, got ${statusBackend}`);
+  if (!["FIRESTORE", "MEMORY"].includes(statusBackend)) {
+    throw new Error(`STATUS_BACKEND must be FIRESTORE or MEMORY, got ${statusBackend}`);
   }
   const maxDuration = positiveInt(env, "PACKAGE_MAX_DURATION_SECONDS", PACKAGE_MAX_DURATION_DEFAULT);
   if (maxDuration > 28_800) {

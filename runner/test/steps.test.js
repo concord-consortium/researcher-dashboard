@@ -104,11 +104,12 @@ test("runPackage fails when the package wrote no display.md, and ignores a displ
 
 // Answers the package's run, then the kills and checks that follow it, from `left`: what
 // pgrep finds after each kill, an exit code 1 meaning nothing.
-function processExec({ left = [1], run = async () => ({ stdout: "", stderr: "" }), onPackage } = {}) {
+function processExec({ left = [1], run = async () => ({ stdout: "", stderr: "" }), onPackage, onKill } = {}) {
   const calls = [];
   const exec = async (command, args, options) => {
     calls.push([command, ...args].join(" "));
     if (command === "/usr/sbin/ip") { const out = await run(); onPackage?.(); return out; }
+    if (args.includes("/usr/bin/kill")) onKill?.();
     if (command === "/usr/bin/pgrep") {
       const next = left.shift();
       if (typeof next === "number") throw Object.assign(new Error(`pgrep exited ${next}`), { code: next });
@@ -122,10 +123,10 @@ function processExec({ left = [1], run = async () => ({ stdout: "", stderr: "" }
 
 test("after a run every process of the package uid is killed before its output is read", async () => {
   await withPackageDir(async (dir, outputDir) => {
-    // A process the package left behind would rewrite display.md once the runner looked away.
-    const { exec, calls } = processExec({ onPackage: () => fs.writeFileSync(path.join(outputDir, "display.md"), "# ok") });
+    // The display only exists once the kill has run, so a read before the kill finds none.
+    const { exec, calls } = processExec({ onKill: () => fs.writeFileSync(path.join(outputDir, "display.md"), "# after kill") });
     const result = await makeSteps().runPackage({ manifest: { name: "x", version: "1.0.0", entrypoint: "run.py", dir }, paths: { outputDir }, env: {}, uid: 1000, exec });
-    assert.equal(result.display, "# ok");
+    assert.equal(result.display, "# after kill");
     assert.equal(calls.length, 3);
     assert.match(calls[1], /^\/usr\/bin\/setpriv --reuid=1000 --regid=1000 .* \/usr\/bin\/kill -KILL -1$/);
     // A zombie of the uid runs nothing, and nothing reaps it when the runner is PID 1.
@@ -194,14 +195,8 @@ test("a package that fails has its output logged before the failure is raised", 
 test("STATUS_BACKEND selects the store and rejects anything else", async () => {
   const { loadEnv } = await import("../server/config.js");
   assert.equal(loadEnv({}).statusBackend, "FIRESTORE");
-  assert.equal(loadEnv({ STATUS_BACKEND: "log" }).statusBackend, "LOG");
-  assert.throws(() => loadEnv({ STATUS_BACKEND: "firestor" }), /must be FIRESTORE, LOG or MEMORY/);
-});
-
-test("LogStore records writes without a sign-in, and cannot call the function", async () => {
-  const { LogStore } = await import("../server/status.js");
-  const store = new LogStore();
-  assert.equal(await store.signIn("placeholder"), null);
-  await store.merge("researcher_dashboard/p/runners/439", { state: "ready" });
-  await assert.rejects(() => store.idToken(), /no ID token/);
+  assert.equal(loadEnv({ STATUS_BACKEND: "memory" }).statusBackend, "MEMORY");
+  // LOG signed nothing in, so it could never bring a VM past /run's claims check.
+  assert.throws(() => loadEnv({ STATUS_BACKEND: "log" }), /must be FIRESTORE or MEMORY/);
+  assert.throws(() => loadEnv({ STATUS_BACKEND: "firestor" }), /must be FIRESTORE or MEMORY/);
 });

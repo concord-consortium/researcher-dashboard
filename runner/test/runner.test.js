@@ -527,6 +527,64 @@ test("a plan started by a resume shares the fetch the old plan has under way", a
   assert.equal(result(built.docs, "users/1/counts").status, "done");
 });
 
+test("a plan stood down during its fetch asks report-server nothing", async () => {
+  const pending = [];
+  const built = build({
+    stepOverrides: {
+      resolvePackage: ({ pkg }) => new Promise((r) => { pending.push(() => r(manifestFor(pkg.identity, { urls: { any: ["*x*"] } }))); })
+    }
+  });
+  built.docs.set(classPath(PORTAL, CLASS), { platform_id: PLATFORM_ID, assignment_urls: ["https://a/x"], interactive_urls: [] });
+  built.fn.queue({ identity: "users/1/counts" });
+  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+  await until(() => pending.length, "the old plan's fetch");
+  const oldLoop = built.runner.loop;
+  built.runner.resume();
+  await settle(10);
+  for (const release of pending) release();
+  await oldLoop;
+  await built.runner.loop;
+  assert.equal(built.record.applies.length, 1, "only the new plan asks");
+});
+
+test("a fetch that fails after a resume is refused once, by the new plan", async () => {
+  let reject;
+  const built = build({ stepOverrides: { resolvePackage: () => new Promise((_, r) => { reject = r; }) } });
+  built.fn.queue({ identity: "users/1/counts" });
+  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+  await until(() => reject, "the old plan's fetch");
+  const oldLoop = built.runner.loop;
+  built.runner.resume();
+  await settle(10);
+  const lines = await captured(async () => {
+    reject(new Error("packages/users/1/counts/1.0.0.zip is missing or not readable"));
+    await oldLoop;
+    await built.runner.loop;
+  });
+  const failures = writesTo(built.record, resultPath(PORTAL, CLASS, USER, "users__1__counts")).filter((w) => w.status === "failed");
+  assert.equal(failures.length, 1);
+  assert.equal(lines.filter((l) => l.event === "package.refused").length, 1, "the old plan refuses nothing");
+});
+
+test("a fetch that failed is tried again when the package is run again", async () => {
+  let fetches = 0;
+  const built = build({
+    stepOverrides: {
+      resolvePackage: async ({ pkg }) => {
+        fetches += 1;
+        if (fetches === 1) throw new Error("packages/users/1/counts/1.0.0.zip is missing or not readable");
+        return manifestFor(pkg.identity);
+      }
+    }
+  });
+  built.fn.queue({ identity: "users/1/counts" });
+  onceWhen(built, () => result(built.docs, "users/1/counts")?.status === "failed", () => requeue(built, "users/1/counts"));
+  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+  await built.runner.loop;
+  assert.equal(fetches, 2);
+  assert.equal(result(built.docs, "users/1/counts").status, "done");
+});
+
 test("a request report-server refuses outright refuses the package with its message", async () => {
   const built = build({ applies: async () => { throw new ReportServerError("scope_urls[3] is longer than 2048 bytes", { status: 400, refusal: true }); } });
   built.fn.queue({ identity: "users/1/ap" });
@@ -660,6 +718,28 @@ test("a package that outruns its bound fails rather than hanging", async () => {
   assert.equal(doc.status, "failed");
   assert.match(doc.error, /ran past its/);
   assert.equal(built.runner.state, "ready");
+});
+
+test("a package past its bound during preparation is never started", async () => {
+  let prepared;
+  let started = false;
+  const built = build({
+    envOverrides: { packageTimeoutMs: 20 },
+    stepOverrides: {
+      preparePackage: (args) => new Promise((r) => { prepared = () => r({ paths: { outputDir: path.join(args.workRoot, "out", args.docId), home: "/h", dataDir: args.dataRoot }, env: {} }); }),
+      killPackageProcesses: async () => { prepared?.(); },
+      runPackage: async () => { started = true; return { display: "x", summary: "y" }; }
+    }
+  });
+  built.fn.queue({ identity: "users/1/slow-prepare" });
+  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+  await built.runner.loop;
+  const writes = writesTo(built.record, resultPath(PORTAL, CLASS, USER, "users__1__slow-prepare"));
+  const failed = writes.findIndex((w) => w.status === "failed");
+  assert.ok(failed >= 0);
+  assert.deepEqual(writes.slice(failed + 1).filter((w) => w.stage), [], "no stage after the failure");
+  assert.equal(started, false, "the package's entrypoint never runs");
+  assert.ok(!writes.some((w) => w.stage === "run_package"));
 });
 
 // Every package runs as one uid, so one past its bound must be gone before the next starts.
@@ -936,8 +1016,6 @@ test("/idle is not called on a flush that does not verify", async () => {
   assert.equal(flushes, 2);
 });
 
-// A slow /idle answer can arrive after the VM was suspended and resumed; it is not read
-// as a failure or as anything else.
 // Stops a loop that would otherwise poll until the VM's cap, so a regression fails the
 // test rather than hanging the file.
 function stopAfter(built, polls) {
@@ -1064,6 +1142,8 @@ test("the status document's queue leaves out a package the same plan failed", as
   await built.runner.loop;
 });
 
+// A slow /idle answer can arrive after the VM was suspended and resumed; it is not read
+// as a failure or as anything else.
 test("an /idle answer from before a resume is ignored", async () => {
   const built = build();
   let release;
@@ -1380,11 +1460,14 @@ test("a hook write repairs a runner document the claim's write never reached", a
 
 test("/suspend mid-run on an unverified flush names the outstanding run on its failed write", async () => {
   const { built, finish } = await holding();
+  built.docs.set(runnerPath(PORTAL, USER), { ...runnerDoc(built.docs), current_package: null });
   const flush = built.runner.syncer.flushAndVerify;
   built.runner.syncer.flushAndVerify = async () => ({ ok: false, reason: "sync incomplete" });
   await assert.rejects(() => built.runner.suspend());
   assert.equal(runnerDoc(built.docs).state, "failed");
-  assert.deepEqual(runnerDoc(built.docs).current_package, { class_hash: CLASS, package_key: SLOW_KEY });
+  const failedWrite = writesTo(built.record, runnerPath(PORTAL, USER)).at(-1);
+  assert.equal(failedWrite.state, "failed");
+  assert.deepEqual(failedWrite.current_package, { class_hash: CLASS, package_key: SLOW_KEY });
   built.runner.syncer.flushAndVerify = flush;
   finish();
   await built.runner.loop;
@@ -1537,6 +1620,7 @@ test("/terminate's failure write is bounded, so a hung write does not keep the h
 test("/terminate after an unverified flush names the outstanding run on its failed write", async () => {
   const { built, finish } = await holding();
   try {
+    built.docs.set(runnerPath(PORTAL, USER), { ...runnerDoc(built.docs), current_package: null });
     built.runner.syncer.flushAndVerify = async () => ({ ok: false, reason: "sync incomplete" });
     await assert.rejects(() => built.runner.terminate());
     assert.equal(runnerDoc(built.docs).state, "failed");

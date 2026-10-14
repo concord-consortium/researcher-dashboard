@@ -197,6 +197,25 @@ test("a link the package left in its data directory is not followed", async () =
   assert.ok(chowned.includes(first.paths.dataDir), "the directory itself is still handed over");
 });
 
+// A hard link passes every check a symbolic link fails, and can name a file of root's.
+test("a hard-linked file in the data directory is not chowned", async () => {
+  const chowned = [];
+  const first = await prepare({ uid: process.getuid() });
+  const outside = path.join(root, "root-only-hard");
+  fs.writeFileSync(outside, "secret");
+  fs.linkSync(outside, path.join(first.paths.dataDir, "hard"));
+  await prepare({ uid: process.getuid(), chown: (target) => chowned.push(target) });
+  assert.ok(!chowned.includes(path.join(first.paths.dataDir, "hard")));
+});
+
+test("a hard-linked display.md is refused", async () => {
+  const { paths } = await prepare();
+  const outside = path.join(root, "root-only-display");
+  fs.writeFileSync(outside, "secret");
+  fs.linkSync(outside, path.join(paths.outputDir, "display.md"));
+  assert.throws(() => readPackageResult(paths.outputDir), /linked from elsewhere/);
+});
+
 test("the package owns every file of its class's data directory", async () => {
   const chowned = [];
   const first = await prepare({ uid: process.getuid() });

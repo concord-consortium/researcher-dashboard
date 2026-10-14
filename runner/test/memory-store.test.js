@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { MemoryStore, SERVER_TIME } from "../server/status.js";
+import { MemoryStore, RunnerStatus, SERVER_TIME } from "../server/status.js";
 
 // The in-memory store stands in for Firestore in every runner test, so its merge has to
 // behave as Firestore's does, or a test passes on a write Firestore would get wrong.
@@ -20,4 +20,30 @@ test("mergeIf writes only while its test holds for the stored document", async (
   assert.equal(store.docs.get("a/b").state, "running");
   assert.equal(await store.mergeIf("a/b", (doc) => doc?.microvm_id === "mvm-1", { state: "terminated" }), true);
   assert.deepEqual(store.docs.get("a/b"), { microvm_id: "mvm-1", state: "terminated" });
+});
+
+// A hook's write can fail while another write is in flight; only what that write carried
+// is cleared when it lands.
+test("a failure recorded while a status write is in flight is reported by the next one", async () => {
+  const store = new MemoryStore({ docs: new Map() });
+  const merge = store.merge.bind(store);
+  let release;
+  let calls = 0;
+  store.merge = (p, fields) => {
+    calls += 1;
+    if (calls === 1) return Promise.reject(new Error("UNAVAILABLE first"));
+    if (calls === 2) return new Promise((r) => { release = () => r(merge(p, fields)); });
+    if (calls === 3) return Promise.reject(new Error("UNAVAILABLE third"));
+    return merge(p, fields);
+  };
+  const status = new RunnerStatus({ store, portal: "p", platformUserId: "1", platformId: "https://p" });
+  await status.writeFromHook("suspend", { state: "suspending" });
+  const inFlight = status.writeFromHook("work", { state: "ready" });
+  await new Promise((r) => setImmediate(r));
+  await status.writeFromHook("terminate", { state: "terminated" });
+  release();
+  await inFlight;
+  await status.writeFromHook("work", { state: "ready" });
+  const reported = store.docs.get(status.path).status_write_failures.map((f) => f.hook);
+  assert.deepEqual(reported, ["terminate"], "the in-flight write carried the first; the next carries the one recorded meanwhile");
 });
