@@ -57,10 +57,6 @@ export class FirestoreStore {
     return snap.exists() ? snap.data() : null;
   }
 
-  async set(path, fields) {
-    await setDoc(doc(this.db, path), fields);
-  }
-
   async merge(path, fields) {
     await setDoc(doc(this.db, path), fields, { merge: true });
   }

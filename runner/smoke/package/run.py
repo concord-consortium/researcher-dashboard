@@ -15,6 +15,8 @@ import time
 
 # The columns the official packages read: cc-data's contract columns on answers, and the
 # run_answers columns wildfire-responses counts through.
+# What smoke.mjs stack looks for in the result's display; its MARKER must match.
+MARKER = "RUNNER-SMOKE-OK"
 COLUMNS = {
     "answers": ["source_key", "remote_endpoint", "question_id"],
     "run_answers": ["run_id", "type", "remote_endpoint", "source_key", "question_id"],
@@ -80,10 +82,10 @@ def main():
 
     os.makedirs(output_dir, exist_ok=True)
     with open(os.path.join(output_dir, "display.md"), "w", encoding="utf-8") as handle:
-        handle.write(f"# Runner smoke check\n\nRUNNER-SMOKE-OK\n\n- class {class_id}\n- {answers} answers\n- columns checked: "
+        handle.write(f"# Runner smoke check\n\n{MARKER}\n\n- class {class_id}\n- {answers} answers\n- columns checked: "
                      + ", ".join(f"{v}.{c}" for v, cs in COLUMNS.items() for c in cs) + "\n")
     with open(os.path.join(output_dir, "summary.txt"), "w", encoding="utf-8") as handle:
-        handle.write(f"RUNNER-SMOKE-OK: {answers} answers for class {class_id}\n")
+        handle.write(f"{MARKER}: {answers} answers for class {class_id}\n")
     with open(os.path.join(output_dir, "counts.json"), "w", encoding="utf-8") as handle:
         json.dump({"answers": answers}, handle)
     print(json.dumps({"answers": answers, "prompts": prompts}))

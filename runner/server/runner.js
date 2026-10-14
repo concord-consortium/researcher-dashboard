@@ -28,10 +28,9 @@ export const HEARTBEAT_SECONDS = 60;
 export const LOST_RUN_REASON = "The machine running it stopped before the run finished; run it again.";
 
 export class HookError extends Error {
-  constructor(status, message, extra = {}) {
+  constructor(status, message) {
     super(message);
     this.status = status;
-    this.extra = extra;
   }
 }
 

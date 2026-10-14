@@ -84,7 +84,7 @@ export function createServer({ runner, env }) {
       // record a transition it cannot stand behind, so it is logged as the
       // meaningful event it is rather than swallowed.
       log.error("hook.failed", { route: key, status, error: err.message });
-      send(status, { error: err.message, ...(err.extra ?? {}) });
+      send(status, { error: err.message });
     }
   });
 }

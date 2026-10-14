@@ -242,12 +242,6 @@ export class MemoryStore {
     return `id-token-for:${this.signedInWith.at(-1)}`;
   }
 
-  async set(path, doc) {
-    if (this.closed) throw new Error("store is closed");
-    this.docs.set(path, { ...doc });
-    this.writes.push({ op: "set", path, doc: { ...doc } });
-  }
-
   // Firestore's merge: a nested map merges into the stored one, and anything else,
   // arrays included, replaces it.
   async merge(path, fields) {

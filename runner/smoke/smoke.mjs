@@ -24,6 +24,7 @@ import { resultPath, runnerPath } from "../server/status.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PACKAGE = path.join(HERE, "package");
+// smoke/package/run.py writes this into its display; the two must match.
 const MARKER = "RUNNER-SMOKE-OK";
 
 function args(argv) {
