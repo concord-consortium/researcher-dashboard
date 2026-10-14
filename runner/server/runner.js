@@ -298,6 +298,7 @@ export class Runner {
           await this.sleep(this.env.idlePollMs);
           continue;
         }
+        if (!this.#current(epoch)) return;
         this.syncer.start();
         refreshed = true;
         // A refused suspend left the VM failed; the loop now running puts it back in service.
@@ -317,7 +318,7 @@ export class Runner {
 
       if (this.#lastWritten !== STATES.READY) {
         const written = await this.status.writeFromHook("work", { state: STATES.READY, current_package: null, queue: [] });
-        if (written) this.#lastWritten = STATES.READY;
+        if (written && this.#current(epoch)) this.#lastWritten = STATES.READY;
       }
       if (this.#vm.state === STATES.RUNNING) this.#vm.to(STATES.READY);
       idleSince ??= this.now();

@@ -194,7 +194,9 @@ function readOwnFile(outputDir, name, limit) {
   if (fs.realpathSync(dir) !== dir) throw new Error(`the package replaced its output directory with a link`);
   let fd;
   try {
-    fd = fs.openSync(path.join(dir, name), fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+    // O_NONBLOCK, so a named pipe left in a file's place opens at once and is refused below
+    // rather than blocking the runner's process on a writer that will never come.
+    fd = fs.openSync(path.join(dir, name), fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
   } catch (err) {
     if (err.code === "ENOENT") return null;
     if (err.code === "ELOOP") throw new Error(`the package's ${name} is a link, not a file`);

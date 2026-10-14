@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { FunctionError, makeFunctionClient } from "../server/function-client.js";
+import { FUNCTION_TIMEOUT_MS, FunctionError, makeFunctionClient } from "../server/function-client.js";
 
 function fakeFetch(status, body) {
   const calls = [];
@@ -33,4 +33,12 @@ test("an answer without the envelope is refused", async () => {
   const { fetchImpl } = fakeFetch(200, undefined);
   const call = makeFunctionClient({ baseUrl: "https://f", fetchImpl });
   await assert.rejects(() => call("idle", { idToken: "t", body: {} }), /no JSON envelope/);
+});
+
+// Fifteen seconds, inside the hooks' sixty and well short of a suspend.
+test("a call the function never answers is abandoned at its bound", async () => {
+  assert.equal(FUNCTION_TIMEOUT_MS, 15_000);
+  const fetchImpl = (url, init) => new Promise((_, reject) => init.signal.addEventListener("abort", () => reject(init.signal.reason)));
+  const call = makeFunctionClient({ baseUrl: "https://f", fetchImpl, timeoutMs: 20 });
+  await assert.rejects(() => call("work", { idToken: "t", body: {} }));
 });

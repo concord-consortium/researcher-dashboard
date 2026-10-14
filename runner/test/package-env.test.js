@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -209,6 +210,13 @@ test("a hard-linked file in the data directory is not chowned", async () => {
   fs.linkSync(outside, path.join(first.paths.dataDir, "hard"));
   await prepare({ uid: process.getuid(), chown: (target) => chowned.push(target) });
   assert.ok(!chowned.includes(path.join(first.paths.dataDir, "hard")));
+});
+
+// A pipe with no writer would block a plain open for good, and the runner with it.
+test("a named pipe in place of display.md is refused at once", async () => {
+  const { paths } = await prepare();
+  execFileSync("mkfifo", [path.join(paths.outputDir, "display.md")]);
+  assert.throws(() => readPackageResult(paths.outputDir), /not a file/);
 });
 
 test("a hard-linked display.md is refused", async () => {

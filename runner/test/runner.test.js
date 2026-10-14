@@ -6,7 +6,7 @@ import path from "node:path";
 import test, { afterEach, beforeEach } from "node:test";
 import { disableDefaultCredentialChain, loadEnv } from "../server/config.js";
 import { makeSteps } from "../server/steps.js";
-import { HEARTBEAT_SECONDS, HookError, LOST_RUN_REASON, Runner } from "../server/runner.js";
+import { HEARTBEAT_SECONDS, HookError, LOST_RUN_REASON, REVOKE_TIMEOUT_MS, Runner } from "../server/runner.js";
 import { buildRunner } from "../server/index.js";
 import { packageDocId, packageKey } from "../server/package-fetch.js";
 import { MemoryStore, SERVER_TIME, STATUS_WRITE_TIMEOUT_MS, classPath, resultPath, runnerPath, scopePath } from "../server/status.js";
@@ -1677,6 +1677,54 @@ test("a resume after a suspend logs no missing suspend", async () => {
   assert.ok(!lines.some((l) => l.event === "lifecycle.resume_without_suspend"));
 });
 
+test("a loop a resume overtook during its credential fetch does not start the syncer", async () => {
+  const { runner } = await started();
+  await runner.loop;
+  const pending = [];
+  runner.storage = { markStale() {}, client: () => new Promise((r) => pending.push(r)) };
+  let starts = 0;
+  const start = runner.syncer.start.bind(runner.syncer);
+  runner.syncer.start = () => { starts += 1; return start(); };
+  await runner.suspend();
+  runner.resume();
+  await until(() => pending.length === 1, "the first loop's fetch");
+  runner.resume();
+  await until(() => pending.length === 2, "the second loop's fetch");
+  pending[0]();
+  await settle(10);
+  assert.equal(starts, 0, "the stood-down loop starts nothing");
+  pending[1]();
+  await runner.loop;
+  assert.equal(starts, 1);
+});
+
+test("a ready write in flight across a suspend and resume leaves the new loop to write ready", async () => {
+  let held = null;
+  let readies = 0;
+  const built = build({
+    wrapStore: (store) => {
+      const merge = store.merge.bind(store);
+      store.merge = (p, fields) => {
+        // The write lands at once; only its answer is late.
+        if (p.includes("/runners/") && fields.state === "ready" && fields.current_package === null && ++readies === 1) {
+          return merge(p, fields).then(() => new Promise((r) => { held = r; }));
+        }
+        return merge(p, fields);
+      };
+      return store;
+    }
+  });
+  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+  await until(() => held, "the drained ready write");
+  const oldLoop = built.runner.loop;
+  await built.runner.suspend();
+  built.runner.resume();
+  held();
+  await oldLoop;
+  await built.runner.loop;
+  assert.equal(runnerDoc(built.docs).state, "ready", "the new loop wrote ready over suspended");
+});
+
 test("a resume with no suspend since the last activity is logged", async () => {
   const lines = [];
   const original = process.stdout.write;
@@ -1783,6 +1831,26 @@ test("currentPackage names the outstanding run, and null with none", async () =>
   finish();
   await built.runner.loop;
   assert.equal(built.runner.currentPackage, null);
+});
+
+test("a revocation that never answers does not hold /terminate past its bound", async (t) => {
+  const { runner, docs } = await started({ revoke: () => new Promise(() => {}) });
+  await runner.loop;
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let ended = false;
+  try {
+    const lines = await captured(async () => {
+      const terminating = runner.terminate().then(() => { ended = true; });
+      await settle(10);
+      t.mock.timers.tick(REVOKE_TIMEOUT_MS + 1000);
+      await until(() => ended, "the hook's end");
+      await terminating;
+    });
+    assert.equal(runnerDoc(docs).state, "terminated");
+    assert.ok(lines.some((l) => l.event === "report_server.refused" && l.call === "revoke"));
+  } finally {
+    t.mock.timers.reset();
+  }
 });
 
 test("/terminate leaves a runner document that records another VM", async () => {
