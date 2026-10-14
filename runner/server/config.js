@@ -50,6 +50,9 @@ function positiveInt(env, name, fallback) {
 // report-server accepted.
 export const PACKAGE_MAX_DURATION_DEFAULT = 7200;
 
+// A VM's maximum life, which the function launches it with.
+export const VM_LIFE_SECONDS = 28_800;
+
 export function loadEnv(env = process.env) {
   const backend = (env.SYNC_BACKEND ?? "S3").toUpperCase();
   if (backend !== "S3" && backend !== "DIR") {
@@ -63,8 +66,8 @@ export function loadEnv(env = process.env) {
     throw new Error(`STATUS_BACKEND must be FIRESTORE or MEMORY, got ${statusBackend}`);
   }
   const maxDuration = positiveInt(env, "PACKAGE_MAX_DURATION_SECONDS", PACKAGE_MAX_DURATION_DEFAULT);
-  if (maxDuration > 28_800) {
-    throw new Error("PACKAGE_MAX_DURATION_SECONDS must be at most 28800, the VM's life");
+  if (maxDuration > VM_LIFE_SECONDS) {
+    throw new Error(`PACKAGE_MAX_DURATION_SECONDS must be at most ${VM_LIFE_SECONDS}, the VM's life`);
   }
   if (maxDuration < PACKAGE_MAX_DURATION_DEFAULT) {
     throw new Error(`PACKAGE_MAX_DURATION_SECONDS must be at least ${PACKAGE_MAX_DURATION_DEFAULT}, the most report-server accepts at publish, got ${maxDuration}`);

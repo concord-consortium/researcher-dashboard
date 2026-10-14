@@ -89,7 +89,7 @@ export function createServer({ runner, env }) {
   });
 }
 
-export function buildRunner(env, { fetchImpl } = {}) {
+export function buildRunner(env) {
   const dir = env.backend === "DIR";
   // One document tree shared by every in-memory store, as one Firestore is shared by
   // every connection to it.
@@ -100,7 +100,7 @@ export function buildRunner(env, { fetchImpl } = {}) {
       if (env.statusBackend === "MEMORY" || dir) return new MemoryStore({ docs: memoryDocs });
       return new FirestoreStore({ projectId });
     },
-    makeFunctionClient: ({ baseUrl }) => makeFunctionClient({ baseUrl, ...(fetchImpl ? { fetchImpl } : {}) }),
+    makeFunctionClient: ({ baseUrl }) => makeFunctionClient({ baseUrl }),
     // The broker's credentials, for every S3 call the runner makes. DIR mode has no S3.
     makeStorage: ({ bucket, prefix, fetchCredentials }) =>
       dir ? null : new StorageCredentials({ bucket, prefix, fetchCredentials }),

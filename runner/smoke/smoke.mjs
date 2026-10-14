@@ -18,7 +18,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { firebaseConfig } from "../server/firebase-projects.js";
-import { CLUE_SOURCE } from "../server/package-env.js";
+import { scopeFile } from "../server/package-env.js";
 import { VERSION, packageDocId } from "../server/package-fetch.js";
 import { resultPath, runnerPath } from "../server/status.js";
 
@@ -105,7 +105,7 @@ function image(opts) {
   const imageName = process.env.IMAGE ?? "researcher-dashboard-runner";
   const platform = process.env.PLATFORM ?? "linux/arm64";
   execFileSync("make", ["build", `IMAGE=${imageName}`, `PLATFORM=${platform}`], { cwd: path.join(HERE, ".."), stdio: "inherit" });
-  const scope = { kind: "class", id: opts.classHash, classes: [{ class_hash: opts.classHash, class_id: Number(opts.classId) }], assignments: [], clue_source: CLUE_SOURCE, dataset: "pkg-0", output_dir: "/tmp/out" };
+  const scope = scopeFile({ scope: { kind: "class", id: opts.classHash, classes: [{ class_hash: opts.classHash, class_id: Number(opts.classId) }], assignments: [] }, dataset: "pkg-0", outputDir: "/tmp/out" });
   // The cc-data the image was built with, read from the pin rather than written twice.
   const ref = fs.readFileSync(path.join(HERE, "..", "Dockerfile"), "utf8").match(/^ARG CC_DATA_REF=(\S+)$/m)?.[1] ?? fail("the Dockerfile pins no CC_DATA_REF");
   const script = [

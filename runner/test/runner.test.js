@@ -1525,6 +1525,32 @@ test("an adoption a resume has overtaken closes its own stores, not the new loop
   await built.runner.loop;
 });
 
+test("a VM whose suspend was refused goes on taking work without a resume", async () => {
+  const { runner, fn, docs } = await started();
+  await runner.loop;
+  const flush = runner.syncer.flushAndVerify;
+  runner.syncer.flushAndVerify = async () => ({ ok: false, reason: "sync incomplete" });
+  await assert.rejects(() => runner.suspend());
+  runner.syncer.flushAndVerify = flush;
+  fn.queue({ identity: "users/1/after" });
+  await runner.loop;
+  assert.equal(result(docs, "users/1/after").status, "done");
+});
+
+test("a failed terminate after a failed suspend still writes the runner document failed", async () => {
+  const { built, finish } = await holding();
+  try {
+    built.runner.syncer.flushAndVerify = async () => ({ ok: false, reason: "sync incomplete: 1 file(s) still outstanding" });
+    await assert.rejects(() => built.runner.suspend());
+    built.docs.set(runnerPath(PORTAL, USER), { ...runnerDoc(built.docs), state: "suspending", current_package: null });
+    await assert.rejects(() => built.runner.terminate(), (err) => err instanceof HookError && /sync incomplete/.test(err.message));
+    assert.equal(runnerDoc(built.docs).state, "failed");
+    assert.deepEqual(runnerDoc(built.docs).current_package, { class_hash: CLASS, package_key: SLOW_KEY });
+  } finally {
+    finish();
+  }
+});
+
 test("a denied PutObject leaves failed, never suspended, and fails the hook", async () => {
   const { runner, docs, record } = await started();
   await runner.loop;

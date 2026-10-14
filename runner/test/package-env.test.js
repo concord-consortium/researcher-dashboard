@@ -171,11 +171,16 @@ test("the package is told where the egress proxy is, and nothing when there is n
 // cc-data creates its own credential store and config under HOME, as the package's uid,
 // so the home has to belong to the package before the login runs rather than after.
 test("the home belongs to the package before cc-data is logged in", async () => {
-  const uid = process.getuid();
-  let ownerAtLogin = null;
-  const { paths } = await prepare({ uid, login: async ({ home }) => { ownerAtLogin = fs.statSync(home).uid; } });
-  assert.equal(ownerAtLogin, uid, "cc-data cannot create its store in a home it does not own");
-  assert.equal(fs.statSync(paths.home).uid, uid);
+  const uid = 4242;
+  const events = [];
+  const { paths } = await prepare({
+    uid,
+    chown: (target, owner) => events.push(`chown:${target}:${owner}`),
+    login: async () => { events.push("login"); }
+  });
+  const chownedHome = events.indexOf(`chown:${paths.home}:${uid}`);
+  assert.ok(chownedHome >= 0, "the home is handed to the package uid");
+  assert.ok(chownedHome < events.indexOf("login"), "cc-data cannot create its store in a home it does not own");
 });
 
 // Root chowns a tree the package wrote to, so a link the package left there must not hand

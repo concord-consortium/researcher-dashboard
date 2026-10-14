@@ -1,12 +1,12 @@
 import { log, setContext, timed } from "./log.js";
-import { defaultChainState, parseRunHookPayload, researcherPrefix } from "./config.js";
+import { VM_LIFE_SECONDS, defaultChainState, parseRunHookPayload, researcherPrefix } from "./config.js";
 import { verifySandbox } from "./sandbox.js";
 import { STATES, VmState, canTransition } from "./state.js";
 import { ClassDocuments, RunnerStatus, bounded } from "./status.js";
 import { askApplies, revokeOwnToken } from "./report-server.js";
 import { CHECKSUM, declaresPatterns, IDENTITY, PACKAGE_DOC_ID, VERSION, packageDocId } from "./package-fetch.js";
 
-const EIGHT_HOURS_MS = 8 * 60 * 60 * 1000;
+const EIGHT_HOURS_MS = VM_LIFE_SECONDS * 1000;
 // Kept back from the window for the last flush and the /terminate hook at the VM's cap.
 export const WINDOW_RESERVE_MS = 5 * 60_000;
 // The watchdog's margin on a declared duration, and the in-VM timeout's.
@@ -721,9 +721,13 @@ export class Runner {
     // proven is exactly what this contract exists to refuse.
     const result = await this.syncer.flushAndVerify("suspend");
     if (!result.ok) {
-      this.#vm.to(STATES.FAILED);
+      if (this.#vm.state !== STATES.FAILED) this.#vm.to(STATES.FAILED);
       log.error("sync.failed", { hook: "suspend", error: result.reason });
       await this.status.writeFromHook("suspend", { state: STATES.FAILED, error: result.reason, ...this.#runningPackage() });
+      // The VM stays awake, and the loop that asked /idle to suspend it has ended, so a new
+      // one takes up the work as after a resume.
+      this.#epoch += 1;
+      this.#startLoop({ afterResume: true });
       throw new HookError(500, result.reason);
     }
     this.#vm.to(STATES.SUSPENDED);
@@ -788,7 +792,7 @@ export class Runner {
     this.syncer.stop();
     const result = await this.syncer.flushAndVerify("terminate");
     if (!result.ok) {
-      this.#vm.to(STATES.FAILED);
+      if (this.#vm.state !== STATES.FAILED) this.#vm.to(STATES.FAILED);
       log.error("sync.failed", { hook: "terminate", error: result.reason });
       await this.status.writeFromHook("terminate", { state: STATES.FAILED, error: result.reason, ...this.#runningPackage() }, { onlyIf });
       throw new HookError(500, result.reason);
