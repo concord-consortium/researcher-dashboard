@@ -83,7 +83,6 @@ test("the lifecycle hooks route through to the runner", async () => {
   assert.equal(doc.state, "terminated");
 });
 
-// The dispatch and the refresh are gone: nothing calls into the VM.
 test("/run-package and /refresh-token exist nowhere", async () => {
   await post(`${HOOK}/run`, { microvmId: "mvm-1", runHookPayload: PAYLOAD });
   assert.equal((await post("/run-package", {})).status, 404);

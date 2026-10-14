@@ -51,10 +51,6 @@ export class RunnerStatus {
     return runnerPath(this.portal, this.platformUserId);
   }
 
-  get pendingFailures() {
-    return [...this.#failures];
-  }
-
   // `onlyIf` is tested against the stored document in a transaction, and the write is
   // skipped, returning null, when it fails.
   async write(fields, { onlyIf } = {}) {

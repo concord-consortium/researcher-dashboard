@@ -503,6 +503,30 @@ test("a plan a resume has stood down makes no further call or write", async () =
   }
 });
 
+test("a plan started by a resume shares the fetch the old plan has under way", async () => {
+  const pending = [];
+  const fetched = () => { for (const release of pending) release(); };
+  const built = build({
+    stepOverrides: {
+      resolvePackage: ({ pkg }) => {
+        built.record.resolved.push(pkg);
+        return new Promise((r) => { pending.push(() => r(manifestFor(pkg.identity))); });
+      }
+    }
+  });
+  built.fn.queue({ identity: "users/1/counts" });
+  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+  await until(() => pending.length, "the old plan's fetch");
+  const oldLoop = built.runner.loop;
+  built.runner.resume();
+  await settle(10);
+  fetched();
+  await oldLoop;
+  await built.runner.loop;
+  assert.equal(built.record.resolved.length, 1, "one fetch for both plans");
+  assert.equal(result(built.docs, "users/1/counts").status, "done");
+});
+
 test("a request report-server refuses outright refuses the package with its message", async () => {
   const built = build({ applies: async () => { throw new ReportServerError("scope_urls[3] is longer than 2048 bytes", { status: 400, refusal: true }); } });
   built.fn.queue({ identity: "users/1/ap" });
@@ -1463,6 +1487,11 @@ test("a resume with no suspend since the last activity is logged", async () => {
   }
   await runner.loop;
   assert.ok(lines.some((l) => l.includes("lifecycle.resume_without_suspend")));
+});
+
+// The watchdog fails a lost run with the same words, so the two read as one reason.
+test("the lost-run reason is the watchdog's, word for word", () => {
+  assert.equal(LOST_RUN_REASON, "The machine running it stopped before the run finished; run it again.");
 });
 
 test("/terminate during a run fails the result first, revokes, flushes and terminates", async () => {

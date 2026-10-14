@@ -52,7 +52,7 @@ function tail(text) {
   return value.length > PACKAGE_OUTPUT_LIMIT ? `...${value.slice(-PACKAGE_OUTPUT_LIMIT)}` : value;
 }
 
-function logPackageOutput(identity, result, level) {
+function logPackageOutput(result, level) {
   log[level]("package.output", {
     stdout: tail(result?.stdout),
     stderr: tail(result?.stderr)
@@ -127,13 +127,13 @@ export function makeSteps({ login = ccDataLogin } = {}) {
           ...(exec ? { exec } : {})
         });
       } catch (err) {
-        logPackageOutput(manifest.name, err, "error");
+        logPackageOutput(err, "error");
         throw err;
       } finally {
         // Before the output is read, so nothing of the package's is left to change it.
         await killPackageProcesses({ uid, ...(exec ? { exec } : {}) });
       }
-      logPackageOutput(manifest.name, result, "info");
+      logPackageOutput(result, "info");
       return readPackageResult(paths.outputDir);
     }
   };

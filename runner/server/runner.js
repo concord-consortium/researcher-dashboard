@@ -1,5 +1,5 @@
 import { log, setContext, timed } from "./log.js";
-import { defaultChainState, parseRunHookPayload, portalHost, researcherPrefix } from "./config.js";
+import { defaultChainState, parseRunHookPayload, researcherPrefix } from "./config.js";
 import { verifySandbox } from "./sandbox.js";
 import { STATES, VmState, canTransition } from "./state.js";
 import { ClassDocuments, RunnerStatus, bounded } from "./status.js";
@@ -65,8 +65,8 @@ export class Runner {
   // Failed claim attempts per queued entry, for this awake period: cleared when the
   // entry's result is written and on every resume.
   #claimFailures = new Map();
-  // Verified manifests by identity, version and checksum, which never change for the
-  // VM's life, so a re-plan does not fetch and unpack the archive again.
+  // Verified manifests, or the fetch under way, by identity, version and checksum, which
+  // never change for the VM's life, so a re-plan does not fetch and unpack the archive again.
   #manifests = new Map();
   // report-server's yes for a class, identity and version, for this awake period.
   #applies = new Set();
@@ -446,17 +446,21 @@ export class Runner {
       }
 
       const archiveKey = `${entry.identity}@${entry.version}@${entry.checksum}`;
-      let manifest = this.#manifests.get(archiveKey);
-      if (!manifest) {
-        try {
-          manifest = await this.steps.resolvePackage({ pkg, backend: this.packageBackend, workRoot: this.env.workRoot, unzip: this.unzip });
-        } catch (err) {
-          await refuse(err.message);
-          continue;
-        }
-        if (!this.#current(epoch)) return null;
-        this.#manifests.set(archiveKey, manifest);
+      // The fetch in flight is shared, so a plan started by a resume never fetches the same
+      // archive into the same directory beside it.
+      if (!this.#manifests.has(archiveKey)) {
+        const fetching = this.steps.resolvePackage({ pkg, backend: this.packageBackend, workRoot: this.env.workRoot, unzip: this.unzip });
+        this.#manifests.set(archiveKey, fetching);
+        fetching.catch(() => this.#manifests.delete(archiveKey));
       }
+      let manifest;
+      try {
+        manifest = await this.#manifests.get(archiveKey);
+      } catch (err) {
+        await refuse(err.message);
+        continue;
+      }
+      if (!this.#current(epoch)) return null;
       const declared = manifest.expected_duration_seconds;
       if (declared > this.env.packageMaxDurationSeconds) {
         await refuse(`the package declares ${declared}s, over the runner's ceiling of ${this.env.packageMaxDurationSeconds}s`);
@@ -806,4 +810,3 @@ function checkScope(scope, classHash) {
   return null;
 }
 
-export { portalHost };

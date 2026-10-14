@@ -67,6 +67,8 @@ def main():
     run_answers = query(dataset, f"SELECT count(*) AS n FROM run_answers WHERE run_id = {run}")[0]["n"]
     if missing:
         raise RuntimeError(f"the dataset lacks the columns the official packages read: {', '.join(missing)}")
+    if answers == 0:
+        raise RuntimeError(f"run {run_id} pulled no answers, so run_answers' binding cannot be checked")
     if run_answers != answers:
         raise RuntimeError(f"run_answers holds {run_answers} answers for run {run_id}, not the {answers} the run pulled")
     if prompts != PROMPT_ROWS:

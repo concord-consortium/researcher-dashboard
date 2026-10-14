@@ -45,10 +45,6 @@ export class StorageCredentials {
     this.#stale = true;
   }
 
-  get fetchedAt() {
-    return this.#fetched?.at ?? null;
-  }
-
   #usable() {
     if (this.#stale || !this.#fetched) return false;
     return this.#fetched.expiresAt - this.now() > REFRESH_MARGIN_MS;
@@ -86,7 +82,7 @@ export class StorageCredentials {
       region: answer.region,
       expiration: new Date(expiresAt)
     });
-    this.#fetched = { expiresAt, at: this.now() };
+    this.#fetched = { expiresAt };
     this.#stale = false;
     log.info("storage.credentials_fetched", { expiration: answer.expiration });
   }
