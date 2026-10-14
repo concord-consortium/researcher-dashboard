@@ -2195,6 +2195,43 @@ test("a run that fails after /terminate leaves the hook's failure as the last wo
   assert.equal(result(built.docs, SLOW).error, LOST_RUN_REASON);
 });
 
+test("a /terminate during the finished run's counts write leaves the hook's failure as the last word", async () => {
+  const held = [];
+  const { built, finish } = await holding({
+    wrapStore: (store) => {
+      const replaceFields = store.replaceFields.bind(store);
+      store.replaceFields = (p, fields) => new Promise((resolve, reject) => held.push(() => replaceFields(p, fields).then(resolve, reject)));
+      return store;
+    }
+  });
+  finish();
+  await until(() => held.length, "the counts write");
+  await built.runner.terminate();
+  assert.equal(result(built.docs, SLOW).error, LOST_RUN_REASON);
+  held[0]();
+  await settle(20);
+  assert.equal(result(built.docs, SLOW).status, "failed");
+  assert.equal(result(built.docs, SLOW).error, LOST_RUN_REASON);
+});
+
+test("a /terminate during a failed run's beat leaves the hook's failure as the last word", async () => {
+  let fail;
+  const g = gate((p, fields) => p.includes("/results/") && Object.keys(fields).every((k) => ["platform_id", "updated_at"].includes(k)));
+  const built = build({ wrapStore: g.wrap, stepOverrides: { runPackage: () => new Promise((_, reject) => { fail = reject; }) } });
+  built.fn.queue({ identity: SLOW });
+  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+  await until(() => fail, "the package step");
+  await tick(built);
+  assert.equal(g.held.length, 1, "a beat is in flight");
+  fail(new Error("package exited 1"));
+  await settle(20);
+  await built.runner.terminate();
+  g.held[0].release();
+  await settle(20);
+  assert.equal(result(built.docs, SLOW).status, "failed");
+  assert.equal(result(built.docs, SLOW).error, LOST_RUN_REASON);
+});
+
 test("a refused revocation does not fail the terminate hook", async () => {
   const { runner } = await started({ revoke: async () => { throw new Error("report-server down"); } });
   await runner.loop;

@@ -638,12 +638,13 @@ export class Runner {
           log.error("status.write_failed", { write: "counts", error: err.message });
         }
         await heartbeat?.settled();
+        if (this.#terminating) return true;
         await docs.done(docId, { pkg, imageVersion: this.env.imageVersion, summary: result.summary, display: result.display });
       } catch (err) {
         log.error("package.failed", { error: err.message });
         if (timedOut) await this.#endTimedOutPackage(running);
-        if (this.#terminating) return true;
         await heartbeat?.settled();
+        if (this.#terminating) return true;
         await docs.failed(docId, { pkg, error: err.message })
           .catch((writeErr) => log.error("status.write_failed", { write: "result", error: writeErr.message }));
       } finally {
