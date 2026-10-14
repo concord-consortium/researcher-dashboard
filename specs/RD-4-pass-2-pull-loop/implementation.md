@@ -356,11 +356,14 @@ this.#run.heartbeat = this.#startHeartbeat(docs, docId);
 
 ```js
 // terminate(), with a run outstanding:
-this.#run.heartbeat.cancel();                               // no wait: one store sends its writes in order
-await bounded(docs.failed(docId, { pkg, error: LOST_RUN_REASON }));
+this.#run.heartbeat?.cancel();                              // none yet while the claim is being written
+await bounded(docs.failed(docId, { pkg, error: LOST_RUN_REASON }));   // no wait for a beat: one store sends its writes in order
 ...
-await this.status.writeFromHook("terminate", { state }, { onlyIf: (doc) => doc?.microvm_id === this.microvmId });
+const onlyIf = (doc) => doc?.microvm_id === this.microvmId;
+// both of terminate()'s runner-document writes: `failed` on an unverified flush, and `terminated`
+await this.status.writeFromHook("terminate", { state }, { onlyIf });
 // writeFromHook logs terminate.runner_doc_skipped when the test fails, bounded at 10 s as before (R21).
+// #runPackage starts no heartbeat once the VM is terminal, so a claim that lands after the hook gets no beats.
 
 // #workLoop, after the suspended branch:
 log.warn("idle.declined", { answer: idle });
@@ -378,13 +381,14 @@ idleSince = this.now();
 - A `done` the store rejects is followed by `failed`, awaited the same way.
 - A failed beat logs `heartbeat.failed` and the run ends `done`.
 - `previous` on the queued result survives the claim (read mid-run), the finish, and a second run that fails, in that order.
-- `/terminate` mid-run: the result reads the one reason, no tick writes after it, and the runner document reads `terminated` with `current_package` still naming the run; with the runner document's `microvm_id` set to another VM first, it is left as it was and `terminate.runner_doc_skipped` is logged.
+- `/terminate` mid-run: the result reads the one reason, no tick writes after it, and the runner document reads `terminated` with `current_package` still naming the run; with the runner document's `microvm_id` set to another VM first, it is left as it was and `terminate.runner_doc_skipped` is logged, for the `terminated` write and for the `failed` one after an unverified flush.
+- `/terminate` while the claim's write is still pending (no heartbeat yet): the hook revokes, flushes and writes `terminated`, and no beat is written after it.
 - `/suspend` mid-run leaves `current_package` naming the run (the existing test, kept).
 - `/idle` answering `run_in_progress` through two idle periods: `/idle` is called twice, eleven `/work` polls apart, with an `idle.declined` line each time, where without the reset it is called on every pass with no sleep.
 - `memory-store.test.js`: `mergeIf` writes when its test passes and leaves the document when it fails.
 - `firestore.emulator.test.js`: the claim with `heartbeat_seconds`, a beat, the finish, and `mergeIf` on the runner document both ways, against REPORT-143's rules as on `master`.
 
-**Mutations to run**: the claim without `heartbeat_seconds` (the emulator suite); no skip while a beat is unsettled; the timer not cancelled before the final write; a beat in flight not awaited; the final write bounded; the store closed or `ready` written before the final write settles; the claim written with `set`, losing `previous`; `/terminate` without its `onlyIf`; the old terminate string; `idleSince` not reset on a declined answer.
+**Mutations to run**: the claim without `heartbeat_seconds` (the emulator suite); no skip while a beat is unsettled; the timer not cancelled before the final write; a beat in flight not awaited; the final write bounded; the store closed or `ready` written before the final write settles; the claim written with `set`, losing `previous`; `/terminate` without its `onlyIf` (on each of its two writes); `terminate()` reading the heartbeat without `?.`; the old terminate string; `idleSince` not reset on a declined answer.
 
 **Verified**: not built. The writes it adds were run against REPORT-143's merged rules (requirements, "Against REPORT-143's merged rules").
 
@@ -401,28 +405,40 @@ idleSince = this.now();
 - `runner/server/status.js`: `counts` without `clueDocuments`
 - `runner/server/package-env.js`: `CLUE_SOURCE = "cc-data"`; `RUNNER_OWNED` and `chownTree`'s skip deleted; the comments that name the CLUE reader
 - `runner/server/package-fetch.js`: the `clue_prepull` type check deleted
-- `runner/server/firebase-projects.js`: the two CLUE projects, `clueProject` and `clueProjectFor` deleted
+- `runner/server/firebase-projects.js`: the two CLUE projects, `clueProject`, `clueProjectFor`, and `portalFirebaseApp` with each entry's row deleted (R56); the header comment says what the table is for without the pairing
+- `runner/server/steps.js` also loses the `customTokenClaims` and `customTokenPayload` import and the `customTokenClaims` re-export, which only the CLUE token's expiry used
+- `runner/smoke/smoke.mjs`: the `image` command's scope writes `clue_source: "cc-data"`, as the runner does (R37)
+- `runner/smoke/package/manifest.json`: `clue_prepull` deleted
 - `runner/server/firestore.js`: the `rtdb` getter, its emulator connection and the `firebase/database` import deleted
 - `README.md`: the runner's line no longer names a CLUE reader
-- Tests: `steps.test.js`, `firebase-projects.test.js`, `package-env.test.js`, `package-fetch.test.js`, `runner.test.js`, `firestore.emulator.test.js` (its `pull` stage write becomes `prepare_package`)
+- Tests: `steps.test.js`, `firebase-projects.test.js` (no `portalFirebaseApp`), `package-env.test.js`, `package-fetch.test.js`, `runner.test.js` (its fake `/work` keeps a CLUE row in `class_tokens`, which rigse still sends until RIGSE-369), `firestore.emulator.test.js` (its `pull` stage write becomes `prepare_package`, and its counts write loses `clueDocuments`)
 
 **Estimated diff size**: ~650 lines, almost all removed
 
 **Tests**: `scope.json` carries `clue_source: "cc-data"`; a run writes the stages `starting`, `prepare_package`, `run_package` and `done`, in that order; the counts' `data` holds no `clue_documents`; a `/work` answer whose class tokens include a CLUE row runs its package with no extra store signed in; `knownProjects()` is exactly `report-service-dev` and `report-service-pro`; `preparePackage` chowns every entry of the class data directory, a `clue-documents` directory included.
 
-**Verified**: not built. `grep -rni clue runner --exclude-dir=node_modules` should then find only `scope.json`'s `clue_source` and its test.
+**Verified**: not built. `grep -rni clue runner --exclude-dir=node_modules` should then find only `clue_source` (`package-env.js`, its test, and `smoke.mjs`'s scope) and `runner.test.js`'s CLUE token row.
 
 ---
 
 ### Step 7: the release's version, and the long-run smoke variant
 
-**Summary**: `runner/package.json`'s version goes to `0.2.0`, and the Makefile's `VERSION` default reads it (`VERSION ?= $(shell node -p "require('./package.json').version")`), so the release needs no `VERSION=` and the number lives once (R58, landing tracker 3.3a). `smoke.mjs build --hold <seconds>` writes the hold into a `hold.txt` beside `run.py` and adds it to `expected_duration_seconds`, and `run.py` sleeps that long after its checks when the file is there (R52), for the run-over-65-minutes check.
+**Summary**: `runner/package.json`'s version goes to `0.2.0`, and the Makefile's `VERSION` default reads it, so the release needs no `VERSION=` and the number lives once (R58, landing tracker 3.3a). It reads it with `sed`, not `node`, and stops on an empty value, since Node is not on every shell's `PATH` (this machine's non-interactive one included) and an empty `VERSION` would publish `runner-.zip`:
 
-**Files affected**: `runner/package.json`, `runner/Makefile`, `runner/smoke/smoke.mjs`, `runner/smoke/package/run.py`, `runner/README.md` (where the version comes from, and `--hold`). `cloudformation/README.md`'s `VERSION=<x.y.z>` still overrides the default and stays as it is, so this pass still changes nothing in `cloudformation/` (R58).
+```make
+VERSION ?= $(shell sed -n 's/^  "version": "\(.*\)",$$/\1/p' package.json)
+ifeq ($(strip $(VERSION)),)
+$(error VERSION is empty: package.json has no version line, and none was given)
+endif
+```
 
-**Estimated diff size**: ~40 lines
+`smoke.mjs build --hold <seconds>` writes the hold into a `hold.txt` beside `run.py` and adds it to `expected_duration_seconds`, and `run.py` sleeps that long after its checks when the file is there (R52), for the run-over-65-minutes check. `build --version <v>` writes the built manifest's version, since report-server refuses a version it already holds (`packages.ex`, `:already_exists`) and every variant the rollout publishes is a new version. `stack --wait-minutes <n>` replaces the fixed 10-minute wait, for the `--hold` checks. The smoke manifest's own version goes to `1.1.0`, since `run.py` changes and `projects/20/runner-smoke` 1.0.0 is published from the old one.
 
-**Checks**: `make -n publish-artifact` names `runner-0.2.0.zip`; `smoke.mjs build --hold 4200` twice gives one checksum, and its manifest declares the smoke package's duration plus 4,200.
+**Files affected**: `runner/package.json`, `runner/Makefile`, `runner/smoke/smoke.mjs`, `runner/smoke/package/run.py`, `runner/smoke/package/manifest.json` (`1.1.0`), `runner/README.md` (where the version comes from, `--hold`, `--version` and `--wait-minutes`). `cloudformation/README.md`'s `VERSION=<x.y.z>` still overrides the default and stays as it is, so this pass still changes nothing in `cloudformation/` (R58).
+
+**Estimated diff size**: ~60 lines
+
+**Checks**: `make -n publish-artifact` names `runner-0.2.0.zip` with no `node` on `PATH`, and stops with the error when `package.json` has no version; `smoke.mjs build --hold 4200 --version 1.1.1` twice gives one checksum, and its manifest declares version `1.1.1` and the smoke package's duration plus 4,200.
 
 ---
 
@@ -446,11 +462,11 @@ By whoever releases the runner (the specs name no one beyond "the operator", RD-
 
 1. `RD_SMOKE_ACCESS_TOKEN=<token> node smoke/smoke.mjs stack --identity <origin>/runner-smoke --version <v> --class-hash <hash> --terminate` ends `done`, with launcher credentials for `--terminate` (requirements R52). The runner's log group shows `aws.default_chain_disabled`, `storage.credentials_fetched` and no `CredentialsProviderError`, and every line carries a non-null `microvm_id`, which answers whether `/run`'s body carries `microvmId`. That id equals `vms/{platform_user_id}`'s `microvm_id` and the claimed result's (morning review item 2b; `/work`'s 409 already requires it, requirements Technical Notes).
 2. A VM left to drain logs `idle.suspended`, and its `/suspend` hook's lines follow. That answers REPORT-143's R1 (an API `SuspendMicrovm` delivers `/suspend`), if REPORT-143's own check has not already, to be written into REPORT-143's spec and `final-design.md` 7.2(b). A `lifecycle.resume_without_suspend` line would say it does not.
-3. The Done-when, on staging: a VM suspended for more than an hour takes a new run and writes its result, with no `work.failed` 401 (the refresh token surviving the suspend); a suspend mid-run (`aws lambda-microvms suspend-microvm` with launcher credentials) leaves `current_package` set, and an idle one leaves it null; the smoke package published under two origins (`?origin=projects/<id>` and a user) runs in one queue; the smoke package rebuilt with `--any '*no-such-url*'` as a new version is refused with "does not apply to this class" and report-server's reason; two researchers of the smoke class each get their own result, and the counts land on each one's scope document while `classes/{class_hash}` holds only the profile; a log line from a run names the researcher, the scope and the package. The ten-hour sentence is the runner's tests only: report-server refuses more than 7,200 seconds at publish, so no version over the ceiling can be queued on staging.
+3. The Done-when, on staging: a VM suspended for more than an hour takes a new run and writes its result, with no `work.failed` 401 (the refresh token surviving the suspend); a suspend mid-run (`aws lambda-microvms suspend-microvm` with launcher credentials) leaves `current_package` set, and an idle one leaves it null; the smoke package published under two origins (`?origin=projects/<id>` and a user) runs in one queue; the smoke package rebuilt with `--any '*no-such-url*' --version <new>` is refused with "does not apply to this class" and report-server's reason; two researchers of the smoke class each get their own result, and the counts land on each one's scope document while `classes/{class_hash}` holds only the profile; a log line from a run names the researcher, the scope and the package. The ten-hour sentence is the runner's tests only: report-server refuses more than 7,200 seconds at publish, so no version over the ceiling can be queued on staging.
 4. `smoke.mjs image` with a column the dataset lacks added to the package's list fails, which shows the gate fails when a column goes.
 5. **Terminated mid-run** (REPORT-143's lease, Q13): a package running, `aws lambda-microvms terminate-microvm` with launcher credentials, and `get-microvm` polled every few seconds with its states and times recorded against the hook's log lines. The VM reads `TERMINATING` while the `/terminate` hook writes; the result reads `failed` with the one reason, written by the hook; the runner document reads `terminated` (or `failed` with an incomplete-sync reason) with `current_package` naming the run; and no later watchdog pass rewrites either.
-6. **A run longer than 65 minutes**: the smoke package built with `--hold 3900` as a new version and run. Its result's `updated_at` keeps moving past the session's first hour, so the class store refreshed its token for the beats, and it ends `done` with no `watchdog.result_failed`.
-7. **Suspended mid-run, resumed from the dashboard**: the `--hold` variant, `suspend-microvm` while it runs, then RD-3's Resume. `vms/`'s `resumed_at` is written before the resume, beats resume after it, and the result ends `done` with no `watchdog.vm_terminated` for that VM.
+6. **A run longer than 65 minutes**: the smoke package built with `--hold 3900 --version <new>` and run with `smoke.mjs stack --wait-minutes 90`. Its result's `updated_at` keeps moving past the session's first hour, so the class store refreshed its token for the beats, and it ends `done` with no `watchdog.result_failed`.
+7. **Suspended mid-run, resumed from the dashboard**: the `--hold` variant, `suspend-microvm` while it runs, left suspended for more than an hour (inside the watchdog's declared duration plus 10 minutes), then RD-3's Resume. The beats after the resume go through the run's class store, whose ID token has expired by then and which R20's forced refresh does not cover, so this is the check that the SDK refreshes it. `vms/`'s `resumed_at` is written before the resume, beats resume after it, and the result ends `done` with no `watchdog.vm_terminated` for that VM.
 8. **`design.md` criterion 11 again**: terminated during a run, the next run launches a new VM and ends `done`.
 
 Then the PR is reviewed and merged. A problem found above is fixed on the branch and the release repeated from its new head.
@@ -619,6 +635,28 @@ Step 3 is 2,884 lines added and 2,017 removed (measured, `git diff --shortstat` 
 ##### RESOLVED: A quarter of the spec is the record of how it was made
 `requirements.md` is 108 KB and `implementation.md` 63 KB. The stage 1, 3, 4 and re-spec verification logs, the three self-review rounds, the stage 8 table and the sixty-mutation inventory describe how the spec was checked, not what to build, and much of each resolved question restates its context. Suggested: at close, keep the requirements, technical notes, out of scope and one or two lines per resolved decision, and move the verification and review records to the PR description and the branch oob folder, where they already live.
 **Decision**: B, leave it until close (Doug, 2026-10-08). Measured, the claim above overstates it: of 186 KB, the verification logs, review rounds and stage 8 table are about 46 KB (25%), and the resolved questions and judgment calls another 32 KB that could each shrink to a line or two. The detail is the implementer's working reference against the step diffs, and `dmartin:close-spec` writes the condensed `specs/RD-4-pass-2-pull-loop.md` and deletes this folder by default.
+
+### Review (2026-10-14)
+
+Steps 5 to 7 and the rollout, reviewed after the amendment (`0573e43`) with the roles named in requirements.md's Review (2026-10-14). Step 5's sketch was applied to a scratch copy of `runner/` (Node 24.14; `npm test` 198 passing with the terminate string's test updated), and the throwaway tests, diffs and outputs are in the branch oob folder `stage-verification/review-2026-10-14/`. Checked and dropped: `/terminate`'s failure write landing after a `done` still in flight (the hook's write is R44b's stated exception, and the window is one write's latency); the in-VM bound's race leaving a timed-out package's process alive until `runPackage`'s own timeout fires a few seconds later (step 3's behavior, and the next package's spawn follows a `/work`, an adoption and three writes); the 11 `/work` polls step 5 expects between declined `/idle` calls (read from the loop: the reset is followed by an immediate `/work` and ten 30-second polls).
+
+#### RESOLVED: Senior Engineer: `/terminate` throws when it lands while the claim is being written
+`#runPackage` sets `#run` before the claim, and the sketch starts the heartbeat only after the claim and the status document, so for up to their two bounded writes `#run.heartbeat` is undefined and `terminate()`'s `this.#run.heartbeat.cancel()` throws. The hook then answers 500 without revoking, flushing or writing the runner document, which loses the data the flush exists to keep. Verified: throwaway test REVIEW A (the claim's merge held pending, then `/terminate`) on the sketch threw `TypeError: Cannot read properties of undefined (reading 'cancel')` with no revocation and the runner document still `ready`; with `?.` it revoked, flushed and wrote `terminated`. Fixed in step 5's sketch: `heartbeat?.cancel()`, no heartbeat started once the VM is terminal, a test and a mutation.
+
+#### RESOLVED: REPORT-143 contract owner: the sketch guards only one of `/terminate`'s two runner-document writes
+R23 writes the runner document `terminated`, or `failed` after an unverified flush, both inside the `microvm_id` transaction. The sketch shows the `onlyIf` on one `writeFromHook` call, and `terminate()` on this branch has two (`runner.js`, the `failed` write on an unverified flush and the `terminated` write), so the unguarded one could overwrite a newer VM's document. Fixed in step 5: both writes take the guard, and the test covers both.
+
+#### RESOLVED: The operator: the Makefile's `VERSION` default is empty without Node on `PATH`
+Step 7's `VERSION ?= $(shell node -p …)` gives an empty `VERSION` when `node` is not on `PATH`, and `publish-artifact` then publishes `researcher-dashboard-runner/runner-.zip`, which the conditional put accepts the first time. Verified: `makefile-version.sh` in a scratch copy at `0.2.0`, run on this machine (whose non-interactive shell has no `node`): the sketch's `artifact-key` printed `runner-.zip`, and `runner-0.2.0.zip` only with Node 24 on `PATH`; the suggested `sed` read printed `runner-0.2.0.zip` without Node, honored `VERSION=9.9.9`, and stopped with the error when `package.json` had no version. Fixed in step 7.
+
+#### RESOLVED: The operator: the rollout's smoke variants cannot be published or waited for
+`smoke.mjs build` takes the version from the committed manifest (`1.0.0`, published as `projects/20/runner-smoke` 1.0.0) and ignores an unknown `--version`, and report-server refuses a version it holds (`packages.ex`, `:already_exists`), so the `--hold 3900` and `--any '*no-such-url*'` variants the rollout publishes "as a new version" need a hand edit. `stack` waits a fixed 10 minutes (`smoke.mjs` line 129), so the 65-minute check fails as a timeout. Step 7 also changes `run.py` under the published version. Verified: `smoke-version.out` (`build --version 1.0.1` built `runner-smoke-1.0.0.zip`). Fixed: R52 and step 7 add `build --version` and `stack --wait-minutes`, the smoke manifest goes to `1.1.0`, and rollout checks 3 and 6 use them.
+
+#### RESOLVED: QA Engineer: step 6's file list and its grep check miss three places
+`smoke.mjs` line 76 writes `clue_source: "firebase"` into the `image` command's scope, the smoke manifest declares `clue_prepull: false`, and `steps.js` imports `customTokenClaims` and `customTokenPayload` and re-exports the first only for the CLUE token's expiry (no other file imports them from `steps.js`). So step 6's `grep -rni clue` check would not hold as written, and two imports would be orphaned. Verified by grep on this branch. Fixed: step 6 lists them (and `portalFirebaseApp`, requirements R56), and the grep check names what remains.
+
+#### RESOLVED: Engineers building on it (RD-3 pass 2's Resume): the class store's token after a long mid-run suspend is not checked
+R20 forces a fresh ID token only for the session store (`#call`'s `force`), while R44a's beats after a resume go through the run's class store, signed in before the suspend. A suspend past an hour leaves that token expired, and if the SDK does not refresh it the beats fail and the lease, restarted by `resumed_at`, fails the run five minutes after the resume. Rollout check 3 covers a long suspend only on an idle VM. Fixed: rollout check 7 holds the suspend past an hour, inside the watchdog's declared duration plus 10 minutes for the `--hold 3900` variant.
 
 ## Stage 8: cross-reference with the requirements
 
