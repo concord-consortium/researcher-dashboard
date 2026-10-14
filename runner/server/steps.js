@@ -88,6 +88,8 @@ export function makeSteps({ login = ccDataLogin } = {}) {
 
     readPackageCounts: async ({ outputDir }) => readPackageCounts(outputDir),
 
+    killPackageProcesses: async ({ uid }) => killPackageProcesses({ uid }),
+
     // The classes this VM holds pulled data for, read from the synced tree rather than
     // remembered: the tree is what `/run` syncs down from the researcher's prefix, so it
     // already carries every class an earlier VM of theirs opened.

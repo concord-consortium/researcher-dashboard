@@ -162,6 +162,7 @@ export async function runSandboxed({ uid, netns, command, args = [], env, cwd, t
     cwd,
     timeout,
     env: proxyUrl ? { ...env, HTTPS_PROXY: proxyUrl, https_proxy: proxyUrl } : env,
+    killSignal: "SIGKILL",
     maxBuffer: 8 * 1024 * 1024
   });
 }

@@ -126,6 +126,7 @@ function steps(record, overrides = {}) {
       return { display: "# Counts\n\n12 documents", summary: "12 documents" };
     },
     readPackageCounts: async () => ({ answers: 201, logs: 490, log_freshness_at: "2026-08-26T00:00:00Z" }),
+    killPackageProcesses: async () => {},
     heldClasses: makeSteps().heldClasses,
     ...overrides
   };
@@ -472,6 +473,36 @@ test("a class profile that cannot be read three times fails the package so the V
   assert.equal(built.record.applies.length, 0, "report-server is not asked without a profile");
 });
 
+// A resume stands the old loop's plan down; its late answers must not refuse anything.
+test("a plan a resume has stood down makes no further call or write", async () => {
+  let first = true;
+  let answerOld;
+  const built = build({
+    applies: () => {
+      if (!first) return { applies: true, reason: null };
+      first = false;
+      return new Promise((r) => { answerOld = r; });
+    }
+  });
+  built.docs.set(classPath(PORTAL, CLASS), { platform_id: PLATFORM_ID, assignment_urls: ["https://a/x"], interactive_urls: [] });
+  for (const identity of ["users/1/first", "users/1/second"]) {
+    built.fn.queue({ identity });
+    built.record.manifests[identity] = manifestFor(identity, { urls: { any: ["*x*"] } });
+  }
+  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+  await until(() => answerOld, "the old plan's applies check");
+  const oldLoop = built.runner.loop;
+  built.runner.resume();
+  await built.runner.loop;
+  const asked = built.record.applies.length;
+  answerOld({ applies: false, reason: "no URL in this class matches the required pattern *x*" });
+  await oldLoop;
+  assert.equal(built.record.applies.length, asked, "the old plan asks nothing more");
+  for (const identity of ["users/1/first", "users/1/second"]) {
+    assert.equal(result(built.docs, identity).status, "done", `${identity} is not refused by the old plan`);
+  }
+});
+
 test("a request report-server refuses outright refuses the package with its message", async () => {
   const built = build({ applies: async () => { throw new ReportServerError("scope_urls[3] is longer than 2048 bytes", { status: 400, refusal: true }); } });
   built.fn.queue({ identity: "users/1/ap" });
@@ -549,7 +580,6 @@ test("a package declaring patterns on a class with no profile is refused", async
   assert.match(result(built.docs, "users/1/ap").error, /profile has not been derived/);
 });
 
-// Done when: a manifest declaring ten hours is refused.
 test("a manifest declaring ten hours is refused by the runner's ceiling", async () => {
   const built = build();
   built.fn.queue({ identity: "users/1/long" });
@@ -588,8 +618,17 @@ test("the window check fails what cannot finish before the VM's cap, up front", 
   assert.ok(!writesTo(built.record, resultPath(PORTAL, CLASS, USER, "users__1__second")).some((w) => w.status === "running"));
 });
 
+// A hung package's process dies only when it is killed, as the sandbox's does.
+function killable(events) {
+  let die;
+  return {
+    runPackage: () => new Promise((_, reject) => { die = reject; }),
+    killPackageProcesses: async () => { events.push("kill"); die?.(new Error("killed")); }
+  };
+}
+
 test("a package that outruns its bound fails rather than hanging", async () => {
-  const built = build({ envOverrides: { packageTimeoutMs: 20 }, stepOverrides: { runPackage: () => new Promise(() => {}) } });
+  const built = build({ envOverrides: { packageTimeoutMs: 20 }, stepOverrides: killable([]) });
   built.fn.queue({ identity: "users/1/hang" });
   await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
   await built.runner.loop;
@@ -597,6 +636,35 @@ test("a package that outruns its bound fails rather than hanging", async () => {
   assert.equal(doc.status, "failed");
   assert.match(doc.error, /ran past its/);
   assert.equal(built.runner.state, "ready");
+});
+
+// Every package runs as one uid, so one past its bound must be gone before the next starts.
+test("a package past its bound is killed before its failure is written and the next is claimed", async () => {
+  const events = [];
+  const stopped = killable(events);
+  let runs = 0;
+  const built = build({
+    envOverrides: { packageTimeoutMs: 20 },
+    stepOverrides: { ...stopped, runPackage: (args) => (++runs === 1 ? stopped.runPackage(args) : Promise.resolve({ display: "x", summary: "y" })) },
+    wrapStore: (store) => {
+      const merge = store.merge.bind(store);
+      store.merge = (p, fields) => {
+        if (p.includes("/results/") && (fields.status || fields.stage)) events.push(`${p.split("/").at(-1)}:${fields.status ?? fields.stage}`);
+        return merge(p, fields);
+      };
+      return store;
+    }
+  });
+  built.fn.queue({ identity: "users/1/hang" });
+  built.fn.queue({ identity: "users/1/next" });
+  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+  await built.runner.loop;
+  const kill = events.indexOf("kill");
+  assert.ok(kill >= 0, "the package's processes are killed");
+  assert.ok(kill < events.indexOf("users__1__hang:failed"), "before its failure is written");
+  assert.ok(kill < events.indexOf("users__1__next:running"), "before the next package is claimed");
+  assert.ok(!events.slice(events.indexOf("users__1__hang:failed")).some((e) => e.startsWith("users__1__hang:") && e !== "users__1__hang:failed"), "nothing of the run is written after its failure");
+  assert.equal(result(built.docs, "users/1/next").status, "done");
 });
 
 test("a failed package fails its document, is redacted, and the VM goes back to ready", async () => {
@@ -1618,7 +1686,6 @@ async function captured(fn) {
   return lines.flatMap((l) => l.split("\n")).filter(Boolean).map((l) => JSON.parse(l));
 }
 
-// Done when: a log line from a run names the researcher, the scope and the package.
 test("every line of a run names the researcher, the VM, the scope and the package, and none after it", async () => {
   const built = build();
   built.fn.queue({ identity: "users/136/class-counts" });

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The runner's smoke package: the gate on the image (final-design.md section 16).
+"""The runner's smoke package: the gate on the image.
 
 It reads scope.json as every package does, creates and pulls a Student Answers run for the
 scope's class with cc-data, as the researcher who launched it, and checks the columns the
@@ -60,9 +60,11 @@ def main():
     for view, columns in COLUMNS.items():
         present = {row["column_name"] for row in query(dataset, f"DESCRIBE {view}")}
         missing += [f"{view}.{c}" for c in columns if c not in present]
-    prompts = query(dataset, "SELECT count(*) AS n FROM report_prompts")[0]["n"]
-    answers = query(dataset, "SELECT count(*) AS n FROM answers")[0]["n"]
-    run_answers = query(dataset, f"SELECT count(*) AS n FROM run_answers WHERE run_id = {int(run_id)}")[0]["n"]
+    # Counted for this run alone: the dataset outlives the VM, so it holds every earlier run's too.
+    run = int(run_id)
+    prompts = query(dataset, f"SELECT count(*) AS n FROM report_prompts WHERE run_id = {run}")[0]["n"]
+    answers = query(dataset, f'SELECT count(*) AS n FROM "answers_{run}"')[0]["n"]
+    run_answers = query(dataset, f"SELECT count(*) AS n FROM run_answers WHERE run_id = {run}")[0]["n"]
     if missing:
         raise RuntimeError(f"the dataset lacks the columns the official packages read: {', '.join(missing)}")
     if run_answers != answers:

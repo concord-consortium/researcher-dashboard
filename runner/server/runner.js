@@ -19,6 +19,8 @@ export const CLAIM_ATTEMPTS = 3;
 export const TOKEN_TIMEOUT_MS = 15_000;
 // The report-server revocation in /terminate, inside the hook's 60 seconds.
 export const REVOKE_TIMEOUT_MS = 10_000;
+// How long a package past its bound has, once killed, for its step to end.
+export const PACKAGE_END_TIMEOUT_MS = 10_000;
 // A claim's heartbeat_seconds and the interval its beats are written at, which the
 // watchdog's lease is five of. report-service's rules allow 30 to 120.
 export const HEARTBEAT_SECONDS = 60;
@@ -298,7 +300,7 @@ export class Runner {
       if (this.#run) await this.#run.done;
       if (!this.#current(epoch)) return;
 
-      const next = await this.#plan(request);
+      const next = await this.#plan(request, epoch);
       if (!this.#current(epoch)) return;
       if (next) {
         idleSince = null;
@@ -402,17 +404,20 @@ export class Runner {
   // answer, in order: the catalog grammar, its class's store and scope, the fetch and
   // checksum, the manifest, the ceiling, applicability and the window. A refused package
   // is written `failed`, never `running`. Returns the first package to run, if any.
-  async #plan(request) {
+  async #plan(request, epoch) {
     const candidates = [];
     // Entries this plan wrote `failed`, which are no longer queued.
     const resolved = new Set();
     for (const entry of request.packages) {
+      // A resume stands this plan down: the new loop's plan decides, with its own stores.
+      if (!this.#current(epoch)) return null;
       const store = request.classStores.get(entry.class_hash);
       if (!store) continue;
       if ((this.#claimFailures.get(this.#claimKey(entry)) ?? 0) >= CLAIM_ATTEMPTS) continue;
       const docs = this.#docs(entry.class_hash, store);
       const pkg = { identity: entry.identity, version: entry.version, checksum: entry.checksum };
       const refuse = async (error) => {
+        if (!this.#current(epoch)) return;
         log.warn("package.refused", { scope: entry.class_hash, package: entry.identity, error });
         try {
           await bounded(docs.failed(docIdOf(entry), { pkg, error }));
@@ -449,6 +454,7 @@ export class Runner {
           await refuse(err.message);
           continue;
         }
+        if (!this.#current(epoch)) return null;
         this.#manifests.set(archiveKey, manifest);
       }
       const declared = manifest.expected_duration_seconds;
@@ -472,6 +478,7 @@ export class Runner {
             scopeUrls: [...(profile.assignment_urls ?? []), ...(profile.interactive_urls ?? [])]
           });
         } catch (err) {
+          if (!this.#current(epoch)) return null;
           log.warn("report_server.refused", { call: "applies", scope: entry.class_hash, package: entry.identity, status: err.status ?? null, error: err.message });
           if (err.refusal) {
             await refuse(`report-server would not check this package against this class: ${err.message}`);
@@ -482,6 +489,7 @@ export class Runner {
           }
           continue;
         }
+        if (!this.#current(epoch)) return null;
         if (!verdict.applies) {
           await refuse(`the package does not apply to this class: ${verdict.reason}`);
           continue;
@@ -493,10 +501,12 @@ export class Runner {
 
     // The window, up front: the answer's declared durations in order, against what the
     // VM has left; from the package the window runs out on, every one is failed.
+    if (!this.#current(epoch)) return null;
     const left = this.#expiresAt - WINDOW_RESERVE_MS - this.now();
     let sum = 0;
     let runnable = null;
     for (const candidate of candidates) {
+      if (!this.#current(epoch)) return null;
       sum += candidate.declared * 1000;
       if (sum > left) {
         await bounded(candidate.docs.failed(candidate.docId, {
@@ -581,11 +591,16 @@ export class Runner {
 
       const timeoutMs = this.env.packageTimeoutMs ?? declared * 1000 + PACKAGE_TIMEOUT_MARGIN_MS;
       let timer;
+      let timedOut = false;
       const timeout = new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`the package ran past its ${Math.round(timeoutMs / 1000)}s bound`)), timeoutMs);
+        timer = setTimeout(() => {
+          timedOut = true;
+          reject(new Error(`the package ran past its ${Math.round(timeoutMs / 1000)}s bound`));
+        }, timeoutMs);
       });
+      const running = this.#steps({ entry, docId, docs, scope, manifest, timeoutMs, cancelled: () => timedOut });
       try {
-        const result = await Promise.race([this.#steps({ entry, docId, docs, scope, manifest, timeoutMs }), timeout]);
+        const result = await Promise.race([running, timeout]);
         try {
           await docs.counts(result.counts);
         } catch (err) {
@@ -595,6 +610,7 @@ export class Runner {
         await docs.done(docId, { pkg, imageVersion: this.env.imageVersion, summary: result.summary, display: result.display });
       } catch (err) {
         log.error("package.failed", { error: err.message });
+        if (timedOut) await this.#endTimedOutPackage(running);
         await heartbeat?.settled();
         await docs.failed(docId, { pkg, error: err.message })
           .catch((writeErr) => log.error("status.write_failed", { write: "result", error: writeErr.message }));
@@ -613,8 +629,21 @@ export class Runner {
     }
   }
 
-  async #steps({ entry, docId, docs, scope, manifest, timeoutMs }) {
+  // A package past its bound may still be running as the uid the next package runs as, so
+  // it is killed, and its step given time to end, before anything else happens.
+  async #endTimedOutPackage(running) {
+    try {
+      await this.steps.killPackageProcesses({ uid: this.env.packageUid });
+    } catch (err) {
+      log.error("package.kill_failed", { error: err.message });
+    }
+    await bounded(running.catch(() => {}), PACKAGE_END_TIMEOUT_MS, "the timed-out package's end")
+      .catch((err) => log.error("package.kill_failed", { error: err.message }));
+  }
+
+  async #steps({ entry, docId, docs, scope, manifest, timeoutMs, cancelled }) {
     const stage = async (name, fn) => {
+      if (cancelled()) throw new Error("the package's run was ended before its next stage");
       await docs.stage(docId, name);
       return timed(`package.${name}`, {}, fn);
     };
