@@ -11,6 +11,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 
 # The columns the official packages read: cc-data's contract columns on answers, and the
 # run_answers columns wildfire-responses counts through.
@@ -19,6 +20,8 @@ COLUMNS = {
     "run_answers": ["run_id", "type", "remote_endpoint", "source_key", "question_id"],
 }
 PROMPT_ROWS = 2
+# Written by `smoke.mjs build --hold`, for a run that has to outlast the session token's first hour.
+HOLD_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hold.txt")
 
 
 def cc_data(*args):
@@ -66,6 +69,9 @@ def main():
         raise RuntimeError(f"run_answers holds {run_answers} answers for run {run_id}, not the {answers} the run pulled")
     if prompts != PROMPT_ROWS:
         raise RuntimeError(f"report_prompts has {prompts} rows, not the {PROMPT_ROWS} pseudo-header rows")
+    if os.path.exists(HOLD_FILE):
+        with open(HOLD_FILE, encoding="utf-8") as handle:
+            time.sleep(int(handle.read().strip()))
 
     os.makedirs(output_dir, exist_ok=True)
     with open(os.path.join(output_dir, "display.md"), "w", encoding="utf-8") as handle:

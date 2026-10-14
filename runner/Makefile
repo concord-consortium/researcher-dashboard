@@ -2,7 +2,11 @@ IMAGE ?= researcher-dashboard-runner
 PLATFORM ?= linux/arm64
 PORT ?= 8080
 
-VERSION ?= 0.1.0
+# package.json's version, read with sed because not every shell that runs make has Node.
+VERSION ?= $(shell sed -n 's/^  "version": "\(.*\)",$$/\1/p' package.json)
+ifeq ($(strip $(VERSION)),)
+$(error VERSION is empty: package.json has no version line, and none was given)
+endif
 ARTIFACT ?= dist/runner-$(VERSION).zip
 ARTIFACT_BUCKET ?= concord-devops
 ARTIFACT_PREFIX ?= researcher-dashboard-runner
