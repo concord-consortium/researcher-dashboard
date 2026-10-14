@@ -196,7 +196,7 @@ test("STATUS_BACKEND selects the store and rejects anything else", async () => {
   const { loadEnv } = await import("../server/config.js");
   assert.equal(loadEnv({}).statusBackend, "FIRESTORE");
   assert.equal(loadEnv({ STATUS_BACKEND: "memory" }).statusBackend, "MEMORY");
-  // LOG signed nothing in, so it could never bring a VM past /run's claims check.
+  // A store that signs nothing in cannot pass /run's claims check, so LOG is no backend.
   assert.throws(() => loadEnv({ STATUS_BACKEND: "log" }), /must be FIRESTORE or MEMORY/);
   assert.throws(() => loadEnv({ STATUS_BACKEND: "firestor" }), /must be FIRESTORE or MEMORY/);
 });
