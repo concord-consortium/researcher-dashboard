@@ -59,7 +59,8 @@ export class RunnerStatus {
       platform_id: this.platformId,
       ...fields,
       updated_at: this.store.serverTimestamp(),
-      ...(sent.length ? { status_write_failures: sent } : {})
+      // Every write carries the list, empty once reported, so a reported failure is cleared.
+      status_write_failures: sent
     };
     if (onlyIf) {
       if (!(await bounded(this.store.mergeIf(this.path, onlyIf, doc)))) return null;

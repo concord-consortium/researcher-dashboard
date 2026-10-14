@@ -84,6 +84,15 @@ test("an archive the backend cannot read is missing or not readable, whatever S3
   }
 });
 
+// The broker or the network failing is not the package's absence.
+test("a fetch that fails for any other reason says what it was", async () => {
+  const backend = { async get() { throw new Error("storage-credentials answered 502: STS refused"); } };
+  await assert.rejects(
+    () => fetchPackage({ backend, pkg: { identity: IDENTITY, version: "1.0.0", checksum: "sha256:x" }, workRoot: path.join(root, "work"), unzip: unzipWriting(MANIFEST), measure: small }),
+    (err) => !(err instanceof PackageUnreadable) && /could not be fetched: storage-credentials answered 502: STS refused/.test(err.message)
+  );
+});
+
 test("a checksum mismatch refuses and unpacks nothing", async () => {
   const workRoot = path.join(root, "work");
   let unzipped = false;
@@ -157,6 +166,28 @@ test("an archive holding a symbolic link is refused and its directory removed", 
     /holds a symbolic link, link/
   );
   assert.ok(!fs.existsSync(path.join(workRoot, "packages", "users__136__class-counts", "1.0.0")));
+});
+
+// unzip restores modes from the archive, and every package runs as the same uid.
+test("an unpacked package is writable by no one but root", { skip: !hasZip() }, async () => {
+  const dir = path.join(root, "m");
+  fs.mkdirSync(path.join(dir, "lib"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify(MANIFEST));
+  fs.writeFileSync(path.join(dir, "run.py"), "");
+  fs.writeFileSync(path.join(dir, "lib", "tool.sh"), "");
+  fs.chmodSync(path.join(dir, "run.py"), 0o777);
+  fs.chmodSync(path.join(dir, "lib", "tool.sh"), 0o775);
+  fs.chmodSync(path.join(dir, "lib"), 0o777);
+  execFileSync("zip", ["-q", "-r", path.join(root, "modes.zip"), "manifest.json", "run.py", "lib"], { cwd: dir });
+  const bytes = fs.readFileSync(path.join(root, "modes.zip"));
+  const checksum = await checksumOf(bytes);
+  const unzip = async (archive, dest) => { execFileSync("unzip", ["-q", "-o", archive, "-d", dest]); };
+  const { dir: unpacked } = await fetchPackage({ backend: backendWriting(bytes), pkg: { identity: IDENTITY, version: "1.0.0", checksum }, workRoot: path.join(root, "work"), unzip });
+  for (const rel of ["", "run.py", "lib", "lib/tool.sh", "manifest.json"]) {
+    const mode = fs.statSync(path.join(unpacked, rel)).mode & 0o777;
+    assert.equal(mode & 0o022, 0, `${rel || "the package directory"} is ${mode.toString(8)}`);
+  }
+  assert.equal(fs.statSync(path.join(unpacked, "run.py")).mode & 0o777, 0o755, "an executable stays executable");
 });
 
 function writeManifest(name, manifest) {

@@ -60,13 +60,14 @@ def main():
     for view, columns in COLUMNS.items():
         present = {row["column_name"] for row in query(dataset, f"DESCRIBE {view}")}
         missing += [f"{view}.{c}" for c in columns if c not in present]
+    # Before any query that reads them, so a renamed column is named rather than a binder error.
+    if missing:
+        raise RuntimeError(f"the dataset lacks the columns the official packages read: {', '.join(missing)}")
     # Counted for this run alone: the dataset outlives the VM, so it holds every earlier run's too.
     run = int(run_id)
     prompts = query(dataset, f"SELECT count(*) AS n FROM report_prompts WHERE run_id = {run}")[0]["n"]
     answers = query(dataset, f'SELECT count(*) AS n FROM "answers_{run}"')[0]["n"]
     run_answers = query(dataset, f"SELECT count(*) AS n FROM run_answers WHERE run_id = {run}")[0]["n"]
-    if missing:
-        raise RuntimeError(f"the dataset lacks the columns the official packages read: {', '.join(missing)}")
     if answers == 0:
         raise RuntimeError(f"run {run_id} pulled no answers, so run_answers' binding cannot be checked")
     if run_answers != answers:

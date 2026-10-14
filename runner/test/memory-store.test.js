@@ -46,4 +46,6 @@ test("a failure recorded while a status write is in flight is reported by the ne
   await status.writeFromHook("work", { state: "ready" });
   const reported = store.docs.get(status.path).status_write_failures.map((f) => f.hook);
   assert.deepEqual(reported, ["terminate"], "the in-flight write carried the first; the next carries the one recorded meanwhile");
+  await status.writeFromHook("work", { state: "ready" });
+  assert.deepEqual(store.docs.get(status.path).status_write_failures, [], "a reported failure is cleared by the next write");
 });

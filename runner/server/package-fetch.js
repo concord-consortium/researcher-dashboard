@@ -99,6 +99,18 @@ function checkTree(dir) {
   walk(dir);
 }
 
+// unzip restores each entry's mode from the archive, and every package runs as one uid, so
+// a world-writable entry would let one package rewrite another's cached code. Nothing in
+// the tree stays writable by anyone but root.
+function normalizeModes(dir) {
+  fs.chmodSync(dir, 0o755);
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) normalizeModes(full);
+    else fs.chmodSync(full, fs.lstatSync(full).mode & 0o111 ? 0o755 : 0o644);
+  }
+}
+
 // `pkg` is {identity, version, checksum} from /work. The cache and the unpacked copy are
 // keyed by the package key, so two packages with the same name from different origins
 // never share an archive or a directory.
@@ -117,8 +129,13 @@ export async function fetchPackage({ backend, pkg, workRoot, unzip, measure = in
       await backend.get(key, archive);
     } catch (err) {
       fs.rmSync(archive, { force: true });
-      log.warn("package.fetch_failed", { key, error: err.name ?? err.message });
-      throw new PackageUnreadable(`${PACKAGES_PREFIX}/${key} is missing or not readable`);
+      log.warn("package.fetch_failed", { key, name: err.name, error: err.message });
+      // Without a list grant a missing key answers AccessDenied; anything else, the broker
+      // or the network failing, is not the package's absence and says what it was.
+      if (["AccessDenied", "NoSuchKey"].includes(err.name) || err.code === "ENOENT") {
+        throw new PackageUnreadable(`${PACKAGES_PREFIX}/${key} is missing or not readable`);
+      }
+      throw new Error(`${PACKAGES_PREFIX}/${key} could not be fetched: ${err.message}`);
     }
   }
 
@@ -147,6 +164,7 @@ export async function fetchPackage({ backend, pkg, workRoot, unzip, measure = in
     fs.rmSync(dest, { recursive: true, force: true });
     throw new Error(`package ${pkg.identity} ${pkg.version} is refused: ${err.message}`);
   }
+  normalizeModes(dest);
 
   const manifest = readManifest(dest);
   if (manifest.name !== nameOf(pkg.identity) || manifest.version !== pkg.version) {

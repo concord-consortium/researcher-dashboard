@@ -178,8 +178,6 @@ test("the home belongs to the package before cc-data is logged in", async () => 
   assert.equal(fs.statSync(paths.home).uid, uid);
 });
 
-// Everything in the class directory comes back from S3 on a cold start, written by the
-// syncer as root, and all of it is the package's.
 // Root chowns a tree the package wrote to, so a link the package left there must not hand
 // it the link's target.
 test("a link the package left in its data directory is not followed", async () => {
@@ -216,6 +214,8 @@ test("a hard-linked display.md is refused", async () => {
   assert.throws(() => readPackageResult(paths.outputDir), /linked from elsewhere/);
 });
 
+// Everything in the class directory comes back from S3 on a cold start, written by the
+// syncer as root, and all of it is the package's.
 test("the package owns every file of its class's data directory", async () => {
   const chowned = [];
   const first = await prepare({ uid: process.getuid() });
