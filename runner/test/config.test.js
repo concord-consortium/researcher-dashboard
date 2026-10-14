@@ -24,6 +24,16 @@ test("the duration ceiling refuses a configured value below report-server's limi
   assert.throws(() => loadEnv({ ...BASE, PACKAGE_MAX_DURATION_SECONDS: "2h" }), /positive integer/);
 });
 
+test("the package timeout and the idle period and poll are read from the environment", () => {
+  const env = loadEnv({ ...BASE, PACKAGE_TIMEOUT_MS: "5000", IDLE_PERIOD_MS: "60000", IDLE_POLL_MS: "1000" });
+  assert.equal(env.packageTimeoutMs, 5000);
+  assert.equal(env.idlePeriodMs, 60_000);
+  assert.equal(env.idlePollMs, 1000);
+  assert.equal(loadEnv(BASE).packageTimeoutMs, null, "unset, each package's bound comes from its declared duration");
+  assert.throws(() => loadEnv({ ...BASE, PACKAGE_TIMEOUT_MS: "0" }), /positive integer/);
+  assert.throws(() => loadEnv({ ...BASE, IDLE_POLL_MS: "x" }), /positive integer/);
+});
+
 // Each VM's log says whether the switch holds; it must say so when it does not.
 test("the default chain reads as enabled when any part of the switch is missing", () => {
   const off = () => disableDefaultCredentialChain({});

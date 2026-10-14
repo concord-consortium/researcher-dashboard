@@ -89,6 +89,8 @@ test("runPackage runs the entrypoint as the package uid with only the named envi
     assert.ok(call.args.includes("netns") && call.args.includes("package"));
     assert.ok(call.args.includes("--reuid=1000") && call.args.includes("--no-new-privs"));
     assert.deepEqual(Object.keys(call.options.env).sort(), ["CC_DATA_LOCAL", "HOME", "HTTPS_PROXY", "https_proxy"]);
+    assert.equal(call.options.timeout, 1000);
+    assert.equal(call.options.killSignal, "SIGKILL", "a package that traps SIGTERM still ends at its bound");
   });
 });
 

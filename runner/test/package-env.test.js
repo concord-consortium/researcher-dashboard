@@ -13,8 +13,8 @@ const SCOPE = {
   kind: "class",
   collection: "classes",
   id: CLASS,
-  classes: [{ class_hash: CLASS, class_id: 111 }],
-  assignments: [{ offering_id: 9, runnable_id: 1234, name: "Moth 1.2", url: "https://activity-player.concord.org/?activity=1" }]
+  classes: [{ class_hash: CLASS, class_id: 111, extra: "not for the package" }],
+  assignments: [{ offering_id: 9, runnable_id: 1234, name: "Moth 1.2", url: "https://activity-player.concord.org/?activity=1", extra: "not for the package" }]
 };
 let root;
 
@@ -99,7 +99,7 @@ test("scope.json carries the seven fields, and names the package's dataset and o
   assert.equal(scope.kind, "class");
   assert.equal(scope.id, CLASS);
   assert.deepEqual(scope.classes, [{ class_hash: CLASS, class_id: 111 }]);
-  assert.deepEqual(scope.assignments, SCOPE.assignments);
+  assert.deepEqual(scope.assignments, [{ offering_id: 9, runnable_id: 1234, name: "Moth 1.2", url: "https://activity-player.concord.org/?activity=1" }]);
   assert.equal(scope.clue_source, "cc-data", "packages read CLUE through cc-data");
   assert.equal(scope.dataset, "pkg-1234");
   assert.equal(scope.output_dir, paths.outputDir);
