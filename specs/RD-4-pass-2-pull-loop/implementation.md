@@ -310,7 +310,7 @@ The smoke package declares no `urls`; `build --any <pattern>` writes them at bui
 
 ### Step 5: the runner's side of REPORT-143's lease
 
-**Summary**: The claim writes `heartbeat_seconds: 60`, and a heartbeat merges `{platform_id, updated_at}` into the result every 60 seconds until the final write (R43, R44a). The final write is awaited until the SDK settles it, with no local bound, and nothing else is written until it has (R44b). `/terminate` stops the beat, writes REPORT-143's one lost-VM reason, and writes the runner document only while it records this VM (R23). An `/idle` answer that neither queues nor suspends restarts the idle period (R11, landing tracker 3.2a). R8's `current_package` rule needs no code: the hooks already write `state` alone, and the claim and the drained `ready` already follow the run's end; the tests pin it.
+**Summary**: The claim writes `heartbeat_seconds: 60`, and a heartbeat merges `{platform_id, updated_at}` into the result every 60 seconds until the final write (R43, R44a). The final write is awaited until the SDK settles it, with no local bound, and nothing else is written until it has (R44b). `/terminate` stops the beat, writes REPORT-143's one lost-VM reason, and writes the runner document only while it records this VM (R23). An `/idle` answer that neither queues nor suspends restarts the idle period (R11, landing tracker 3.2a). R8's `current_package` rule: while a run is outstanding, `/suspend`'s and `/terminate`'s runner-document writes carry `current_package` from `#run`, so a lost claim-time write is repaired by the next hook write; with no run they leave the field alone, as today.
 
 **Files affected**:
 - `runner/server/runner.js`: `HEARTBEAT_SECONDS`; the heartbeat in `#runPackage`; the final write unbounded; `terminate()`'s reason, beat stop and guarded write; the idle loop's declined branch
@@ -361,7 +361,9 @@ await bounded(docs.failed(docId, { pkg, error: LOST_RUN_REASON }));   // no wait
 ...
 const onlyIf = (doc) => doc?.microvm_id === this.microvmId;
 // both of terminate()'s runner-document writes: `failed` on an unverified flush, and `terminated`
-await this.status.writeFromHook("terminate", { state }, { onlyIf });
+await this.status.writeFromHook("terminate", { state, ...this.#runningPackage() }, { onlyIf });
+// #runningPackage(): { current_package: {class_hash, package_key} } from #run, or {} with none outstanding.
+// suspend() spreads it into both of its writes too (R8, R22).
 // writeFromHook logs terminate.runner_doc_skipped when the test fails, bounded at 10 s as before (R21).
 // #runPackage starts no heartbeat once the VM is terminal, so a claim that lands after the hook gets no beats.
 
@@ -383,12 +385,13 @@ idleSince = this.now();
 - `previous` on the queued result survives the claim (read mid-run), the finish, and a second run that fails, in that order.
 - `/terminate` mid-run: the result reads the one reason, no tick writes after it, and the runner document reads `terminated` with `current_package` still naming the run; with the runner document's `microvm_id` set to another VM first, it is left as it was and `terminate.runner_doc_skipped` is logged, for the `terminated` write and for the `failed` one after an unverified flush.
 - `/terminate` while the claim's write is still pending (no heartbeat yet): the hook revokes, flushes and writes `terminated`, and no beat is written after it.
-- `/suspend` mid-run leaves `current_package` naming the run (the existing test, kept).
+- `/suspend` mid-run writes `current_package` naming the run on both its writes; `/suspend` while idle writes no `current_package`, which stays `null`.
+- REVIEW B: the claim lands, the claim's runner-document write throws, then `/suspend`: the document reads `suspended` with `current_package` naming the run.
 - `/idle` answering `run_in_progress` through two idle periods: `/idle` is called twice, eleven `/work` polls apart, with an `idle.declined` line each time, where without the reset it is called on every pass with no sleep.
 - `memory-store.test.js`: `mergeIf` writes when its test passes and leaves the document when it fails.
 - `firestore.emulator.test.js`: the claim with `heartbeat_seconds`, a beat, the finish, and `mergeIf` on the runner document both ways, against REPORT-143's rules as on `master`.
 
-**Mutations to run**: the claim without `heartbeat_seconds` (the emulator suite); no skip while a beat is unsettled; the timer not cancelled before the final write; a beat in flight not awaited; the final write bounded; the store closed or `ready` written before the final write settles; the claim written with `set`, losing `previous`; `/terminate` without its `onlyIf` (on each of its two writes); `terminate()` reading the heartbeat without `?.`; the old terminate string; `idleSince` not reset on a declined answer.
+**Mutations to run**: the claim without `heartbeat_seconds` (the emulator suite); no skip while a beat is unsettled; the timer not cancelled before the final write; a beat in flight not awaited; the final write bounded; the store closed or `ready` written before the final write settles; the claim written with `set`, losing `previous`; `/terminate` without its `onlyIf` (on each of its two writes); `terminate()` reading the heartbeat without `?.`; a hook write without the run's `current_package`; the old terminate string; `idleSince` not reset on a declined answer.
 
 **Verified**: not built. The writes it adds were run against REPORT-143's merged rules (requirements, "Against REPORT-143's merged rules").
 
