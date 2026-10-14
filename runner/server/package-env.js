@@ -4,18 +4,18 @@ import { log } from "./log.js";
 
 // What a package is handed, and where its credential lives.
 //
-// The package makes its own pulls with cc-data, CLUE's included,
-// which is only safe because the credential is the requesting researcher's own rather
-// than a shared site admin's: a package that leaks it reaches what its researcher could
-// already download to their laptop, and nothing else.
+// The package makes its own pulls with cc-data, CLUE's included, which is only safe
+// because the credential is the requesting researcher's own rather than a shared site
+// admin's: a package that leaks it reaches what its researcher could already download to
+// their laptop, and nothing else.
 //
 // The package's HOME sits outside the synced data root, so the credential is never
 // written to S3, the same reason the runner's own is under $HOME rather than /data.
 // cc-data's dataset root is under the data root, because the pulled corpus is exactly
 // what should survive a suspend and be there for the next run.
 //
-// cc-data reads one variable for that root, CC_DATA_ROOT, and nothing else: without it
-// it falls back to $HOME/cc-data, which here is the throwaway home, so every pull lands
+// cc-data reads one variable for that root, CC_DATA_ROOT, and nothing else: without it it
+// falls back to $HOME/cc-data, which here is the throwaway home, so every pull lands
 // somewhere that is deleted before the next run and is never synced.
 
 // cc-data's dataset grammar, the narrowest of the names in play.
@@ -50,8 +50,8 @@ export function packagePaths({ workRoot, dataRoot, classHash, docId }) {
 export const CLUE_SOURCE = "cc-data";
 
 // The file a package writes its filters from. Everything but clue_source, dataset and
-// output_dir comes from the scope block rigse sent, which
-// /work returns: the runner holds no portal bearer and cannot build it any other way.
+// output_dir comes from the scope block rigse sent, which /work returns: the runner holds
+// no portal bearer and cannot build it any other way.
 export function scopeFile({ scope, dataset, outputDir }) {
   return {
     kind: scope.kind,

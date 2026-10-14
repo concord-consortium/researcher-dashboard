@@ -6,16 +6,16 @@ const run = promisify(execFile);
 
 // The package namespace: a package's only route out is the egress proxy.
 //
-// Built rather than empty, because a package makes its own report-service pulls now.
-// The shape is chosen so that "what may a package reach" is answered by routing rather
-// than by filtering: the namespace holds one /30, so the single address it can reach is
-// the host end of the veth, and the proxy is what listens there. The metadata endpoint,
-// the rest of AWS and the internet are unreachable because there is no route to them,
-// not because a rule says no.
+// Built rather than empty, because a package makes its own report-service pulls now. The
+// shape is chosen so that "what may a package reach" is answered by routing rather than
+// by filtering: the namespace holds one /30, so the single address it can reach is the
+// host end of the veth, and the proxy is what listens there. The metadata endpoint, the
+// rest of AWS and the internet are unreachable because there is no route to them, not
+// because a rule says no.
 //
 // Two things still need a rule. The runner's own HTTP server binds every interface, so
-// the host end of the veth would otherwise expose the lifecycle hooks and the status
-// page to the package; only the proxy port is allowed. And IPv6 is never configured, which is
+// the host end of the veth would otherwise expose the lifecycle hooks and the status page
+// to the package; only the proxy port is allowed. And IPv6 is never configured, which is
 // what closes the fd00:ec2::254 metadata address without a second ruleset.
 
 export const NETNS = "package";

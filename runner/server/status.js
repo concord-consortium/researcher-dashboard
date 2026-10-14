@@ -36,7 +36,8 @@ export function bounded(promise, ms = STATUS_WRITE_TIMEOUT_MS, what = "status wr
 // platform_id, which the rules check against the token's claim rather than trusting the
 // {portal} path segment, and a server-time updated_at, which the rules require.
 //
-// A hook's write is bounded and never fails the hook: a failure is logged and kept, and the next write that succeeds reports it.
+// A hook's write is bounded and never fails the hook: a failure is logged and kept, and
+// the next write that succeeds reports it.
 export class RunnerStatus {
   #failures = [];
 

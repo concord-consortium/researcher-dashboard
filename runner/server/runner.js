@@ -41,10 +41,10 @@ const everyInterval = (ms, fn) => {
   return () => clearInterval(timer);
 };
 
-// Orchestrates the VM's lifecycle and its pull loop. Everything that touches the world is injected: the stores, the function, the
-// storage credentials, the sync and package backends, the egress setup and the package
-// steps. That is what lets the tests drive the real sequences without S3, Firestore,
-// report-service or cc-data.
+// Orchestrates the VM's lifecycle and its pull loop. Everything that touches the world is
+// injected: the stores, the function, the storage credentials, the sync and package
+// backends, the egress setup and the package steps. That is what lets the tests drive the
+// real sequences without S3, Firestore, report-service or cc-data.
 export class Runner {
   #vm = new VmState();
   // The package running now, and the class store it writes its result through.
@@ -739,9 +739,9 @@ export class Runner {
     return { state: this.#vm.state, ...result };
   }
 
-  // Writes nothing and awaits nothing: the session is stale, and
-  // a write on it could hang past the hook's 60 seconds. The loop that follows asks for
-  // work with a fresh ID token, adopts new stores and fetches new credentials.
+  // Writes nothing and awaits nothing: the session is stale, and a write on it could hang
+  // past the hook's 60 seconds. The loop that follows asks for work with a fresh ID
+  // token, adopts new stores and fetches new credentials.
   resume() {
     this.#requireStarted();
     this.#epoch += 1;

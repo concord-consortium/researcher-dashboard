@@ -125,10 +125,9 @@ export const DEFAULT_CHAIN_VARIABLES = Object.freeze([
 ]);
 
 // The runner makes no AWS call on the execution role: every S3 client is built from the
-// broker's credentials. Switching the default chain off
-// in-process makes a client built any other way fail at once with a
-// CredentialsProviderError that names its cause, rather than with an AccessDenied from
-// the execution role, which holds no S3.
+// broker's credentials. Switching the default chain off in-process makes a client built
+// any other way fail at once with a CredentialsProviderError that names its cause, rather
+// than with an AccessDenied from the execution role, which holds no S3.
 export function disableDefaultCredentialChain(env = process.env) {
   for (const name of DEFAULT_CHAIN_VARIABLES) delete env[name];
   env.AWS_EC2_METADATA_DISABLED = "true";

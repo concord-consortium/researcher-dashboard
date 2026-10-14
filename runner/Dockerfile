@@ -1,6 +1,6 @@
-# Runner image: tooling only. No package is baked in; packages are fetched from S3
-# when the runner takes them from its queue. Nothing secret is present at build time, because every VM
-# launched from this image shares one snapshot.
+# Runner image: tooling only. No package is baked in; packages are fetched from S3 when
+# the runner takes them from its queue. Nothing secret is present at build time, because
+# every VM launched from this image shares one snapshot.
 
 ARG AL2023_TAG=2023
 ARG RUNTIME_IMAGE=public.ecr.aws/lambda/microvms:al2023-minimal

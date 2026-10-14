@@ -13,10 +13,10 @@ import subprocess
 import sys
 import time
 
+# What smoke.mjs stack looks for in the result's display, which it reads from here.
+MARKER = "RUNNER-SMOKE-OK"
 # The columns the official packages read: cc-data's contract columns on answers, and the
 # run_answers columns wildfire-responses counts through.
-# What smoke.mjs stack looks for in the result's display; its MARKER must match.
-MARKER = "RUNNER-SMOKE-OK"
 COLUMNS = {
     "answers": ["source_key", "remote_endpoint", "question_id"],
     "run_answers": ["run_id", "type", "remote_endpoint", "source_key", "question_id"],

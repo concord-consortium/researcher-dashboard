@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// The runner's smoke gate (runner/README.md says when to run each command). Node's own fetch and child_process, and nothing else, so it runs from a
-// fresh checkout with `node smoke/smoke.mjs <command>` in runner/.
+// The runner's smoke gate (runner/README.md says when to run each command). Node's own
+// fetch and child_process, and nothing else, so it runs from a fresh checkout with
+// `node smoke/smoke.mjs <command>` in runner/.
 //
 //   build  [--any <pattern>]... [--version <v>] [--hold <seconds>]
 //          the smoke package's zip, reproducibly, and its checksum; --hold makes the package
@@ -24,8 +25,8 @@ import { resultPath, runnerPath } from "../server/status.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PACKAGE = path.join(HERE, "package");
-// smoke/package/run.py writes this into its display; the two must match.
-const MARKER = "RUNNER-SMOKE-OK";
+// The marker the smoke package writes into its display, read from it rather than repeated.
+const MARKER = fs.readFileSync(path.join(PACKAGE, "run.py"), "utf8").match(/^MARKER = "([^"]+)"$/m)?.[1] ?? fail("run.py defines no MARKER");
 
 function args(argv) {
   const out = { any: [] };
