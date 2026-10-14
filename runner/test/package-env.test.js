@@ -88,7 +88,10 @@ test("HOME and the output directory start empty on every run, the corpus does no
 
 // scope.json, from the scope block /work returned.
 test("scope.json carries the seven fields, and names the package's dataset and output", async () => {
-  const { paths, env } = await prepare();
+  const chowned = [];
+  const { paths, env } = await prepare({ uid: 4242, chown: (target) => chowned.push(target) });
+  assert.ok(!chowned.includes(paths.inputDir), "the input directory stays root's");
+  assert.equal(fs.statSync(paths.inputDir).mode & 0o777, 0o755);
   const file = path.join(paths.inputDir, "scope.json");
   assert.equal(env.RD_SCOPE_FILE, file);
   const scope = JSON.parse(fs.readFileSync(file, "utf8"));

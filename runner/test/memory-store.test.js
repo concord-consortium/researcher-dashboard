@@ -49,3 +49,15 @@ test("a failure recorded while a status write is in flight is reported by the ne
   await status.writeFromHook("work", { state: "ready" });
   assert.deepEqual(store.docs.get(status.path).status_write_failures, [], "a reported failure is cleared by the next write");
 });
+
+test("a status document carries only the last ten failures", async () => {
+  const store = new MemoryStore({ docs: new Map() });
+  const merge = store.merge.bind(store);
+  let failing = true;
+  store.merge = (p, fields) => (failing ? Promise.reject(new Error("UNAVAILABLE")) : merge(p, fields));
+  const status = new RunnerStatus({ store, portal: "p", platformUserId: "1", platformId: "https://p" });
+  for (let i = 0; i < 12; i++) await status.writeFromHook(`hook${i}`, { state: "ready" });
+  failing = false;
+  await status.writeFromHook("work", { state: "ready" });
+  assert.deepEqual(store.docs.get(status.path).status_write_failures.map((f) => f.hook), Array.from({ length: 10 }, (_, i) => `hook${i + 2}`));
+});

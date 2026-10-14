@@ -6,7 +6,7 @@ import path from "node:path";
 import test, { afterEach, beforeEach } from "node:test";
 import { disableDefaultCredentialChain, loadEnv } from "../server/config.js";
 import { makeSteps } from "../server/steps.js";
-import { HEARTBEAT_SECONDS, HookError, LOST_RUN_REASON, REVOKE_TIMEOUT_MS, Runner } from "../server/runner.js";
+import { HEARTBEAT_SECONDS, HookError, LOST_RUN_REASON, PACKAGE_END_TIMEOUT_MS, REVOKE_TIMEOUT_MS, Runner, TOKEN_TIMEOUT_MS } from "../server/runner.js";
 import { buildRunner } from "../server/index.js";
 import { packageDocId, packageKey } from "../server/package-fetch.js";
 import { MemoryStore, SERVER_TIME, STATUS_WRITE_TIMEOUT_MS, classPath, resultPath, runnerPath, scopePath } from "../server/status.js";
@@ -327,7 +327,6 @@ test("a queued package is claimed, run and finished, and the counts land on the 
   assert.equal(docs.has(classPath(PORTAL, CLASS)), false, "nothing per researcher on the class's own document");
 });
 
-// A package that reports only some counts must not inherit another run's others.
 test("an unparseable log_freshness_at is left out, and the counts still land", async () => {
   const built = build({ stepOverrides: { readPackageCounts: async () => ({ answers: 3, log_freshness_at: "not a date" }) } });
   built.fn.queue({ identity: "users/1/wildfire-responses" });
@@ -339,6 +338,7 @@ test("an unparseable log_freshness_at is left out, and the counts still land", a
   assert.ok(!lines.some((l) => l.event === "status.write_failed"));
 });
 
+// A package that reports only some counts must not inherit another run's others.
 test("the counts replace the scope document's last counts rather than merging into them", async () => {
   const built = build({ stepOverrides: { readPackageCounts: async () => ({ answers: 3 }) } });
   built.docs.set(scopePath(PORTAL, CLASS, USER), { platform_id: PLATFORM_ID, data: { answers: 1, logs: 9, log_freshness_at: "2026-01-01T00:00:00.000Z", clue_documents: 4 } });
@@ -801,6 +801,29 @@ test("a package past its bound during preparation is never started", async () =>
   assert.ok(!writes.some((w) => w.stage === "run_package"));
 });
 
+test("a timed-out package whose step never ends is failed once its end's bound passes", async (t) => {
+  let started;
+  const built = build({
+    envOverrides: { packageTimeoutMs: 20 },
+    stepOverrides: { runPackage: () => { started = true; return new Promise(() => {}); }, killPackageProcesses: async () => {} }
+  });
+  built.fn.queue({ identity: "users/1/stuck" });
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+    await until(() => started, "the package step");
+    t.mock.timers.tick(25);
+    await settle(10);
+    assert.equal(result(built.docs, "users/1/stuck").status, "running", "held for the step's end");
+    t.mock.timers.tick(PACKAGE_END_TIMEOUT_MS + 1000);
+    await settle(10);
+    assert.equal(result(built.docs, "users/1/stuck").status, "failed");
+  } finally {
+    t.mock.timers.reset();
+  }
+  built.runner.terminate().catch(() => {});
+});
+
 // Every package runs as one uid, so one past its bound must be gone before the next starts.
 test("a package past its bound is killed before its failure is written and the next is claimed", async () => {
   const events = [];
@@ -939,16 +962,21 @@ test("an entry with neither a usable identity nor a well-formed key is logged an
   const call = built.fn.makeFunctionClient();
   built.runner.makeFunctionClient = () => async (route, args) => {
     const answer = await call(route, args);
-    if (route === "work") answer.packages = answer.packages.map((p) => ({ ...p, identity: "Users/1/counts", package_key: "../evil" }));
+    if (route === "work") answer.packages = answer.packages.map((p) => (p.identity === "users/1/counts" ? { ...p, identity: "Users/1/counts", package_key: "../evil" } : p));
     return answer;
   };
+  built.fn.queue({ identity: "users/1/good" });
   stopAfter(built, 4);
   const lines = await captured(async () => {
     await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
     await built.runner.loop;
   });
-  const resultWrites = built.record.stores.flatMap((st) => st.writes).filter((w) => w.path.includes("/results/"));
+  await until(() => built.runner.state === "terminated", "the stop's terminate");
+  const resultWrites = built.record.stores.flatMap((st) => st.writes).filter((w) => w.path.includes("/results/") && !w.path.endsWith("users__1__good"));
   assert.deepEqual(resultWrites, []);
+  const running = writesTo(built.record, runnerPath(PORTAL, USER)).find((w) => w.state === "running");
+  assert.ok(running, "the good package's claim-time runner-document write lands");
+  assert.deepEqual(running.queue, [], "an entry with no usable key is not listed");
   assert.ok(lines.some((l) => l.event === "package.refused" && /Users\/1\/counts/.test(l.error) && /\.\.\/evil/.test(l.error)));
 });
 
@@ -1116,6 +1144,8 @@ test("work requested while idle is taken at the next poll", async () => {
   await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
   await built.runner.loop;
   assert.equal(result(built.docs, "users/1/late").status, "done");
+  assert.equal(runnerDoc(built.docs).state, "ready", "ready is written again once the late package is done");
+  assert.equal(runnerDoc(built.docs).current_package, null);
 });
 
 test("/idle answering work_queued sends the runner straight back to /work", async () => {
@@ -1693,6 +1723,7 @@ test("a VM whose suspend was refused, with nothing to do, reads ready again", as
   runner.syncer.flushAndVerify = flush;
   await runner.loop;
   assert.equal(runnerDoc(docs).state, "ready");
+  assert.equal(runnerDoc(docs).error, null, "the refused suspend's reason is cleared");
 });
 
 test("a failed terminate after a failed suspend still writes the runner document failed", async () => {
@@ -1832,6 +1863,66 @@ test("the syncer stops at a resume until the new loop has fetched credentials", 
   await runner.loop;
   assert.ok(events.indexOf("stop") >= 0 && events.indexOf("stop") < events.indexOf("client"), "stopped before the fetch");
   assert.ok(events.indexOf("start") > events.indexOf("fetched"), "started only after it");
+});
+
+// The package the suspend interrupted finishes, through the store it was claimed with,
+// before the resumed loop claims anything else.
+test("a resume finishes the interrupted package before claiming the next", async () => {
+  let release;
+  const built = build({ stepOverrides: { runPackage: () => (release ? Promise.resolve({ display: "x", summary: "y" }) : new Promise((r) => { release = () => r({ display: "x", summary: "y" }); })) } });
+  built.fn.queue({ identity: SLOW });
+  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+  await until(() => release, "the package step");
+  const finish = () => release();
+  const runStore = built.runner.currentRun.store;
+  await built.runner.suspend();
+  built.fn.queue({ identity: "users/1/next" });
+  built.runner.resume();
+  await settle(20);
+  assert.equal(built.record.prepared.length, 1, "nothing else is prepared while it runs");
+  assert.equal(result(built.docs, "users/1/next").status, "queued");
+  assert.equal(runStore.closed, false, "its class store stays open");
+  finish();
+  await built.runner.loop;
+  assert.equal(result(built.docs, SLOW).status, "done");
+  assert.equal(result(built.docs, "users/1/next").status, "done");
+});
+
+test("the syncer is stopped before /suspend's and /terminate's flushes", async () => {
+  for (const hook of ["suspend", "terminate"]) {
+    const { runner } = await started();
+    await runner.loop;
+    const events = [];
+    const stop = runner.syncer.stop.bind(runner.syncer);
+    const flush = runner.syncer.flushAndVerify.bind(runner.syncer);
+    runner.syncer.stop = () => { events.push("stop"); return stop(); };
+    runner.syncer.flushAndVerify = (h) => { events.push(`flush:${h}`); return flush(h); };
+    await runner[hook]();
+    assert.ok(events.indexOf("stop") >= 0 && events.indexOf("stop") < events.indexOf(`flush:${hook}`), hook);
+  }
+});
+
+test("an ID token that never comes is given up on at its bound", async (t) => {
+  const { runner, fn } = await started();
+  await runner.loop;
+  await runner.suspend();
+  for (const store of [runner.status.store]) store.idToken = () => new Promise(() => {});
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    const lines = await captured(async () => {
+      runner.resume();
+      await settle(10);
+      const calls = fn.state.calls.length;
+      t.mock.timers.tick(TOKEN_TIMEOUT_MS + 1000);
+      await settle(10);
+      assert.equal(fn.state.calls.length, calls, "no /work without a token");
+      runner.terminate().catch(() => {});
+      await settle(10);
+    });
+    assert.ok(lines.some((l) => l.event === "work.failed" && /an ID token did not finish/.test(l.error)));
+  } finally {
+    t.mock.timers.reset();
+  }
 });
 
 test("a resume with no suspend since the last activity is logged", async () => {

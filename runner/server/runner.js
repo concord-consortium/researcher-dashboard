@@ -175,7 +175,8 @@ export class Runner {
       microvm_id: this.microvmId,
       image_version: this.env.imageVersion,
       expires_at: store.timestamp(new Date(this.#expiresAt)),
-      current_package: null
+      current_package: null,
+      error: null
     });
 
     // Every S3 call from here on, the pull-down first, goes through the broker's
@@ -317,7 +318,7 @@ export class Runner {
       }
 
       if (this.#lastWritten !== STATES.READY) {
-        const written = await this.status.writeFromHook("work", { state: STATES.READY, current_package: null, queue: [] });
+        const written = await this.status.writeFromHook("work", { state: STATES.READY, current_package: null, queue: [], error: null });
         if (written && this.#current(epoch)) this.#lastWritten = STATES.READY;
       }
       if (this.#vm.state === STATES.RUNNING) this.#vm.to(STATES.READY);
@@ -587,17 +588,19 @@ export class Runner {
       // The VM is ending: the hook has written this run failed and the runner document
       // terminated, which may by now name a newer VM, so nothing more is written or run.
       if (this.#terminating) return true;
-      // A claim that lands while a hook is suspending or ending the VM runs on regardless;
-      // the hook's own state stands until the resume.
+      // A claim that lands while /suspend runs still runs its package; the hook's state
+      // stands until the resume.
       if (this.#vm.state !== STATES.RUNNING && canTransition(this.#vm.state, STATES.RUNNING)) this.#vm.to(STATES.RUNNING);
       // What is still queued: not the claimed entry, nor one this plan failed.
       const queue = request.packages
         .filter((p) => this.#claimKey(p) !== this.#claimKey(entry) && !resolved.has(this.#claimKey(p)))
+        .filter((p) => PACKAGE_DOC_ID.test(docIdOf(p) ?? ""))
         .map((p) => ({ class_hash: p.class_hash, package_key: docIdOf(p) }));
       this.#lastWritten = STATES.RUNNING;
       await this.status.writeFromHook("work", {
         state: STATES.RUNNING,
         current_package: this.currentPackage,
+        error: null,
         queue,
         scopes: await this.#heldScopes(entry.class_hash)
       });

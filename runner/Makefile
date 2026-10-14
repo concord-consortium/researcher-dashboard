@@ -35,9 +35,8 @@ shell:
 test:
 	npm test
 
-# Status doc writes against real Firestore and Auth, which the default `npm test`
-# skips so it stays hermetic. Rules arrive with the report-service work; until then
-# this proves the document shapes and the custom-token sign-in.
+# The status writes against the Firestore and Auth emulators, which the default npm test
+# skips. Load report-service's rules to check the runner's writes against them.
 FIREBASE_PROJECT ?= demo-researcher-dashboard
 test-emulator:
 	firebase emulators:exec --only firestore,auth --project $(FIREBASE_PROJECT) \
