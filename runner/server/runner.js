@@ -424,16 +424,7 @@ export class Runner {
       if ((this.#claimFailures.get(this.#claimKey(entry)) ?? 0) >= CLAIM_ATTEMPTS) continue;
       const docs = this.#docs(entry.class_hash, store);
       const pkg = { identity: entry.identity, version: entry.version, checksum: entry.checksum };
-      const refuse = async (error) => {
-        if (!this.#current(epoch)) return;
-        log.warn("package.refused", { scope: entry.class_hash, package: entry.identity, error });
-        try {
-          await bounded(docs.failed(docIdOf(entry), { pkg, error }));
-          this.#resolved(entry, resolved);
-        } catch (err) {
-          this.#noteClaimFailure(entry, err, epoch);
-        }
-      };
+      const refuse = (error) => this.#refuse({ entry, docs, pkg, error, resolved, epoch });
 
       if (!IDENTITY.test(entry.identity ?? "") || !VERSION.test(entry.version ?? "") || !CHECKSUM.test(entry.checksum ?? "")
           || !Number.isInteger(entry.catalog_id) || entry.catalog_id < 1) {
@@ -520,15 +511,32 @@ export class Runner {
       if (!this.#current(epoch)) return null;
       sum += candidate.declared * 1000;
       if (sum > left) {
-        await bounded(candidate.docs.failed(candidate.docId, {
+        await this.#refuse({
+          entry: candidate.entry,
+          docs: candidate.docs,
           pkg: candidate.pkg,
-          error: `VM window exhausted: ${Math.max(0, Math.floor(left / 1000))}s left, and this package and the ones before it declare ${Math.floor(sum / 1000)}s`
-        })).then(() => this.#resolved(candidate.entry, resolved), (err) => this.#noteClaimFailure(candidate.entry, err, epoch));
+          error: `VM window exhausted: ${Math.max(0, Math.floor(left / 1000))}s left, and this package and the ones before it declare ${Math.floor(sum / 1000)}s`,
+          resolved,
+          epoch
+        });
         continue;
       }
       runnable ??= candidate;
     }
     return runnable && { ...runnable, resolved };
+  }
+
+  // A package refused before any claim: logged, and written failed with the reason. A
+  // write that fails counts as a claim attempt.
+  async #refuse({ entry, docs, pkg, error, resolved, epoch }) {
+    if (!this.#current(epoch)) return;
+    log.warn("package.refused", { scope: entry.class_hash, package: entry.identity, error });
+    try {
+      await bounded(docs.failed(docIdOf(entry), { pkg, error }));
+      this.#resolved(entry, resolved);
+    } catch (err) {
+      this.#noteClaimFailure(entry, err, epoch);
+    }
   }
 
   #claimKey(entry) {

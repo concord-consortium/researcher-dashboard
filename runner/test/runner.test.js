@@ -749,13 +749,16 @@ test("the window check fails what cannot finish before the VM's cap, up front", 
     if (!jumped) { jumped = true; clock.t += 4.5 * 3600_000; return; }
     await origSleep(ms);
   };
-  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
-  await built.runner.loop;
+  const lines = await captured(async () => {
+    await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+    await built.runner.loop;
+  });
 
   assert.equal(result(built.docs, "users/1/first").status, "done");
   const second = result(built.docs, "users/1/second");
   assert.equal(second.status, "failed");
   assert.match(second.error, /VM window exhausted: 12300s left, and this package and the ones before it declare 14000s/);
+  assert.ok(lines.some((l) => l.event === "package.refused" && l.package === "users/1/second" && /VM window exhausted/.test(l.error)), "the refusal is logged");
   assert.ok(!writesTo(built.record, resultPath(PORTAL, CLASS, USER, "users__1__second")).some((w) => w.status === "running"));
 });
 
