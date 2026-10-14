@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test, { after, before, describe } from "node:test";
 import { Timestamp } from "firebase/firestore";
 import { FirestoreStore } from "../server/firestore.js";
+import { HEARTBEAT_SECONDS } from "../server/runner.js";
 import { ClassDocuments, RunnerStatus, resultPath, runnerPath, scopePath } from "../server/status.js";
 
 // Skipped unless the emulators are up, so the default `npm test` stays hermetic.
@@ -74,17 +75,32 @@ describe("the runner's writes against the Firestore and Auth emulators", { skip:
     assert.ok(doc.updated_at instanceof Timestamp);
   });
 
-  test("a claim, a stage and a finish land as one result, with Firestore timestamps", async () => {
+  test("a claim, a stage, a heartbeat and a finish land as one result, with Firestore timestamps", async () => {
     const docs = new ClassDocuments({ store: klass, portal: PORTAL, classHash: CLASS, platformUserId: USER, platformId: PLATFORM_ID });
     const pkg = { identity: "users/136/class-counts", version: "1.0.0", checksum: `sha256:${"ab".repeat(32)}` };
-    await docs.claim("users__136__class-counts", { pkg, imageVersion: "24.0", microvmId: "mvm-emulator", expectedDurationSeconds: 120 });
+    await docs.claim("users__136__class-counts", { pkg, imageVersion: "24.0", microvmId: "mvm-emulator", expectedDurationSeconds: 120, heartbeatSeconds: HEARTBEAT_SECONDS });
     await docs.stage("users__136__class-counts", "pull");
+    const claimed = await klass.get(resultPath(PORTAL, CLASS, USER, "users__136__class-counts"));
+    await docs.beat("users__136__class-counts");
+    const beat = await klass.get(resultPath(PORTAL, CLASS, USER, "users__136__class-counts"));
+    assert.equal(beat.status, "running");
+    assert.equal(beat.heartbeat_seconds, HEARTBEAT_SECONDS);
+    assert.ok(beat.started_at.isEqual(claimed.started_at), "a beat leaves started_at alone");
     await docs.done("users__136__class-counts", { pkg, imageVersion: "24.0", summary: "12 documents", display: "# Counts" });
     const result = await klass.get(resultPath(PORTAL, CLASS, USER, "users__136__class-counts"));
     assert.equal(result.status, "done");
     assert.equal(result.display, "# Counts");
     assert.equal(result.microvm_id, "mvm-emulator");
     assert.ok(result.started_at instanceof Timestamp && result.finished_at instanceof Timestamp);
+  });
+
+  test("a guarded runner-document write lands only while the document records this VM", async () => {
+    const status = new RunnerStatus({ store: session, portal: PORTAL, platformUserId: USER, platformId: PLATFORM_ID });
+    await status.write({ state: "running", microvm_id: "mvm-emulator" });
+    assert.equal(await status.write({ state: "terminated" }, { onlyIf: (doc) => doc?.microvm_id === "mvm-other" }), null);
+    assert.equal((await session.get(runnerPath(PORTAL, USER))).state, "running");
+    assert.ok(await status.write({ state: "terminated" }, { onlyIf: (doc) => doc?.microvm_id === "mvm-emulator" }));
+    assert.equal((await session.get(runnerPath(PORTAL, USER))).state, "terminated");
   });
 
   test("the counts land on the researcher's scope document", async () => {

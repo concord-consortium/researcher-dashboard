@@ -55,23 +55,31 @@ export class RunnerStatus {
     return [...this.#failures];
   }
 
-  async write(fields) {
+  // `onlyIf` is tested against the stored document in a transaction, and the write is
+  // skipped, returning null, when it fails.
+  async write(fields, { onlyIf } = {}) {
     const doc = {
       platform_id: this.platformId,
       ...fields,
       updated_at: this.store.serverTimestamp(),
       ...(this.#failures.length ? { status_write_failures: this.#failures } : {})
     };
-    await bounded(this.store.merge(this.path, doc));
+    if (onlyIf) {
+      if (!(await bounded(this.store.mergeIf(this.path, onlyIf, doc)))) return null;
+    } else {
+      await bounded(this.store.merge(this.path, doc));
+    }
     if (this.#failures.length) this.#failures = [];
     log.info("status.runner", { state: doc.state ?? null });
     return doc;
   }
 
   // For the hooks: never throws, since losing the VM is worse than a document that lags.
-  async writeFromHook(hook, fields) {
+  async writeFromHook(hook, fields, { onlyIf } = {}) {
     try {
-      return await this.write(fields);
+      const doc = await this.write(fields, { onlyIf });
+      if (!doc) log.warn(`${hook}.runner_doc_skipped`, { state: fields.state ?? null });
+      return doc;
     } catch (err) {
       const error = redact(err.message);
       log.error("status.write_failed", { hook, error });
@@ -109,7 +117,7 @@ export class ClassDocuments {
   // The claim: the result says running, which is what takes it out of /work's answer and
   // what the watchdog reads. It clears the last run's summary and display, so a result
   // only ever describes the run its `package` names.
-  async claim(docId, { pkg, imageVersion, microvmId, expectedDurationSeconds }) {
+  async claim(docId, { pkg, imageVersion, microvmId, expectedDurationSeconds, heartbeatSeconds }) {
     await bounded(this.store.merge(this.#result(docId), this.#stamped({
       status: "running",
       stage: "starting",
@@ -117,6 +125,7 @@ export class ClassDocuments {
       image_version: imageVersion,
       microvm_id: microvmId,
       expected_duration_seconds: expectedDurationSeconds,
+      heartbeat_seconds: heartbeatSeconds,
       started_at: this.store.serverTimestamp(),
       finished_at: null,
       error: null,
@@ -125,13 +134,19 @@ export class ClassDocuments {
     })));
   }
 
+  // Proof that the run is alive, which the watchdog's lease reads from updated_at.
+  async beat(docId) {
+    await this.store.merge(this.#result(docId), this.#stamped({}));
+  }
+
   async stage(docId, stage) {
     await bounded(this.store.merge(this.#result(docId), this.#stamped({ stage })));
   }
 
   // Every field of a finished result in one call, so nothing on it can describe another run.
+  // Unbounded, as is `failed`: a write the caller stopped waiting for can still land.
   async done(docId, { pkg, imageVersion, summary, display }) {
-    await bounded(this.store.merge(this.#result(docId), this.#stamped({
+    await this.store.merge(this.#result(docId), this.#stamped({
       status: "done",
       stage: "done",
       package: pkg,
@@ -140,18 +155,18 @@ export class ClassDocuments {
       display,
       error: null,
       finished_at: this.store.serverTimestamp()
-    })));
+    }));
   }
 
   // A run that failed, or a package refused before it was claimed. The reason reaches the
   // researcher's page, so it is redacted.
   async failed(docId, { pkg, error }) {
-    await bounded(this.store.merge(this.#result(docId), this.#stamped({
+    await this.store.merge(this.#result(docId), this.#stamped({
       status: "failed",
       error: redact(error),
       package: pkg,
       finished_at: this.store.serverTimestamp()
-    })));
+    }));
   }
 
   // This researcher's counts for this class. Nothing per researcher goes on the class's
@@ -216,6 +231,11 @@ export class LogStore {
 
   async replaceFields(path, fields) {
     log.info("status.write", { op: "replaceFields", path, doc: fields });
+  }
+
+  async mergeIf(path, test, fields) {
+    log.info("status.write", { op: "mergeIf", path, doc: fields });
+    return true;
   }
 
   serverTimestamp() {
@@ -291,6 +311,13 @@ export class MemoryStore {
     if (this.closed) throw new Error("store is closed");
     this.docs.set(path, { ...(this.docs.get(path) ?? {}), ...fields });
     this.writes.push({ op: "replaceFields", path, doc: { ...fields } });
+  }
+
+  async mergeIf(path, test, fields) {
+    if (this.closed) throw new Error("store is closed");
+    if (!test(this.docs.get(path) ?? null)) return false;
+    await this.merge(path, fields);
+    return true;
   }
 
   serverTimestamp() {

@@ -20,6 +20,11 @@ export const CLAIM_ATTEMPTS = 3;
 export const TOKEN_TIMEOUT_MS = 15_000;
 // The report-server revocation in /terminate, inside the hook's 60 seconds.
 export const REVOKE_TIMEOUT_MS = 10_000;
+// A claim's heartbeat_seconds and the interval its beats are written at, which the
+// watchdog's lease is five of. report-service's rules allow 30 to 120.
+export const HEARTBEAT_SECONDS = 60;
+// The reason every lost run is failed with, by this runner and by the watchdog alike.
+export const LOST_RUN_REASON = "The machine running it stopped before the run finished; run it again.";
 
 export class HookError extends Error {
   constructor(status, message, extra = {}) {
@@ -30,6 +35,11 @@ export class HookError extends Error {
 }
 
 const sleepFor = (ms) => new Promise((resolve) => setTimeout(resolve, ms).unref?.());
+
+const everyInterval = (ms, fn) => {
+  const timer = setInterval(fn, ms);
+  return () => clearInterval(timer);
+};
 
 // Orchestrates the VM's lifecycle and its pull loop. Everything that touches the world is injected: the stores, the function, the
 // storage credentials, the sync and package backends, the egress setup and the package
@@ -50,6 +60,7 @@ export class Runner {
   #readyAt = null;
   #ready = false;
   #suspendSeen = false;
+  #terminating = false;
   // Failed claim attempts per queued entry, for this awake period: cleared when the
   // entry's result is written and on every resume.
   #claimFailures = new Map();
@@ -61,7 +72,7 @@ export class Runner {
   // The last state the loop wrote, so an idle poll does not rewrite an unchanged document.
   #lastWritten = null;
 
-  constructor({ env, makeStore, makeSyncer, makePackageBackend, makeStorage = () => null, makeFunctionClient, steps, unzip, startEgress, netGuard = verifySandbox, revokeReportServerToken = revokeOwnToken, askAppliesRoute = askApplies, now = () => Date.now(), sleep = sleepFor, processEnv = process.env }) {
+  constructor({ env, makeStore, makeSyncer, makePackageBackend, makeStorage = () => null, makeFunctionClient, steps, unzip, startEgress, netGuard = verifySandbox, revokeReportServerToken = revokeOwnToken, askAppliesRoute = askApplies, now = () => Date.now(), sleep = sleepFor, startTimer = everyInterval, processEnv = process.env }) {
     this.env = env;
     this.processEnv = processEnv;
     // The store, the syncer and the function client are built in /run, not here: the
@@ -82,6 +93,8 @@ export class Runner {
     this.askApplies = askAppliesRoute;
     this.now = now;
     this.sleep = sleep;
+    // Separate from `sleep`, which the loop waits on: the heartbeat ticks beside it.
+    this.startTimer = startTimer;
     this.payload = null;
     this.syncer = null;
     this.storage = null;
@@ -330,6 +343,10 @@ export class Runner {
         log.info("idle.suspended", {});
         return;
       }
+      // Declined without work to hand out, most often a run still recorded as running
+      // here: wait out another idle period rather than asking again at once.
+      log.warn("idle.declined", { answer: idle });
+      idleSince = this.now();
     }
   }
 
@@ -391,7 +408,7 @@ export class Runner {
       const refuse = async (error) => {
         log.warn("package.refused", { scope: entry.class_hash, package: entry.identity, error });
         try {
-          await docs.failed(docIdOf(entry), { pkg, error });
+          await bounded(docs.failed(docIdOf(entry), { pkg, error }));
           this.#resolved(entry, resolved);
         } catch (err) {
           this.#noteClaimFailure(entry, err);
@@ -481,10 +498,10 @@ export class Runner {
     for (const candidate of candidates) {
       sum += candidate.declared * 1000;
       if (sum > left) {
-        await candidate.docs.failed(candidate.docId, {
+        await bounded(candidate.docs.failed(candidate.docId, {
           pkg: candidate.pkg,
           error: `VM window exhausted: ${Math.max(0, Math.floor(left / 1000))}s left, and this package and the ones before it declare ${Math.floor(sum / 1000)}s`
-        }).then(() => this.#resolved(candidate.entry, resolved), (err) => this.#noteClaimFailure(candidate.entry, err));
+        })).then(() => this.#resolved(candidate.entry, resolved), (err) => this.#noteClaimFailure(candidate.entry, err));
         continue;
       }
       runnable ??= candidate;
@@ -511,6 +528,25 @@ export class Runner {
     return count;
   }
 
+  // Beats every HEARTBEAT_SECONDS until stopped, skipping a tick while the last beat is
+  // still unsettled. `settled` stops it and waits out a beat in flight.
+  #startHeartbeat(docs, docId) {
+    let inFlight = null;
+    const cancel = this.startTimer(HEARTBEAT_SECONDS * 1000, () => {
+      if (inFlight) return;
+      inFlight = docs.beat(docId)
+        .catch((err) => log.warn("heartbeat.failed", { error: err.message }))
+        .finally(() => { inFlight = null; });
+    });
+    return { cancel, settled: async () => { cancel(); await inFlight; } };
+  }
+
+  // While a run is outstanding every runner-document write names it, so a write lost at
+  // the claim is repaired by the next one and the document never names an earlier run.
+  #runningPackage() {
+    return this.#run ? { current_package: { class_hash: this.#run.classHash, package_key: this.#run.docId } } : {};
+  }
+
   async #runPackage(request, next) {
     const { entry, pkg, docId, docs, store, scope, manifest, declared, resolved } = next;
     let resolveDone;
@@ -518,7 +554,7 @@ export class Runner {
     setContext({ scope: entry.class_hash, package: entry.identity });
     try {
       try {
-        await docs.claim(docId, { pkg, imageVersion: this.env.imageVersion, microvmId: this.microvmId, expectedDurationSeconds: declared });
+        await docs.claim(docId, { pkg, imageVersion: this.env.imageVersion, microvmId: this.microvmId, expectedDurationSeconds: declared, heartbeatSeconds: HEARTBEAT_SECONDS });
       } catch (err) {
         this.#noteClaimFailure(entry, err);
         return;
@@ -536,6 +572,9 @@ export class Runner {
         queue,
         scopes: await this.#heldScopes(entry.class_hash)
       });
+      // A claim that lands after /terminate gets no beats: the VM is ending.
+      if (!this.#terminating) this.#run.heartbeat = this.#startHeartbeat(docs, docId);
+      const heartbeat = this.#run.heartbeat;
 
       const timeoutMs = this.env.packageTimeoutMs ?? declared * 1000 + PACKAGE_TIMEOUT_MARGIN_MS;
       let timer;
@@ -550,9 +589,11 @@ export class Runner {
         } catch (err) {
           log.error("status.write_failed", { write: "counts", error: err.message });
         }
+        await heartbeat?.settled();
         await docs.done(docId, { pkg, imageVersion: this.env.imageVersion, summary: result.summary, display: result.display });
       } catch (err) {
         log.error("package.failed", { error: err.message });
+        await heartbeat?.settled();
         await docs.failed(docId, { pkg, error: err.message })
           .catch((writeErr) => log.error("status.write_failed", { write: "result", error: writeErr.message }));
       } finally {
@@ -646,7 +687,7 @@ export class Runner {
     this.#requireStarted();
     this.#suspendSeen = true;
     this.#vm.to(STATES.SUSPENDING);
-    await this.status.writeFromHook("suspend", { state: STATES.SUSPENDING });
+    await this.status.writeFromHook("suspend", { state: STATES.SUSPENDING, ...this.#runningPackage() });
     this.syncer.stop();
 
     // The one hook result that is allowed to fail: a suspend on a sync that cannot be
@@ -655,13 +696,13 @@ export class Runner {
     if (!result.ok) {
       this.#vm.to(STATES.FAILED);
       log.error("sync.failed", { hook: "suspend", error: result.reason });
-      await this.status.writeFromHook("suspend", { state: STATES.FAILED, error: result.reason });
+      await this.status.writeFromHook("suspend", { state: STATES.FAILED, error: result.reason, ...this.#runningPackage() });
       throw new HookError(500, result.reason);
     }
     this.#vm.to(STATES.SUSPENDED);
-    // current_package and queue are kept by not being written: they are what tells
-    // "paused while idle" from "suspended mid-run".
-    await this.status.writeFromHook("suspend", { state: STATES.SUSPENDED });
+    // queue is kept by not being written, and current_package is the outstanding run's or
+    // left alone: together they tell "paused while idle" from "suspended mid-run".
+    await this.status.writeFromHook("suspend", { state: STATES.SUSPENDED, ...this.#runningPackage() });
     return { state: this.#vm.state, ...result };
   }
 
@@ -686,13 +727,16 @@ export class Runner {
 
   async terminate() {
     this.#requireStarted();
+    this.#terminating = true;
     this.#epoch += 1;
     // First, so it lands inside the hook's 60 seconds whatever the flush costs: a run
     // outstanding at termination was interrupted, whether or not the flush completes.
     if (this.#run) {
       const { docs, docId, pkg } = this.#run;
+      // No wait for a beat in flight: one store sends its writes in order.
+      this.#run.heartbeat?.cancel();
       try {
-        await docs.failed(docId, { pkg, error: "VM terminated during the package run" });
+        await bounded(docs.failed(docId, { pkg, error: LOST_RUN_REASON }));
       } catch (err) {
         log.error("status.write_failed", { hook: "terminate", write: "result", error: err.message });
       }
@@ -712,16 +756,18 @@ export class Runner {
       log.warn("report_server.refused", { call: "revoke", error: err.message });
     }
 
+    // Only while the document still records this VM: a VM launched since owns it now.
+    const onlyIf = (doc) => doc?.microvm_id === this.microvmId;
     this.syncer.stop();
     const result = await this.syncer.flushAndVerify("terminate");
     if (!result.ok) {
       this.#vm.to(STATES.FAILED);
       log.error("sync.failed", { hook: "terminate", error: result.reason });
-      await this.status.writeFromHook("terminate", { state: STATES.FAILED, error: result.reason });
+      await this.status.writeFromHook("terminate", { state: STATES.FAILED, error: result.reason, ...this.#runningPackage() }, { onlyIf });
       throw new HookError(500, result.reason);
     }
     this.#vm.to(STATES.TERMINATED);
-    await this.status.writeFromHook("terminate", { state: STATES.TERMINATED });
+    await this.status.writeFromHook("terminate", { state: STATES.TERMINATED, ...this.#runningPackage() }, { onlyIf });
     return { state: this.#vm.state, ...result };
   }
 }

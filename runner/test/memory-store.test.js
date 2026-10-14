@@ -12,3 +12,12 @@ test("merge merges a nested map, as Firestore's does, and replaceFields replaces
   await store.replaceFields("a/b", { data: { answers: 8 } });
   assert.deepEqual(store.docs.get("a/b"), { platform_id: "p", data: { answers: 8 }, queue: [3] });
 });
+
+test("mergeIf writes only while its test holds for the stored document", async () => {
+  const store = new MemoryStore({ docs: new Map() });
+  await store.merge("a/b", { microvm_id: "mvm-1", state: "running" });
+  assert.equal(await store.mergeIf("a/b", (doc) => doc?.microvm_id === "mvm-2", { state: "terminated" }), false);
+  assert.equal(store.docs.get("a/b").state, "running");
+  assert.equal(await store.mergeIf("a/b", (doc) => doc?.microvm_id === "mvm-1", { state: "terminated" }), true);
+  assert.deepEqual(store.docs.get("a/b"), { microvm_id: "mvm-1", state: "terminated" });
+});

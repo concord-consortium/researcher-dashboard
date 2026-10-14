@@ -313,10 +313,9 @@ The smoke package declares no `urls`; `build --any <pattern>` writes them at bui
 **Summary**: The claim writes `heartbeat_seconds: 60`, and a heartbeat merges `{platform_id, updated_at}` into the result every 60 seconds until the final write (R43, R44a). The final write is awaited until the SDK settles it, with no local bound, and nothing else is written until it has (R44b). `/terminate` stops the beat, writes REPORT-143's one lost-VM reason, and writes the runner document only while it records this VM (R23). An `/idle` answer that neither queues nor suspends restarts the idle period (R11, landing tracker 3.2a). R8's `current_package` rule: while a run is outstanding, `/suspend`'s and `/terminate`'s runner-document writes carry `current_package` from `#run`, so a lost claim-time write is repaired by the next hook write; with no run they leave the field alone, as today.
 
 **Files affected**:
-- `runner/server/runner.js`: `HEARTBEAT_SECONDS`; the heartbeat in `#runPackage`; the final write unbounded; `terminate()`'s reason, beat stop and guarded write; the idle loop's declined branch
+- `runner/server/runner.js`: `HEARTBEAT_SECONDS`; `startTimer`, defaulting to a `setInterval` in the constructor beside `sleep`, so `index.js` is unchanged; the heartbeat in `#runPackage`; the final write unbounded; `terminate()`'s reason, beat stop and guarded write; the idle loop's declined branch
 - `runner/server/status.js`: `ClassDocuments.claim` writes `heartbeat_seconds`; `beat(docId)`; `done` and `failed` no longer bounded inside (callers that need a bound wrap them); `RunnerStatus.writeFromHook(hook, fields, { onlyIf })`; `MemoryStore.mergeIf`
 - `runner/server/firestore.js`: `mergeIf(path, test, fields)` through `runTransaction`
-- `runner/server/index.js`: the default heartbeat timer
 - Tests: `runner.test.js`, `memory-store.test.js`, `firestore.emulator.test.js`
 
 **Estimated diff size**: ~450 lines, two thirds of it tests

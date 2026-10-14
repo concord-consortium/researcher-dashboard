@@ -1,7 +1,7 @@
 import { deleteApp, initializeApp } from "firebase/app";
 import { connectAuthEmulator, getAuth, signInWithCustomToken } from "firebase/auth";
 import { connectDatabaseEmulator, getDatabase } from "firebase/database";
-import { Timestamp, connectFirestoreEmulator, doc, getDoc, getFirestore, serverTimestamp, setDoc } from "firebase/firestore";
+import { Timestamp, connectFirestoreEmulator, doc, getDoc, getFirestore, runTransaction, serverTimestamp, setDoc } from "firebase/firestore";
 import { firebaseConfig } from "./firebase-projects.js";
 import { log } from "./log.js";
 
@@ -83,6 +83,18 @@ export class FirestoreStore {
 
   async merge(path, fields) {
     await setDoc(doc(this.db, path), fields, { merge: true });
+  }
+
+  // Merges only while `test` holds for the stored document (null when there is none),
+  // read and written in one transaction. Answers whether it wrote.
+  async mergeIf(path, test, fields) {
+    const ref = doc(this.db, path);
+    return runTransaction(this.db, async (tx) => {
+      const snap = await tx.get(ref);
+      if (!test(snap.exists() ? snap.data() : null)) return false;
+      tx.set(ref, fields, { merge: true });
+      return true;
+    });
   }
 
   // Writes each named field whole, leaving the document's other fields alone: a map

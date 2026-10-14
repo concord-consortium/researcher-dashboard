@@ -6,10 +6,10 @@ import path from "node:path";
 import test, { afterEach, beforeEach } from "node:test";
 import { disableDefaultCredentialChain, loadEnv } from "../server/config.js";
 import { makeSteps } from "../server/steps.js";
-import { HookError, Runner } from "../server/runner.js";
+import { HEARTBEAT_SECONDS, HookError, LOST_RUN_REASON, Runner } from "../server/runner.js";
 import { buildRunner } from "../server/index.js";
 import { packageDocId, packageKey } from "../server/package-fetch.js";
-import { MemoryStore, SERVER_TIME, classPath, resultPath, runnerPath, scopePath } from "../server/status.js";
+import { MemoryStore, SERVER_TIME, STATUS_WRITE_TIMEOUT_MS, classPath, resultPath, runnerPath, scopePath } from "../server/status.js";
 import { StorageCredentials } from "../server/storage.js";
 import { ReportServerError } from "../server/report-server.js";
 import { DirBackend, S3Backend, Syncer } from "../server/sync/index.js";
@@ -133,10 +133,10 @@ function steps(record, overrides = {}) {
 
 // A runner wired to in-memory stores, a directory for S3 and the fake function. The clock
 // is advanced by `sleep`, so the idle period passes without waiting.
-function build({ stepOverrides = {}, envOverrides = {}, makeStore, makePackageBackend, revoke, applies, clock = { t: Date.parse("2026-09-26T12:00:00Z") } } = {}) {
+function build({ stepOverrides = {}, envOverrides = {}, makeStore, wrapStore = (store) => store, makePackageBackend, revoke, applies, clock = { t: Date.parse("2026-09-26T12:00:00Z") } } = {}) {
   const docs = new Map();
   const fn = fakeFunction(docs);
-  const record = { resolved: [], pulled: [], prepared: [], stores: [], manifests: {}, sleeps: [], revoked: [], applies: [] };
+  const record = { resolved: [], pulled: [], prepared: [], stores: [], manifests: {}, sleeps: [], revoked: [], applies: [], timers: [] };
   const env = {
     ...loadEnv({ SYNC_BACKEND: "DIR", SYNC_DIR: path.join(work, "remote") }),
     dataRoot: path.join(work, "data"),
@@ -149,7 +149,7 @@ function build({ stepOverrides = {}, envOverrides = {}, makeStore, makePackageBa
       const store = new MemoryStore({ docs });
       store.projectId = projectId;
       record.stores.push(store);
-      return store;
+      return wrapStore(store);
     }),
     makeFunctionClient: fn.makeFunctionClient,
     makeSyncer: ({ root }) => new Syncer({ backend: new DirBackend(path.join(work, "remote")), root }),
@@ -161,12 +161,32 @@ function build({ stepOverrides = {}, envOverrides = {}, makeStore, makePackageBa
     askAppliesRoute: async (args) => { record.applies.push(args); return applies ? applies(args) : { applies: true, reason: null }; },
     steps: steps(record, stepOverrides),
     now: () => clock.t,
-    sleep: async (ms) => { record.sleeps.push(ms); clock.t += ms; await new Promise((r) => setImmediate(r)); }
+    sleep: async (ms) => { record.sleeps.push(ms); clock.t += ms; await new Promise((r) => setImmediate(r)); },
+    // The heartbeat's timer, fired by hand with tick().
+    startTimer: (ms, fn) => {
+      const timer = { ms, fn, cancelled: false };
+      record.timers.push(timer);
+      return () => { timer.cancelled = true; };
+    }
   });
   return { runner, fn, docs, record, clock, env };
 }
 
 const runnerDoc = (docs) => docs.get(runnerPath(PORTAL, USER));
+const settle = async (n = 5) => { for (let i = 0; i < n; i++) await new Promise((r) => setImmediate(r)); };
+// Waits for `ready()`, failing rather than hanging the file when it never comes.
+async function until(ready, what) {
+  for (let i = 0; i < 1000; i++) {
+    if (ready()) return;
+    await settle(1);
+  }
+  assert.fail(`never reached: ${what}`);
+}
+// Fires every heartbeat timer still running, as one interval passing.
+async function tick(built) {
+  for (const timer of built.record.timers) if (!timer.cancelled) timer.fn();
+  await settle();
+}
 const result = (docs, identity, classHash = CLASS) => docs.get(resultPath(PORTAL, classHash, USER, packageDocId(identity)));
 const writesTo = (record, p) => record.stores.flatMap((s) => s.writes.filter((w) => w.path === p).map((w) => w.doc));
 
@@ -428,6 +448,61 @@ test("a request report-server refuses outright refuses the package with its mess
   assert.equal(built.record.applies.length, 1);
 });
 
+test("a refusal whose write hangs is bounded, so the loop moves on", async (t) => {
+  const g = gate((p, fields) => p.includes("/results/") && fields.status === "failed");
+  const built = build({ wrapStore: g.wrap, applies: () => ({ applies: false, reason: "no URL in this class matches the required pattern *x*" }) });
+  built.docs.set(classPath(PORTAL, CLASS), { assignment_urls: ["https://a"], interactive_urls: [] });
+  built.record.manifests["users/1/refused"] = manifestFor("users/1/refused", { urls: { all: ["*x*"] } });
+  built.fn.queue({ identity: "users/1/refused" });
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let lines;
+  try {
+    lines = await captured(async () => {
+      await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+      await until(() => g.held.length, "the refusal's write");
+      t.mock.timers.tick(STATUS_WRITE_TIMEOUT_MS + 1000);
+      await settle(10);
+    });
+  } finally {
+    t.mock.timers.reset();
+    g.open();
+  }
+  assert.ok(lines.some((l) => l.event === "package.claim_failed"), "the hung write counts as a failed attempt");
+  await built.runner.loop;
+  assert.equal(result(built.docs, "users/1/refused").status, "failed");
+});
+
+test("a window-exhausted write that hangs is bounded, so the loop moves on", async (t) => {
+  const g = gate((p, fields) => p.includes("/results/") && fields.status === "failed" && /VM window exhausted/.test(fields.error));
+  const clock = { t: Date.parse("2026-09-26T12:00:00Z") };
+  const built = build({ clock, wrapStore: g.wrap });
+  built.fn.queue({ identity: "users/1/long" });
+  built.record.manifests["users/1/long"] = manifestFor("users/1/long", { expected_duration_seconds: 7000 });
+  built.fn.state.workErrors.push(Object.assign(new Error("not yet"), { status: 500 }));
+  const origSleep = built.runner.sleep;
+  let jumped = false;
+  built.runner.sleep = async (ms) => {
+    if (!jumped) { jumped = true; clock.t += 7 * 3600_000; return; }
+    await origSleep(ms);
+  };
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let lines;
+  try {
+    lines = await captured(async () => {
+      await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+      await until(() => g.held.length, "the window's write");
+      t.mock.timers.tick(STATUS_WRITE_TIMEOUT_MS + 1000);
+      await settle(10);
+    });
+  } finally {
+    t.mock.timers.reset();
+    g.open();
+  }
+  assert.ok(lines.some((l) => l.event === "package.claim_failed"), "the hung write counts as a failed attempt");
+  await built.runner.loop;
+  assert.match(result(built.docs, "users/1/long").error, /VM window exhausted/);
+});
+
 test("a package declaring patterns on a class with no profile is refused", async () => {
   const built = build();
   built.fn.queue({ identity: "users/1/ap" });
@@ -684,6 +759,21 @@ test("/idle answering work_queued sends the runner straight back to /work", asyn
   assert.equal(routes.at(-1), "idle");
 });
 
+test("an /idle that neither queues nor suspends waits out another idle period", async () => {
+  const built = build();
+  const inProgress = { success: true, suspended: false, run_in_progress: true };
+  built.fn.state.idle.push(inProgress, inProgress);
+  const lines = await captured(async () => {
+    await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+    await built.runner.loop;
+  });
+  const routes = built.fn.routes();
+  const idles = routes.flatMap((r, i) => (r === "idle" ? [i] : []));
+  assert.equal(idles.length, 3, "two declined, then suspended");
+  assert.equal(routes.slice(idles[0], idles[1]).filter((r) => r === "work").length, 11, "a whole idle period between them");
+  assert.equal(lines.filter((l) => l.event === "idle.declined").length, 2);
+});
+
 test("/idle is not called on a flush that does not verify", async () => {
   const built = build();
   await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
@@ -871,19 +961,282 @@ test("a loop stood down by a resume during its pre-idle flush does not ask to be
   await built.runner.loop;
 });
 
+
+// ---- the heartbeat and the run's final write -----------------------------------
+
+const SLOW = "users/1/slow";
+const SLOW_KEY = packageDocId(SLOW);
+const isBeat = (p, fields) => p.includes("/results/") && Object.keys(fields).sort().join() === "platform_id,updated_at";
+const beatsIn = (record) => writesTo(record, resultPath(PORTAL, CLASS, USER, SLOW_KEY)).filter((w) => isBeat("/results/", w));
+
+// Holds each merge `matches` picks until the test releases it; the rest go straight through.
+// `open()` releases everything held and lets later merges through.
+function gate(matches) {
+  const held = [];
+  let opened = false;
+  return {
+    held,
+    open: () => { opened = true; for (const h of held) h.release(); },
+    wrap: (store) => {
+      const merge = store.merge.bind(store);
+      store.merge = (p, fields) => !opened && matches(p, fields)
+        ? new Promise((resolve, reject) => held.push({ release: () => merge(p, fields).then(resolve, reject) }))
+        : merge(p, fields);
+      return store;
+    }
+  };
+}
+
+// A run held in its package step until the test lets it finish.
+async function holding(opts = {}) {
+  let release;
+  const built = build({ ...opts, stepOverrides: { runPackage: () => new Promise((r) => { release = r; }), ...opts.stepOverrides } });
+  built.fn.queue({ identity: SLOW });
+  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+  await until(() => release, "the package step");
+  return { built, finish: () => release({ display: "x", summary: "y" }) };
+}
+
+test("the claim records the interval its heartbeat is written at", async () => {
+  const { built, finish } = await holding();
+  try {
+    const claim = writesTo(built.record, resultPath(PORTAL, CLASS, USER, SLOW_KEY)).find((w) => w.status === "running");
+    assert.equal(claim.heartbeat_seconds, HEARTBEAT_SECONDS);
+    assert.deepEqual(built.record.timers.map((t) => t.ms), [HEARTBEAT_SECONDS * 1000]);
+  } finally {
+    finish();
+  }
+  await built.runner.loop;
+});
+
+test("each heartbeat merges only platform_id and server time into the running result", async () => {
+  const { built, finish } = await holding();
+  try {
+    for (let i = 0; i < 3; i++) await tick(built);
+    const beats = beatsIn(built.record);
+    assert.equal(beats.length, 3);
+    assert.deepEqual(beats[0], { platform_id: PLATFORM_ID, updated_at: SERVER_TIME });
+    const doc = result(built.docs, SLOW);
+    assert.equal(doc.status, "running");
+    assert.equal(doc.stage, "run_package");
+  } finally {
+    finish();
+  }
+  await built.runner.loop;
+});
+
+test("a heartbeat is skipped while the last one is unsettled", async () => {
+  const g = gate(isBeat);
+  const { built, finish } = await holding({ wrapStore: g.wrap });
+  await tick(built);
+  await tick(built);
+  assert.equal(g.held.length, 1, "no second beat while the first is in flight");
+  g.held[0].release();
+  await settle();
+  await tick(built);
+  assert.equal(g.held.length, 2, "beats resume once the last one settles");
+  g.held[1].release();
+  finish();
+  await built.runner.loop;
+});
+
+test("the finish waits for a heartbeat in flight, and no heartbeat follows it", async () => {
+  const g = gate(isBeat);
+  const { built, finish } = await holding({ wrapStore: g.wrap });
+  await tick(built);
+  finish();
+  await settle(10);
+  assert.equal(result(built.docs, SLOW).status, "running", "done is not written while a beat is in flight");
+  g.held[0].release();
+  await built.runner.loop;
+  assert.equal(result(built.docs, SLOW).status, "done");
+  assert.ok(built.record.timers.every((t) => t.cancelled), "the timer stopped with the run");
+  const writes = writesTo(built.record, resultPath(PORTAL, CLASS, USER, SLOW_KEY)).length;
+  await tick(built);
+  assert.equal(writesTo(built.record, resultPath(PORTAL, CLASS, USER, SLOW_KEY)).length, writes, "the timer stopped with the run");
+});
+
+test("the run's final write is awaited past the status bound, and nothing else is written until it settles", async (t) => {
+  const g = gate((p, fields) => p.includes("/results/") && fields.status === "done");
+  const { built, finish } = await holding({ wrapStore: g.wrap });
+  const classStore = built.runner.currentRun.store;
+  const runnerWrites = writesTo(built.record, runnerPath(PORTAL, USER)).length;
+  const calls = built.fn.state.calls.length;
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    finish();
+    await settle(10);
+    assert.equal(g.held.length, 1, "done was issued");
+    t.mock.timers.tick(STATUS_WRITE_TIMEOUT_MS + 1000);
+    await settle(10);
+    assert.equal(writesTo(built.record, runnerPath(PORTAL, USER)).length, runnerWrites, "no runner-document write");
+    assert.equal(built.fn.state.calls.length, calls, "no /work");
+    assert.equal(classStore.closed, false, "the run's store stays open");
+  } finally {
+    t.mock.timers.reset();
+  }
+  g.held[0].release();
+  await built.runner.loop;
+  assert.equal(result(built.docs, SLOW).status, "done");
+  assert.equal(classStore.closed, true);
+  assert.equal(runnerDoc(built.docs).state, "ready");
+});
+
+test("a finish the store refuses is followed by a failure, awaited past the status bound the same way", async (t) => {
+  const g = gate((p, fields) => p.includes("/results/") && fields.status === "failed");
+  const { built, finish } = await holding({
+    wrapStore: (store) => {
+      g.wrap(store);
+      const merge = store.merge;
+      store.merge = (p, fields) => (p.includes("/results/") && fields.status === "done" ? Promise.reject(new Error("PERMISSION_DENIED")) : merge(p, fields));
+      return store;
+    }
+  });
+  const classStore = built.runner.currentRun.store;
+  const runnerWrites = writesTo(built.record, runnerPath(PORTAL, USER)).length;
+  const calls = built.fn.state.calls.length;
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    finish();
+    await settle(10);
+    assert.equal(g.held.length, 1, "the failure was issued");
+    t.mock.timers.tick(STATUS_WRITE_TIMEOUT_MS + 1000);
+    await settle(10);
+    assert.equal(writesTo(built.record, runnerPath(PORTAL, USER)).length, runnerWrites, "no runner-document write");
+    assert.equal(built.fn.state.calls.length, calls, "no /work");
+    assert.equal(classStore.closed, false, "the run's store stays open");
+  } finally {
+    t.mock.timers.reset();
+  }
+  g.held[0].release();
+  await built.runner.loop;
+  assert.equal(result(built.docs, SLOW).status, "failed");
+  assert.match(result(built.docs, SLOW).error, /PERMISSION_DENIED/);
+  assert.equal(classStore.closed, true);
+});
+
+test("a package that fails waits for a heartbeat in flight before its failure, and no heartbeat follows", async () => {
+  const g = gate(isBeat);
+  let fail;
+  const built = build({ wrapStore: g.wrap, stepOverrides: { runPackage: () => new Promise((_, reject) => { fail = reject; }) } });
+  built.fn.queue({ identity: SLOW });
+  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+  await until(() => fail, "the package step");
+  await tick(built);
+  fail(new Error("package exited 1"));
+  await settle(10);
+  assert.equal(result(built.docs, SLOW).status, "running", "failed is not written while a beat is in flight");
+  g.held[0].release();
+  await built.runner.loop;
+  assert.equal(result(built.docs, SLOW).status, "failed");
+  assert.ok(built.record.timers.every((t) => t.cancelled), "the timer stopped with the run");
+  const writes = writesTo(built.record, resultPath(PORTAL, CLASS, USER, SLOW_KEY)).length;
+  await tick(built);
+  assert.equal(writesTo(built.record, resultPath(PORTAL, CLASS, USER, SLOW_KEY)).length, writes, "the timer stopped with the run");
+});
+
+test("a heartbeat that fails is logged and the run still finishes", async () => {
+  const { built, finish } = await holding({
+    wrapStore: (store) => {
+      const merge = store.merge.bind(store);
+      store.merge = (p, fields) => (isBeat(p, fields) ? Promise.reject(new Error("UNAVAILABLE")) : merge(p, fields));
+      return store;
+    }
+  });
+  const lines = await captured(() => tick(built));
+  assert.ok(lines.some((l) => l.event === "heartbeat.failed"));
+  finish();
+  await built.runner.loop;
+  assert.equal(result(built.docs, SLOW).status, "done");
+});
+
+// The function keeps the last finished run on a re-queued result; it is not the runner's to touch.
+test("previous survives the claim, the finish and a later failure", async () => {
+  const previous = { summary: "last time", display: "# Last" };
+  let runs = 0;
+  let release;
+  const built = build({
+    stepOverrides: {
+      runPackage: () => {
+        runs += 1;
+        if (runs === 1) return new Promise((r) => { release = r; });
+        return Promise.reject(new Error("package exited 1"));
+      }
+    }
+  });
+  built.fn.queue({ identity: SLOW });
+  const queued = () => built.docs.set(resultPath(PORTAL, CLASS, USER, SLOW_KEY), { status: "queued", platform_id: PLATFORM_ID, previous });
+  queued();
+  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+  await until(() => release, "the package step");
+  assert.deepEqual(result(built.docs, SLOW).previous, previous, "after the claim");
+  release({ display: "x", summary: "y" });
+  await built.runner.loop;
+  assert.equal(result(built.docs, SLOW).status, "done");
+  assert.deepEqual(result(built.docs, SLOW).previous, previous, "after the finish");
+  queued();
+  built.runner.resume();
+  await built.runner.loop;
+  assert.equal(result(built.docs, SLOW).status, "failed");
+  assert.deepEqual(result(built.docs, SLOW).previous, previous, "after a failure");
+});
+
 // ---- the hooks -----------------------------------------------------------------
 
-test("/suspend writes suspending then suspended, keeping current_package and queue", async () => {
+test("/suspend while idle writes suspending then suspended, leaving current_package and queue alone", async () => {
   const { runner, docs, record } = await started();
   await runner.loop;
-  docs.set(runnerPath(PORTAL, USER), { ...runnerDoc(docs), current_package: { class_hash: CLASS, package_key: "users__1__x" }, queue: [{ class_hash: CLASS, package_key: "users__1__y" }] });
+  docs.set(runnerPath(PORTAL, USER), { ...runnerDoc(docs), queue: [{ class_hash: CLASS, package_key: "users__1__y" }] });
   await runner.suspend();
   const suspendWrites = writesTo(record, runnerPath(PORTAL, USER)).slice(-2);
   assert.deepEqual(suspendWrites.map((w) => w.state), ["suspending", "suspended"]);
   for (const w of suspendWrites) {
     assert.ok(!("current_package" in w) && !("queue" in w), "the hook does not write them, so they are kept");
   }
-  assert.deepEqual(runnerDoc(docs).current_package, { class_hash: CLASS, package_key: "users__1__x" });
+  assert.equal(runnerDoc(docs).current_package, null);
+  assert.deepEqual(runnerDoc(docs).queue, [{ class_hash: CLASS, package_key: "users__1__y" }]);
+});
+
+test("/suspend mid-run names the outstanding run on both its writes", async () => {
+  const { built, finish } = await holding();
+  await built.runner.suspend();
+  const suspendWrites = writesTo(built.record, runnerPath(PORTAL, USER)).slice(-2);
+  assert.deepEqual(suspendWrites.map((w) => w.state), ["suspending", "suspended"]);
+  for (const w of suspendWrites) assert.deepEqual(w.current_package, { class_hash: CLASS, package_key: SLOW_KEY });
+  finish();
+  await built.runner.loop;
+});
+
+// The watchdog reads a runner document naming an earlier package as a runner that has
+// moved on, so a hook write names the run whatever the claim's own write did.
+test("a hook write repairs a runner document the claim's write never reached", async () => {
+  let failRunning = true;
+  const { built, finish } = await holding({
+    wrapStore: (store) => {
+      const merge = store.merge.bind(store);
+      store.merge = (p, fields) => (failRunning && p.includes("/runners/") && fields.state === "running" ? Promise.reject(new Error("UNAVAILABLE")) : merge(p, fields));
+      return store;
+    }
+  });
+  assert.equal(runnerDoc(built.docs).current_package, null, "the claim's runner-document write was lost");
+  failRunning = false;
+  await built.runner.suspend();
+  assert.equal(runnerDoc(built.docs).state, "suspended");
+  assert.deepEqual(runnerDoc(built.docs).current_package, { class_hash: CLASS, package_key: SLOW_KEY });
+  finish();
+  await built.runner.loop;
+});
+
+test("/suspend mid-run on an unverified flush names the outstanding run on its failed write", async () => {
+  const { built, finish } = await holding();
+  const flush = built.runner.syncer.flushAndVerify;
+  built.runner.syncer.flushAndVerify = async () => ({ ok: false, reason: "sync incomplete" });
+  await assert.rejects(() => built.runner.suspend());
+  assert.equal(runnerDoc(built.docs).state, "failed");
+  assert.deepEqual(runnerDoc(built.docs).current_package, { class_hash: CLASS, package_key: SLOW_KEY });
+  built.runner.syncer.flushAndVerify = flush;
+  finish();
+  await built.runner.loop;
 });
 
 test("a denied PutObject leaves failed, never suspended, and fails the hook", async () => {
@@ -934,23 +1287,93 @@ test("a resume with no suspend since the last activity is logged", async () => {
 });
 
 test("/terminate during a run fails the result first, revokes, flushes and terminates", async () => {
-  let release;
-  const built = build({ stepOverrides: { runPackage: () => new Promise((r) => { release = r; }) } });
-  built.fn.queue({ identity: "users/1/slow" });
-  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
-  while (!built.runner.currentRun || !release) await new Promise((r) => setImmediate(r));
+  const { built, finish } = await holding();
   try {
     await built.runner.terminate();
     assert.equal(built.runner.state, "terminated");
-    const doc = result(built.docs, "users/1/slow");
+    const doc = result(built.docs, SLOW);
     assert.equal(doc.status, "failed");
-    assert.equal(doc.error, "VM terminated during the package run");
+    assert.equal(doc.error, LOST_RUN_REASON);
     assert.equal(built.record.revoked[0].token, "forwarded-report-server-token");
     assert.equal(runnerDoc(built.docs).state, "terminated");
+    assert.deepEqual(runnerDoc(built.docs).current_package, { class_hash: CLASS, package_key: SLOW_KEY });
+    const writes = writesTo(built.record, resultPath(PORTAL, CLASS, USER, SLOW_KEY)).length;
+    await tick(built);
+    assert.equal(writesTo(built.record, resultPath(PORTAL, CLASS, USER, SLOW_KEY)).length, writes, "no heartbeat after the hook");
   } finally {
     // The run's own bound is its declared duration plus ten minutes; let it end.
-    release({ display: "x", summary: "y" });
+    finish();
   }
+});
+
+test("/terminate's failure write is bounded, so a hung write does not keep the hook from revoking and flushing", async (t) => {
+  const g = gate((p, fields) => p.includes("/results/") && fields.error === LOST_RUN_REASON);
+  const { built, finish } = await holding({ wrapStore: g.wrap });
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let ended = false;
+  try {
+    const terminating = built.runner.terminate().then(() => { ended = true; });
+    await until(() => g.held.length, "the failure write");
+    t.mock.timers.tick(STATUS_WRITE_TIMEOUT_MS + 1000);
+    await until(() => ended, "the hook's end");
+    await terminating;
+    assert.equal(built.record.revoked.length, 1);
+    assert.equal(runnerDoc(built.docs).state, "terminated");
+  } finally {
+    t.mock.timers.reset();
+    g.open();
+    finish();
+  }
+});
+
+test("/terminate after an unverified flush names the outstanding run on its failed write", async () => {
+  const { built, finish } = await holding();
+  try {
+    built.runner.syncer.flushAndVerify = async () => ({ ok: false, reason: "sync incomplete" });
+    await assert.rejects(() => built.runner.terminate());
+    assert.equal(runnerDoc(built.docs).state, "failed");
+    assert.deepEqual(runnerDoc(built.docs).current_package, { class_hash: CLASS, package_key: SLOW_KEY });
+  } finally {
+    finish();
+  }
+});
+
+test("/terminate leaves a runner document that records another VM", async () => {
+  for (const flushed of [true, false]) {
+    const { built, finish } = await holding();
+    try {
+      built.docs.set(runnerPath(PORTAL, USER), { ...runnerDoc(built.docs), microvm_id: "mvm-2", state: "starting" });
+      if (!flushed) built.runner.syncer.flushAndVerify = async () => ({ ok: false, reason: "sync incomplete" });
+      const lines = await captured(() => built.runner.terminate().catch(() => {}));
+      assert.equal(runnerDoc(built.docs).microvm_id, "mvm-2");
+      assert.equal(runnerDoc(built.docs).state, "starting", flushed ? "not terminated" : "not failed");
+      assert.ok(lines.some((l) => l.event === "terminate.runner_doc_skipped"));
+    } finally {
+      finish();
+    }
+  }
+});
+
+test("a claim that lands while /terminate is under way starts no heartbeat", async () => {
+  const g = gate((p, fields) => p.includes("/results/") && fields.status === "running");
+  let revoked;
+  const built = build({
+    wrapStore: g.wrap,
+    revoke: () => new Promise((r) => { revoked = r; }),
+    stepOverrides: { runPackage: () => new Promise(() => {}) }
+  });
+  built.fn.queue({ identity: SLOW });
+  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+  await until(() => g.held.length, "the claim's write");
+  const terminating = built.runner.terminate();
+  await until(() => revoked, "the revocation");
+  g.held[0].release();
+  await until(() => writesTo(built.record, runnerPath(PORTAL, USER)).some((w) => w.state === "running"), "the claim's runner-document write");
+  await settle(10);
+  revoked();
+  await terminating;
+  assert.equal(runnerDoc(built.docs).state, "terminated");
+  assert.equal(built.record.timers.length, 0, "no heartbeat starts once the VM is terminating");
 });
 
 test("a refused revocation does not fail the terminate hook", async () => {
