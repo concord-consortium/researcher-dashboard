@@ -1,4 +1,4 @@
-import { createReadStream, createWriteStream } from "node:fs";
+import { createWriteStream } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { pipeline } from "node:stream/promises";
 import path from "node:path";
@@ -33,13 +33,13 @@ export class S3Backend {
     return (await this.client()).send(command);
   }
 
-  // `source` is the file the syncer opened and checked, {fd, size}; the stream closes it.
-  async put(relPath, { fd, size }) {
+  // `body` reads the file the syncer opened and checked; the syncer closes it.
+  async put(relPath, { body, size }) {
     await this.#send(
       new PutObjectCommand({
         Bucket: this.bucket,
         Key: this.#key(relPath),
-        Body: createReadStream(null, { fd, start: 0 }),
+        Body: body,
         ContentLength: size
       })
     );

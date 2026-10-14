@@ -2159,6 +2159,28 @@ test("a claim that lands while /terminate is under way starts no heartbeat", asy
   assert.equal(built.record.timers.length, 0, "no heartbeat starts once the VM is terminating");
 });
 
+test("a run that finishes after /terminate leaves the hook's failure as the last word", async () => {
+  const { built, finish } = await holding();
+  await built.runner.terminate();
+  finish();
+  await settle(20);
+  assert.equal(result(built.docs, SLOW).status, "failed");
+  assert.equal(result(built.docs, SLOW).error, LOST_RUN_REASON);
+  assert.equal(built.docs.get(scopePath(PORTAL, CLASS, USER)), undefined, "no counts written after the hook");
+});
+
+test("a run that fails after /terminate leaves the hook's failure as the last word", async () => {
+  let fail;
+  const built = build({ stepOverrides: { runPackage: () => new Promise((_, reject) => { fail = reject; }) } });
+  built.fn.queue({ identity: SLOW });
+  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+  await until(() => fail, "the package step");
+  await built.runner.terminate();
+  fail(new Error("package exited 1"));
+  await settle(20);
+  assert.equal(result(built.docs, SLOW).error, LOST_RUN_REASON);
+});
+
 test("a refused revocation does not fail the terminate hook", async () => {
   const { runner } = await started({ revoke: async () => { throw new Error("report-server down"); } });
   await runner.loop;

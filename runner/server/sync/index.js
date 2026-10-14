@@ -1,4 +1,4 @@
-import fs from "node:fs";
+import fs, { createReadStream } from "node:fs";
 import path from "node:path";
 import { log, timed } from "../log.js";
 import { openForSync, pendingFiles, scanTree } from "./scan.js";
@@ -50,7 +50,13 @@ export class Syncer {
         log.warn("sync.skipped", { path: rel });
         continue;
       }
-      await this.backend.put(rel, source);
+      // Destroyed whatever the put did, so a failed upload does not leave the file open.
+      const body = createReadStream(null, { fd: source.fd, start: 0 });
+      try {
+        await this.backend.put(rel, { body, size: source.size });
+      } finally {
+        body.destroy();
+      }
       // Recorded only after the put resolves, so a failed upload leaves the file
       // pending and the next verify refuses to call the flush complete.
       this.#uploaded.set(rel, scanned.get(rel));

@@ -629,6 +629,9 @@ export class Runner {
       const running = this.#steps({ entry, docId, docs, scope, manifest, timeoutMs, cancelled: () => timedOut });
       try {
         const result = await Promise.race([running, timeout]);
+        // /terminate has written this run failed, the last word on it: what the package
+        // left after the hook's flush was never synced.
+        if (this.#terminating) return true;
         try {
           await docs.counts(result.counts);
         } catch (err) {
@@ -639,6 +642,7 @@ export class Runner {
       } catch (err) {
         log.error("package.failed", { error: err.message });
         if (timedOut) await this.#endTimedOutPackage(running);
+        if (this.#terminating) return true;
         await heartbeat?.settled();
         await docs.failed(docId, { pkg, error: err.message })
           .catch((writeErr) => log.error("status.write_failed", { write: "result", error: writeErr.message }));

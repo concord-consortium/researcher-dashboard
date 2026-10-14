@@ -254,3 +254,14 @@ test("openForSync refuses a pipe, a link, a hard link and a path through a swapp
   fs.symlinkSync(path.join(local, "moved"), path.join(local, "dir"));
   assert.equal(openForSync(real), null, "a directory above it became a link");
 });
+
+// A broker outage fails every tick's upload; each must give back the file it opened.
+test("an upload that fails closes the file the syncer opened", async () => {
+  await write("a.txt", "a");
+  const failing = syncer({ backend: { put: async () => { throw new Error("storage-credentials answered 502"); }, list: async () => [] } });
+  const open = () => fs.readdirSync("/proc/self/fd").length;
+  const before = open();
+  for (let i = 0; i < 5; i++) await failing.flush().catch(() => {});
+  await new Promise((r) => setImmediate(r));
+  assert.equal(open(), before);
+});
