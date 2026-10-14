@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdtemp, mkdir, rm, writeFile, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import fs from "node:fs";
 import path from "node:path";
 import test, { afterEach, beforeEach } from "node:test";
 import { DirBackend, Syncer } from "../server/sync/index.js";
-import { isExcluded, pendingFiles, scanTree } from "../server/sync/scan.js";
+import { isExcluded, openForSync, pendingFiles, scanTree } from "../server/sync/scan.js";
 
 let work;
 let local;
@@ -233,4 +234,23 @@ test("scanTree leaves out a file with another hard link", async () => {
   const files = await scanTree(local);
   assert.ok(files.has("plain.txt"));
   assert.ok(!files.has("mine.txt"));
+});
+
+// Root opens what it uploads from a tree the package owns, so whatever the package swapped
+// in since the scan is refused there, at once.
+test("openForSync refuses a pipe, a link, a hard link and a path through a swapped directory", async () => {
+  const real = await write("dir/plain.txt", "abc");
+  const opened = openForSync(real);
+  assert.equal(opened.size, 3);
+  fs.closeSync(opened.fd);
+  execFileSync("mkfifo", [path.join(local, "dir", "pipe")]);
+  assert.equal(openForSync(path.join(local, "dir", "pipe")), null, "a pipe does not block, and is refused");
+  fs.symlinkSync(real, path.join(local, "dir", "sym"));
+  assert.equal(openForSync(path.join(local, "dir", "sym")), null);
+  fs.linkSync(real, path.join(work, "hard"));
+  assert.equal(openForSync(real), null, "a file with another hard link");
+  fs.unlinkSync(path.join(work, "hard"));
+  fs.renameSync(path.join(local, "dir"), path.join(local, "moved"));
+  fs.symlinkSync(path.join(local, "moved"), path.join(local, "dir"));
+  assert.equal(openForSync(real), null, "a directory above it became a link");
 });

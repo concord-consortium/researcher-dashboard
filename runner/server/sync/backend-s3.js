@@ -33,12 +33,14 @@ export class S3Backend {
     return (await this.client()).send(command);
   }
 
-  async put(relPath, sourcePath) {
+  // `source` is the file the syncer opened and checked, {fd, size}; the stream closes it.
+  async put(relPath, { fd, size }) {
     await this.#send(
       new PutObjectCommand({
         Bucket: this.bucket,
         Key: this.#key(relPath),
-        Body: createReadStream(sourcePath)
+        Body: createReadStream(null, { fd, start: 0 }),
+        ContentLength: size
       })
     );
   }

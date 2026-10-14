@@ -934,7 +934,8 @@ test("a queued entry is refused when its version, checksum, catalog id or scope 
     ["class id zero", null, (sc) => ({ ...sc, classes: [{ class_hash: CLASS, class_id: 0 }] }), /class list is not this class/],
     ["class id string", null, (sc) => ({ ...sc, classes: [{ class_hash: CLASS, class_id: "111" }] }), /class list is not this class/],
     ["scope class", null, (sc) => ({ ...sc, classes: [{ class_hash: OTHER_CLASS, class_id: 1 }] }), /class list is not this class/],
-    ["assignments", null, (sc) => ({ ...sc, assignments: "none" }), /no assignment list/]
+    ["assignments", null, (sc) => ({ ...sc, assignments: "none" }), /no assignment list/],
+    ["two classes", null, (sc) => ({ ...sc, classes: [...sc.classes, { class_hash: OTHER_CLASS, class_id: 2 }] }), /class list is not this class/]
   ];
   for (const [name, entry, scope, reason] of cases) {
     const built = build();
@@ -1979,6 +1980,17 @@ test("each resume with no suspend before it is logged, not only the first", asyn
   assert.ok(lines.some((l) => l.event === "lifecycle.resume_without_suspend"));
 });
 
+test("/resume itself marks the storage credentials stale, before the loop runs", async () => {
+  const { runner } = await started();
+  await runner.loop;
+  let marked = 0;
+  runner.storage = { markStale() { marked += 1; }, client: async () => {} };
+  await runner.suspend();
+  runner.resume();
+  assert.equal(marked, 1, "marked by the hook, synchronously");
+  await runner.loop;
+});
+
 test("a resume with no suspend since the last activity is logged", async () => {
   const lines = [];
   const original = process.stdout.write;
@@ -2078,6 +2090,7 @@ test("/terminate during the claim's runner-document write starts no heartbeat", 
   g.open();
   await settle(20);
   assert.equal(built.record.timers.length, 0, "no heartbeat once the VM is terminating");
+  assert.equal(built.record.prepared.length, 0, "the package is not prepared");
 });
 
 test("currentPackage names the outstanding run, and null with none", async () => {

@@ -1,6 +1,7 @@
+import fs from "node:fs";
 import path from "node:path";
 import { log, timed } from "../log.js";
-import { pendingFiles, scanTree } from "./scan.js";
+import { openForSync, pendingFiles, scanTree } from "./scan.js";
 
 export { DirBackend } from "./backend-dir.js";
 export { S3Backend } from "./backend-s3.js";
@@ -40,9 +41,16 @@ export class Syncer {
   async #flushOnce() {
     const scanned = await scanTree(this.root);
     const pending = pendingFiles(scanned, this.#uploaded);
+    // Resolved only when there is something to send: a root not yet created scans as empty.
+    const realRoot = pending.length ? fs.realpathSync(this.root) : this.root;
     let bytes = 0;
     for (const rel of pending) {
-      await this.backend.put(rel, path.join(this.root, rel));
+      const source = openForSync(path.join(realRoot, rel));
+      if (!source) {
+        log.warn("sync.skipped", { path: rel });
+        continue;
+      }
+      await this.backend.put(rel, source);
       // Recorded only after the put resolves, so a failed upload leaves the file
       // pending and the next verify refuses to call the flush complete.
       this.#uploaded.set(rel, scanned.get(rel));

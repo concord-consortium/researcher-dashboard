@@ -1,4 +1,6 @@
+import { createReadStream, createWriteStream } from "node:fs";
 import { copyFile, mkdir, readdir, rm, stat } from "node:fs/promises";
+import { pipeline } from "node:stream/promises";
 import path from "node:path";
 
 // The DIR backend copies to a local directory instead of S3. It exists so the
@@ -13,10 +15,11 @@ export class DirBackend {
     return path.join(this.root, relPath);
   }
 
-  async put(relPath, sourcePath) {
+  // `source` is the file the syncer opened and checked, {fd, size}; the stream closes it.
+  async put(relPath, { fd }) {
     const dest = this.#abs(relPath);
     await mkdir(path.dirname(dest), { recursive: true });
-    await copyFile(sourcePath, dest);
+    await pipeline(createReadStream(null, { fd, start: 0 }), createWriteStream(dest));
   }
 
   async get(relPath, destPath) {

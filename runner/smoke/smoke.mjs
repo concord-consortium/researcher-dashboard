@@ -25,8 +25,8 @@ import { resultPath, runnerPath } from "../server/status.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PACKAGE = path.join(HERE, "package");
-// The marker the smoke package writes into its display, read from it rather than repeated.
 const STAGING_PORTAL = "learn.portal.staging.concord.org";
+// The marker the smoke package writes into its display, read from it rather than repeated.
 const MARKER = fs.readFileSync(path.join(PACKAGE, "run.py"), "utf8").match(/^MARKER = "([^"]+)"$/m)?.[1] ?? fail("run.py defines no MARKER");
 
 function args(argv) {

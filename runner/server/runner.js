@@ -612,8 +612,9 @@ export class Runner {
         queue,
         scopes: await this.#heldScopes(entry.class_hash)
       });
-      // A claim that lands after /terminate gets no beats: the VM is ending.
-      if (!this.#terminating) this.#run.heartbeat = this.#startHeartbeat(docs, docId);
+      // A /terminate that arrived during that write leaves the run to the hook, unstarted.
+      if (this.#terminating) return true;
+      this.#run.heartbeat = this.#startHeartbeat(docs, docId);
       const heartbeat = this.#run.heartbeat;
 
       const timeoutMs = this.env.packageTimeoutMs ?? declared * 1000 + PACKAGE_TIMEOUT_MARGIN_MS;
