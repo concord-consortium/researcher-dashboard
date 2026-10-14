@@ -125,7 +125,8 @@ function parentsBetween(root, leaf) {
   return dirs;
 }
 
-// Everything the package needs, prepared and owned by the package uid.
+// Everything the package needs. Its home, output directory and data are handed to the
+// package uid; its input directory and scope.json stay root's.
 // `chown` is a seam: the effect it has cannot be observed by a test, which runs as the
 // uid it would be chowning to, so what a test can check is that it was asked for.
 export async function preparePackage({ workRoot, dataRoot, classHash, docId, scope, catalogId, portalHost, token, uid, proxyUrl, reportServerUrl, bucket, storagePrefix, login, chown = fs.lchownSync }) {

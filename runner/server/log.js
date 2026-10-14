@@ -50,8 +50,8 @@ export async function timed(event, fields, fn) {
   }
 }
 
-// The result document is read by every researcher of the class, and the strings that
-// reach it are whatever a step happened to throw: cc-data's stderr, a fetch error
+// A result document and the runner document's recorded failures are read in the
+// researcher's browser, and the strings that reach them are whatever a step happened to throw: cc-data's stderr, a fetch error
 // carrying a presigned S3 URL, a stack trace. None of that is the researcher's to see,
 // and some of it is credential-shaped. So the document gets a redacted message and the
 // log keeps the original, which is where an engineer is looking anyway.

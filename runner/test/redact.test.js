@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { redact } from "../server/log.js";
 
-// Whatever a step throws ends up in the result document, which every researcher of the
-// class reads. These are the shapes that actually turn up in this runner's errors.
+// Whatever a step throws ends up in a document the researcher's browser reads. These are
+// the shapes that actually turn up in this runner's errors.
 test("strips the signature from a presigned S3 URL", () => {
   const msg = "fetch failed: https://bucket.s3.amazonaws.com/packages/demo/1.0.0.zip" +
     "?X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20260918&X-Amz-Signature=abc123def456&X-Amz-Expires=900";

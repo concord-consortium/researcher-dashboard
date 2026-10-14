@@ -1642,6 +1642,41 @@ test("/terminate after an unverified flush names the outstanding run on its fail
   }
 });
 
+test("a claim that lands after /terminate has finished writes and runs nothing more", async () => {
+  const g = gate((p, fields) => p.includes("/results/") && fields.status === "running");
+  const built = build({ wrapStore: g.wrap });
+  built.fn.queue({ identity: SLOW });
+  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+  await until(() => g.held.length, "the claim's write");
+  await built.runner.terminate();
+  built.docs.set(runnerPath(PORTAL, USER), { ...runnerDoc(built.docs), microvm_id: "mvm-2", state: "starting" });
+  g.held[0].release();
+  await settle(20);
+  assert.equal(runnerDoc(built.docs).state, "starting", "the newer VM's document is left alone");
+  assert.equal(built.record.prepared.length, 0, "the package is not prepared");
+  assert.equal(built.record.timers.length, 0);
+});
+
+test("/terminate during the claim's runner-document write starts no heartbeat", async () => {
+  const g = gate((p, fields) => p.includes("/runners/") && fields.state === "running");
+  const built = build({ wrapStore: g.wrap, stepOverrides: { runPackage: () => new Promise(() => {}) } });
+  built.fn.queue({ identity: SLOW });
+  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+  await until(() => g.held.length, "the claim's runner-document write");
+  await built.runner.terminate();
+  g.open();
+  await settle(20);
+  assert.equal(built.record.timers.length, 0, "no heartbeat once the VM is terminating");
+});
+
+test("currentPackage names the outstanding run, and null with none", async () => {
+  const { built, finish } = await holding();
+  assert.deepEqual(built.runner.currentPackage, { class_hash: CLASS, package_key: SLOW_KEY });
+  finish();
+  await built.runner.loop;
+  assert.equal(built.runner.currentPackage, null);
+});
+
 test("/terminate leaves a runner document that records another VM", async () => {
   for (const flushed of [true, false]) {
     const { built, finish } = await holding();
@@ -1672,11 +1707,11 @@ test("a claim that lands while /terminate is under way starts no heartbeat", asy
   const terminating = built.runner.terminate();
   await until(() => revoked, "the revocation");
   g.held[0].release();
-  await until(() => writesTo(built.record, runnerPath(PORTAL, USER)).some((w) => w.state === "running"), "the claim's runner-document write");
-  await settle(10);
+  await settle(20);
   revoked();
   await terminating;
   assert.equal(runnerDoc(built.docs).state, "terminated");
+  assert.ok(!writesTo(built.record, runnerPath(PORTAL, USER)).some((w) => w.state === "running"), "no running write once the VM is terminating");
   assert.equal(built.record.timers.length, 0, "no heartbeat starts once the VM is terminating");
 });
 

@@ -115,6 +115,11 @@ export class Runner {
     return this.#run;
   }
 
+  // The outstanding run as the runner document names it, or null.
+  get currentPackage() {
+    return this.#run ? { class_hash: this.#run.classHash, package_key: this.#run.docId } : null;
+  }
+
   // Resolves when the pull loop now running stops: drained and suspended, or stood down.
   get loop() {
     return this.#loop;
@@ -558,7 +563,7 @@ export class Runner {
   // While a run is outstanding every runner-document write names it, so a write lost at
   // the claim is repaired by the next one and the document never names an earlier run.
   #runningPackage() {
-    return this.#run ? { current_package: { class_hash: this.#run.classHash, package_key: this.#run.docId } } : {};
+    return this.#run ? { current_package: this.currentPackage } : {};
   }
 
   async #runPackage(request, next) {
@@ -574,6 +579,9 @@ export class Runner {
         return false;
       }
       this.#resolved(entry);
+      // The VM is ending: the hook has written this run failed and the runner document
+      // terminated, which may by now name a newer VM, so nothing more is written or run.
+      if (this.#terminating) return true;
       // A claim that lands while a hook is suspending or ending the VM runs on regardless;
       // the hook's own state stands until the resume.
       if (this.#vm.state !== STATES.RUNNING && canTransition(this.#vm.state, STATES.RUNNING)) this.#vm.to(STATES.RUNNING);
@@ -584,7 +592,7 @@ export class Runner {
       this.#lastWritten = STATES.RUNNING;
       await this.status.writeFromHook("work", {
         state: STATES.RUNNING,
-        current_package: { class_hash: entry.class_hash, package_key: docId },
+        current_package: this.currentPackage,
         queue,
         scopes: await this.#heldScopes(entry.class_hash)
       });

@@ -184,7 +184,7 @@ test("a package that fails has its output logged before the failure is raised", 
   await withPackageDir(async (dir, outputDir) => {
     const failure = Object.assign(new Error("exited 1"), { stdout: "", stderr: "cc-data: NOT_AUTHENTICATED" });
     const lines = await captureLog(async () => {
-      await assert.rejects(makeSteps().runPackage({ manifest: { name: "x", version: "1.0.0", entrypoint: "run.py", dir }, paths: { outputDir }, env: {}, uid: 1000, timeoutMs: 1000, exec: async () => { throw failure; } }), /exited 1/);
+      await assert.rejects(makeSteps().runPackage({ manifest: { name: "x", version: "1.0.0", entrypoint: "run.py", dir }, paths: { outputDir }, env: {}, uid: 1000, timeoutMs: 1000, exec: processExec({ run: async () => { throw failure; } }).exec }), /^Error: exited 1$|^exited 1$/);
     });
     const output = lines.find((l) => l.event === "package.output");
     assert.equal(output.level, "error");

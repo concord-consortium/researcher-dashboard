@@ -86,15 +86,13 @@ export function inflatedSize(archive, { limit = MAX_UNPACKED_BYTES, spawnFn = sp
   });
 }
 
-// Everything unzip wrote, refusing a symbolic link (unzip restores them) or anything
-// that resolves outside the package directory.
+// Everything unzip wrote, refusing a symbolic link, which unzip restores. Nothing lands
+// outside the directory: unzip writes a ../ or absolute entry inside it.
 function checkTree(dir) {
-  const root = path.resolve(dir) + path.sep;
   const walk = (current) => {
     for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
       const full = path.join(current, entry.name);
       if (entry.isSymbolicLink()) throw new Error(`the archive holds a symbolic link, ${path.relative(dir, full)}`);
-      if (!path.resolve(full).startsWith(root)) throw new Error(`the archive writes outside its directory, ${full}`);
       if (entry.isDirectory()) walk(full);
     }
   };
