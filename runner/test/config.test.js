@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { loadEnv } from "../server/config.js";
+import { defaultChainState, disableDefaultCredentialChain, loadEnv } from "../server/config.js";
 
 const BASE = { SYNC_BACKEND: "DIR", SYNC_DIR: "/tmp/x" };
 
@@ -22,4 +22,15 @@ test("the duration ceiling refuses a configured value below report-server's limi
   assert.throws(() => loadEnv({ ...BASE, PACKAGE_MAX_DURATION_SECONDS: "7199" }), /at least 7200/);
   assert.throws(() => loadEnv({ ...BASE, PACKAGE_MAX_DURATION_SECONDS: "28801" }), /at most 28800/);
   assert.throws(() => loadEnv({ ...BASE, PACKAGE_MAX_DURATION_SECONDS: "2h" }), /positive integer/);
+});
+
+// Each VM's log says whether the switch holds; it must say so when it does not.
+test("the default chain reads as enabled when any part of the switch is missing", () => {
+  const off = () => disableDefaultCredentialChain({});
+  assert.deepEqual(defaultChainState(off()), { disabled: true, present: [] });
+  assert.deepEqual(defaultChainState({ ...off(), AWS_ACCESS_KEY_ID: "x" }), { disabled: false, present: ["AWS_ACCESS_KEY_ID"] });
+  const { AWS_EC2_METADATA_DISABLED, ...noImds } = off();
+  assert.equal(defaultChainState(noImds).disabled, false);
+  assert.equal(defaultChainState({ ...off(), AWS_CONFIG_FILE: "/home/x/.aws/config" }).disabled, false);
+  assert.equal(defaultChainState({ ...off(), AWS_SHARED_CREDENTIALS_FILE: "/home/x/.aws/credentials" }).disabled, false);
 });

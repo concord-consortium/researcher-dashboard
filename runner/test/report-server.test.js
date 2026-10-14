@@ -14,6 +14,7 @@ test("asks the applies route with the bearer, the manifest's patterns and the sc
   assert.equal(calls[0].init.method, "POST");
   assert.equal(calls[0].init.headers.Authorization, "Bearer tok");
   assert.deepEqual(JSON.parse(calls[0].init.body), { urls: { any: ["*x*"] }, scope_urls: ["https://a/x"] });
+  assert.ok(calls[0].init.signal, "every call is bounded");
 });
 
 test("a 400 or 422 is a refusal carrying report-server's message", async () => {
@@ -30,7 +31,9 @@ test("a 503, a 401, a 404 and an answer without a verdict are not refusals", asy
 });
 
 test("no answer in time and a failed connection are not refusals", async () => {
-  const hang = (url, init) => new Promise((_, reject) => init.signal.addEventListener("abort", () => reject(init.signal.reason)));
+  let aborted = false;
+  const hang = (url, init) => new Promise((_, reject) => init.signal.addEventListener("abort", () => { aborted = true; reject(init.signal.reason); }));
   await assert.rejects(ask(hang, { timeoutMs: 20 }), (err) => err instanceof ReportServerError && !err.refusal && err.status === null);
+  assert.ok(aborted, "the bound aborted the call");
   await assert.rejects(ask(async () => { throw new TypeError("fetch failed"); }), (err) => err instanceof ReportServerError && !err.refusal);
 });

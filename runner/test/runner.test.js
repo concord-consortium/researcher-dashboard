@@ -249,6 +249,24 @@ test("/run refuses a session token that names another researcher", async () => {
   await assert.rejects(() => runner.run({ microvmId: "mvm-1", runHookPayload: other }), /names researcher 999/);
 });
 
+test("/run refuses a session token for another portal", async () => {
+  const { runner } = build();
+  const other = JSON.stringify({ ...JSON.parse(PAYLOAD), session_token: sessionToken({ platform_id: "https://learn.concord.org" }) });
+  await assert.rejects(() => runner.run({ microvmId: "mvm-1", runHookPayload: other }), /names portal/);
+});
+
+test("/run logs the default chain as enabled when the process still holds credentials", async () => {
+  const built = build();
+  built.runner.processEnv = { AWS_ACCESS_KEY_ID: "x" };
+  const lines = await captured(async () => {
+    await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+    await built.runner.loop;
+  });
+  const line = lines.find((l) => l.event === "aws.default_chain_enabled");
+  assert.deepEqual(line?.present, ["AWS_ACCESS_KEY_ID"]);
+  assert.ok(!lines.some((l) => l.event === "aws.default_chain_disabled"));
+});
+
 test("/run refuses a session token without the runner claim", async () => {
   const { runner } = build();
   const other = JSON.stringify({ ...JSON.parse(PAYLOAD), session_token: sessionToken({ researcher_dashboard_runner: false }) });
@@ -310,6 +328,17 @@ test("a queued package is claimed, run and finished, and the counts land on the 
 });
 
 // A package that reports only some counts must not inherit another run's others.
+test("an unparseable log_freshness_at is left out, and the counts still land", async () => {
+  const built = build({ stepOverrides: { readPackageCounts: async () => ({ answers: 3, log_freshness_at: "not a date" }) } });
+  built.fn.queue({ identity: "users/1/wildfire-responses" });
+  const lines = await captured(async () => {
+    await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+    await built.runner.loop;
+  });
+  assert.deepEqual(built.docs.get(scopePath(PORTAL, CLASS, USER)).data, { answers: 3, last_pull_at: SERVER_TIME });
+  assert.ok(!lines.some((l) => l.event === "status.write_failed"));
+});
+
 test("the counts replace the scope document's last counts rather than merging into them", async () => {
   const built = build({ stepOverrides: { readPackageCounts: async () => ({ answers: 3 }) } });
   built.docs.set(scopePath(PORTAL, CLASS, USER), { platform_id: PLATFORM_ID, data: { answers: 1, logs: 9, log_freshness_at: "2026-01-01T00:00:00.000Z", clue_documents: 4 } });
@@ -875,6 +904,9 @@ test("a queued entry is refused when its version, checksum, catalog id or scope 
     ["checksum", (p) => ({ ...p, checksum: "sha256:xyz" }), null, /does not match the catalog's grammar/],
     ["catalog id", (p) => ({ ...p, catalog_id: 0 }), null, /does not match the catalog's grammar/],
     ["scope kind", null, (sc) => ({ ...sc, kind: "school" }), /not a class scope/],
+    ["scope id", null, (sc) => ({ ...sc, id: OTHER_CLASS }), /queued scope names .*, not /],
+    ["class id zero", null, (sc) => ({ ...sc, classes: [{ class_hash: CLASS, class_id: 0 }] }), /class list is not this class/],
+    ["class id string", null, (sc) => ({ ...sc, classes: [{ class_hash: CLASS, class_id: "111" }] }), /class list is not this class/],
     ["scope class", null, (sc) => ({ ...sc, classes: [{ class_hash: OTHER_CLASS, class_id: 1 }] }), /class list is not this class/],
     ["assignments", null, (sc) => ({ ...sc, assignments: "none" }), /no assignment list/]
   ];
@@ -901,6 +933,25 @@ test("a queued entry is refused when its version, checksum, catalog id or scope 
   }
 });
 
+test("an entry with neither a usable identity nor a well-formed key is logged and written nowhere", async () => {
+  const built = build();
+  built.fn.queue({ identity: "users/1/counts" });
+  const call = built.fn.makeFunctionClient();
+  built.runner.makeFunctionClient = () => async (route, args) => {
+    const answer = await call(route, args);
+    if (route === "work") answer.packages = answer.packages.map((p) => ({ ...p, identity: "Users/1/counts", package_key: "../evil" }));
+    return answer;
+  };
+  stopAfter(built, 4);
+  const lines = await captured(async () => {
+    await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+    await built.runner.loop;
+  });
+  const resultWrites = built.record.stores.flatMap((st) => st.writes).filter((w) => w.path.includes("/results/"));
+  assert.deepEqual(resultWrites, []);
+  assert.ok(lines.some((l) => l.event === "package.refused" && /Users\/1\/counts/.test(l.error) && /\.\.\/evil/.test(l.error)));
+});
+
 // ---- tokens and stores ---------------------------------------------------------
 
 test("every /work answer signs in new stores, per class, and the last request's are closed", async () => {
@@ -915,6 +966,31 @@ test("every /work answer signs in new stores, per class, and the last request's 
   const open = built.record.stores.filter((s) => !s.closed);
   assert.ok(open.length <= 3, `only the current request's stores stay open, found ${open.length}`);
 });
+
+for (const [name, change] of [
+  ["another portal's session token", (fn) => { fn.state.sessionToken = () => sessionToken({ platform_id: "https://learn.concord.org" }); }],
+  ["another Firebase project", (fn, built) => {
+    const call = fn.makeFunctionClient();
+    built.runner.makeFunctionClient = () => async (route, args) => {
+      const answer = await call(route, args);
+      return route === "work" ? { ...answer, firebase_project: "report-service-pro" } : answer;
+    };
+  }]
+]) {
+  test(`a /work answer naming ${name} is not adopted`, async () => {
+    const built = build();
+    built.fn.queue({ identity: "users/1/counts" });
+    change(built.fn, built);
+    stopAfter(built, 4);
+    const lines = await captured(async () => {
+      await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+      await built.runner.loop;
+    });
+    assert.equal(result(built.docs, "users/1/counts").status, "queued");
+    assert.equal(built.record.prepared.length, 0);
+    assert.ok(lines.some((l) => l.event === "work.token_refused"));
+  });
+}
 
 test("a /work answer whose session token names another researcher is not adopted", async () => {
   const built = build();
@@ -1725,6 +1801,39 @@ test("a ready write in flight across a suspend and resume leaves the new loop to
   assert.equal(runnerDoc(built.docs).state, "ready", "the new loop wrote ready over suspended");
 });
 
+test("report-server's yes is asked again after a resume", async () => {
+  const built = build();
+  built.docs.set(classPath(PORTAL, CLASS), { platform_id: PLATFORM_ID, assignment_urls: ["https://a/x"], interactive_urls: [] });
+  built.fn.queue({ identity: "users/1/ap" });
+  built.record.manifests["users/1/ap"] = manifestFor("users/1/ap", { urls: { any: ["*x*"] } });
+  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+  await built.runner.loop;
+  assert.equal(built.record.applies.length, 1);
+  await built.runner.suspend();
+  requeue(built, "users/1/ap");
+  built.runner.resume();
+  await built.runner.loop;
+  assert.equal(built.record.applies.length, 2);
+});
+
+test("the syncer stops at a resume until the new loop has fetched credentials", async () => {
+  const { runner } = await started();
+  await runner.loop;
+  const events = [];
+  let release;
+  runner.storage = { markStale() {}, client: () => { events.push("client"); return new Promise((r) => { release = () => { events.push("fetched"); r(); }; }); } };
+  const stop = runner.syncer.stop.bind(runner.syncer);
+  const start = runner.syncer.start.bind(runner.syncer);
+  runner.syncer.stop = () => { events.push("stop"); return stop(); };
+  runner.syncer.start = () => { events.push("start"); return start(); };
+  runner.resume();
+  await until(() => release, "the post-resume fetch");
+  release();
+  await runner.loop;
+  assert.ok(events.indexOf("stop") >= 0 && events.indexOf("stop") < events.indexOf("client"), "stopped before the fetch");
+  assert.ok(events.indexOf("start") > events.indexOf("fetched"), "started only after it");
+});
+
 test("a resume with no suspend since the last activity is logged", async () => {
   const lines = [];
   const original = process.stdout.write;
@@ -1748,6 +1857,7 @@ test("the lost-run reason is the watchdog's, word for word", () => {
 test("/terminate during a run fails the result first, revokes, flushes and terminates", async () => {
   const { built, finish } = await holding();
   try {
+    built.docs.set(runnerPath(PORTAL, USER), { ...runnerDoc(built.docs), current_package: null });
     await built.runner.terminate();
     assert.equal(built.runner.state, "terminated");
     const doc = result(built.docs, SLOW);
