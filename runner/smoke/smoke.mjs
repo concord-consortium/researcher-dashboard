@@ -26,6 +26,7 @@ import { resultPath, runnerPath } from "../server/status.js";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PACKAGE = path.join(HERE, "package");
 // The marker the smoke package writes into its display, read from it rather than repeated.
+const STAGING_PORTAL = "learn.portal.staging.concord.org";
 const MARKER = fs.readFileSync(path.join(PACKAGE, "run.py"), "utf8").match(/^MARKER = "([^"]+)"$/m)?.[1] ?? fail("run.py defines no MARKER");
 
 function args(argv) {
@@ -102,7 +103,7 @@ function build(opts) {
 function image(opts) {
   need(opts, "classId", "classHash");
   const token = process.env.RD_SMOKE_REPORT_SERVER_TOKEN ?? fail("RD_SMOKE_REPORT_SERVER_TOKEN is not set");
-  const portal = opts.portal ?? "learn.portal.staging.concord.org";
+  const portal = opts.portal ?? STAGING_PORTAL;
   // The Makefile's names, which `make smoke-image` passes, so the image run is the one just built.
   const imageName = process.env.IMAGE ?? "researcher-dashboard-runner";
   const platform = process.env.PLATFORM ?? "linux/arm64";
@@ -138,7 +139,7 @@ async function stack(opts) {
   need(opts, "identity", "version", "classHash");
   const waitMinutes = opts.waitMinutes === undefined ? 10 : positiveInteger(opts, "waitMinutes");
   const access = process.env.RD_SMOKE_ACCESS_TOKEN ?? fail("RD_SMOKE_ACCESS_TOKEN is not set");
-  const portalUrl = (opts.portalUrl ?? "https://learn.portal.staging.concord.org").replace(/\/+$/, "");
+  const portalUrl = (opts.portalUrl ?? `https://${STAGING_PORTAL}`).replace(/\/+$/, "");
   const project = opts.firebaseProject ?? "report-service-dev";
   const bearer = { Authorization: `Bearer ${access}` };
   const uid = JSON.parse(Buffer.from(access.split(".")[1], "base64url").toString("utf8")).uid;

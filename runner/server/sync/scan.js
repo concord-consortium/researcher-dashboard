@@ -32,6 +32,9 @@ export async function scanTree(root) {
       }
       if (!entry.isFile() || isExcluded(rel)) continue;
       const info = await stat(abs);
+      // A file with another hard link could be one of root's, which the syncer, running as
+      // root, would otherwise read and push to the researcher's prefix.
+      if (info.nlink !== 1) continue;
       files.set(rel, { size: info.size, mtimeMs: Math.floor(info.mtimeMs) });
     }
   }

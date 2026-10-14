@@ -1084,6 +1084,20 @@ test("a claim that cannot be written is tried three times, then left, without a 
 
 // ---- /work's answers -----------------------------------------------------------
 
+test("a 409 long after /run waits one idle poll, not five seconds", async () => {
+  const clock = { t: Date.parse("2026-09-26T12:00:00Z") };
+  const built = build({ clock });
+  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+  await built.runner.loop;
+  await built.runner.suspend();
+  clock.t += 120_000;
+  built.fn.state.workErrors.push(Object.assign(new Error("not the recorded VM"), { status: 409 }));
+  const before = built.record.sleeps.length;
+  built.runner.resume();
+  await built.runner.loop;
+  assert.equal(built.record.sleeps[before], built.env.idlePollMs);
+});
+
 test("a 409 right after /run is retried after five seconds", async () => {
   const built = build();
   built.fn.state.workErrors.push(Object.assign(new Error("not the recorded VM"), { status: 409 }));
@@ -1181,11 +1195,35 @@ test("/idle is not called on a flush that does not verify", async () => {
   const built = build();
   await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
   let flushes = 0;
-  built.runner.syncer.flushAndVerify = async () => { flushes += 1; return flushes === 1 ? { ok: false, reason: "sync incomplete" } : { ok: true }; };
+  built.runner.syncer.flushAndVerify = async () => { flushes += 1; built.fn.state.calls.push({ route: "flush" }); return flushes === 1 ? { ok: false, reason: "sync incomplete" } : { ok: true }; };
   await built.runner.loop;
   const routes = built.fn.routes();
   assert.equal(routes.filter((r) => r === "idle").length, 1, "one /idle, after the second flush verified");
   assert.equal(flushes, 2);
+  const flushAt = routes.flatMap((r, i) => (r === "flush" ? [i] : []));
+  assert.equal(routes.slice(flushAt[0], flushAt[1]).filter((r) => r === "work").length, 11, "a whole idle period before the next flush");
+});
+
+test("an /idle call that fails waits out another idle period", async () => {
+  const built = build();
+  const call = built.fn.makeFunctionClient();
+  let failed = false;
+  built.runner.makeFunctionClient = () => async (route, args) => {
+    if (route === "idle" && !failed) {
+      failed = true;
+      built.fn.state.calls.push({ route: "idle" });
+      throw Object.assign(new Error("SuspendMicrovm failed"), { status: 502 });
+    }
+    return call(route, args);
+  };
+  const lines = await captured(async () => {
+    await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+    await built.runner.loop;
+  });
+  assert.equal(lines.filter((l) => l.event === "idle.failed").length, 1);
+  const routes = built.fn.routes();
+  const idles = routes.flatMap((r, i) => (r === "idle" ? [i] : []));
+  assert.equal(routes.slice(idles[0], idles[1]).filter((r) => r === "work").length, 11);
 });
 
 // Stops a loop that would otherwise poll until the VM's cap, so a regression fails the
@@ -1926,6 +1964,19 @@ test("an ID token that never comes is given up on at its bound", async (t) => {
   } finally {
     t.mock.timers.reset();
   }
+});
+
+test("each resume with no suspend before it is logged, not only the first", async () => {
+  const { runner } = await started();
+  await runner.loop;
+  await runner.suspend();
+  runner.resume();
+  await runner.loop;
+  const lines = await captured(async () => {
+    runner.resume();
+    await runner.loop;
+  });
+  assert.ok(lines.some((l) => l.event === "lifecycle.resume_without_suspend"));
 });
 
 test("a resume with no suspend since the last activity is logged", async () => {

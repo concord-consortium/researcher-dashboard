@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, rm, writeFile, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import fs from "node:fs";
 import path from "node:path";
 import test, { afterEach, beforeEach } from "node:test";
 import { DirBackend, Syncer } from "../server/sync/index.js";
@@ -222,4 +223,14 @@ test("a tick whose flush fails is logged as sync.failed", async () => {
   }
   const line = lines.flatMap((l) => l.split("\n")).filter(Boolean).map((l) => JSON.parse(l)).find((l) => l.event === "sync.failed");
   assert.deepEqual({ hook: line?.hook, error: line?.error }, { hook: "tick", error: "AccessDenied" });
+});
+
+// The syncer runs as root over a tree the package owns, so a hard link there is not followed.
+test("scanTree leaves out a file with another hard link", async () => {
+  const abs = await write("mine.txt", "a");
+  fs.linkSync(abs, path.join(work, "outside-link"));
+  await write("plain.txt", "b");
+  const files = await scanTree(local);
+  assert.ok(files.has("plain.txt"));
+  assert.ok(!files.has("mine.txt"));
 });

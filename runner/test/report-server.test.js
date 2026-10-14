@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { askApplies, ReportServerError } from "../server/report-server.js";
+import { APPLIES_TIMEOUT_MS, askApplies, ReportServerError } from "../server/report-server.js";
 
 const answer = (status, body) => async () => new Response(body === undefined ? "" : JSON.stringify(body), { status });
 const ask = (fetchImpl, extra = {}) => askApplies({ baseUrl: "https://rs.example/", token: "tok", urls: { any: ["*x*"] }, scopeUrls: ["https://a/x"], fetchImpl, ...extra });
@@ -35,5 +35,6 @@ test("no answer in time and a failed connection are not refusals", async () => {
   const hang = (url, init) => new Promise((_, reject) => init.signal.addEventListener("abort", () => { aborted = true; reject(init.signal.reason); }));
   await assert.rejects(ask(hang, { timeoutMs: 20 }), (err) => err instanceof ReportServerError && !err.refusal && err.status === null);
   assert.ok(aborted, "the bound aborted the call");
+  assert.equal(APPLIES_TIMEOUT_MS, 30_000);
   await assert.rejects(ask(async () => { throw new TypeError("fetch failed"); }), (err) => err instanceof ReportServerError && !err.refusal);
 });
