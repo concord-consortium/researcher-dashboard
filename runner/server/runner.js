@@ -289,7 +289,8 @@ export class Runner {
       if (!request) return;
 
       // After a resume: fresh credentials before the syncer ticks again, and nothing
-      // claimed until a package the suspend interrupted has finished.
+      // claimed until a package the suspend interrupted has finished and /work has been
+      // asked again.
       if (!refreshed) {
         try {
           this.storage?.markStale();
@@ -305,8 +306,11 @@ export class Runner {
         // A refused suspend left the VM failed; the loop now running puts it back in service.
         if (this.#vm.state === STATES.FAILED) this.#vm.to(STATES.READY);
       }
-      if (this.#run) await this.#run.done;
-      if (!this.#current(epoch)) return;
+      if (this.#run) {
+        await this.#run.done;
+        if (!this.#current(epoch)) return;
+        continue;
+      }
 
       const next = await this.#plan(request, epoch);
       if (!this.#current(epoch)) return;

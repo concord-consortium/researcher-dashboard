@@ -4,9 +4,9 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test, { afterEach, beforeEach } from "node:test";
-import { disableDefaultCredentialChain, loadEnv } from "../server/config.js";
+import { PACKAGE_MAX_DURATION_DEFAULT, disableDefaultCredentialChain, loadEnv } from "../server/config.js";
 import { makeSteps } from "../server/steps.js";
-import { HEARTBEAT_SECONDS, HookError, LOST_RUN_REASON, PACKAGE_END_TIMEOUT_MS, REVOKE_TIMEOUT_MS, Runner, TOKEN_TIMEOUT_MS } from "../server/runner.js";
+import { HEARTBEAT_SECONDS, HookError, LOST_RUN_REASON, PACKAGE_END_TIMEOUT_MS, PACKAGE_TIMEOUT_MARGIN_MS, REVOKE_TIMEOUT_MS, Runner, TOKEN_TIMEOUT_MS } from "../server/runner.js";
 import { buildRunner } from "../server/index.js";
 import { packageDocId, packageKey } from "../server/package-fetch.js";
 import { MemoryStore, SERVER_TIME, STATUS_WRITE_TIMEOUT_MS, classPath, resultPath, runnerPath, scopePath } from "../server/status.js";
@@ -740,6 +740,31 @@ test("a manifest declaring ten hours is refused by the runner's ceiling", async 
   const doc = result(built.docs, "users/1/long");
   assert.equal(doc.status, "failed");
   assert.match(doc.error, /declares 36000s, over the runner's ceiling of 7200s/);
+});
+
+test("the ceiling admits a package declaring exactly the most report-server accepts, and refuses one second more", async () => {
+  const built = build();
+  built.fn.queue({ identity: "users/1/at" });
+  built.fn.queue({ identity: "users/1/over" });
+  built.record.manifests["users/1/at"] = manifestFor("users/1/at", { expected_duration_seconds: PACKAGE_MAX_DURATION_DEFAULT });
+  built.record.manifests["users/1/over"] = manifestFor("users/1/over", { expected_duration_seconds: PACKAGE_MAX_DURATION_DEFAULT + 1 });
+  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+  await built.runner.loop;
+
+  assert.equal(result(built.docs, "users/1/at").status, "done");
+  assert.equal(result(built.docs, "users/1/over").status, "failed");
+  assert.match(result(built.docs, "users/1/over").error, /over the runner's ceiling/);
+});
+
+test("a package's run is bounded by its declared duration plus the margin by default", async () => {
+  const bounds = [];
+  const built = build({ stepOverrides: { runPackage: async ({ timeoutMs }) => { bounds.push(timeoutMs); return { display: "x", summary: "y" }; } } });
+  built.fn.queue({ identity: "users/1/minute" });
+  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+  await built.runner.loop;
+
+  assert.equal(result(built.docs, "users/1/minute").status, "done");
+  assert.deepEqual(bounds, [60_000 + PACKAGE_TIMEOUT_MARGIN_MS]);
 });
 
 // /run is at 12:00, so the VM's cap is 20:00, less five minutes. At 16:30, 3h25m are
@@ -1942,6 +1967,25 @@ test("a resume finishes the interrupted package before claiming the next", async
   await built.runner.loop;
   assert.equal(result(built.docs, SLOW).status, "done");
   assert.equal(result(built.docs, "users/1/next").status, "done");
+});
+
+test("after a resume the next package is planned from a /work answer asked once the interrupted one finished", async () => {
+  let release;
+  const built = build({ stepOverrides: { runPackage: () => (release ? Promise.resolve({ display: "x", summary: "y" }) : new Promise((r) => { release = () => r({ display: "x", summary: "y" }); })) } });
+  built.fn.queue({ identity: SLOW });
+  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+  await until(() => release, "the package step");
+  await built.runner.suspend();
+  built.fn.queue({ identity: "users/1/next" });
+  built.runner.resume();
+  await settle(20);
+  const entry = built.fn.state.entries.find((e) => e.identity === "users/1/next");
+  entry.version = "1.1.0";
+  built.record.manifests["users/1/next"] = manifestFor("users/1/next", { version: "1.1.0" });
+  release();
+  await built.runner.loop;
+  assert.equal(result(built.docs, "users/1/next").status, "done");
+  assert.equal(result(built.docs, "users/1/next").package.version, "1.1.0");
 });
 
 test("the syncer is stopped before /suspend's and /terminate's flushes", async () => {

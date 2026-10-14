@@ -1,10 +1,11 @@
 // One JSON object per line on stdout, which is what CloudWatch ingests from the VM.
-// Every line carries the identifiers a run is traced by: researcher, scope, package.
+// Every line after /run carries the researcher and microvm_id; a line from a package's
+// run also carries its scope and package.
 
 let context = {};
 
-// Set once from runHookPayload so callers never have to thread the researcher id
-// through every function that might log.
+// Fields every later line carries, so callers never have to thread the researcher or
+// the run's scope and package through every function that might log.
 export function setContext(fields) {
   context = { ...context, ...fields };
 }
