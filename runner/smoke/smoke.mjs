@@ -101,7 +101,10 @@ function image(opts) {
   need(opts, "classId", "classHash");
   const token = process.env.RD_SMOKE_REPORT_SERVER_TOKEN ?? fail("RD_SMOKE_REPORT_SERVER_TOKEN is not set");
   const portal = opts.portal ?? "learn.portal.staging.concord.org";
-  execFileSync("make", ["build"], { cwd: path.join(HERE, ".."), stdio: "inherit" });
+  // The Makefile's names, which `make smoke-image` passes, so the image run is the one just built.
+  const imageName = process.env.IMAGE ?? "researcher-dashboard-runner";
+  const platform = process.env.PLATFORM ?? "linux/arm64";
+  execFileSync("make", ["build", `IMAGE=${imageName}`, `PLATFORM=${platform}`], { cwd: path.join(HERE, ".."), stdio: "inherit" });
   const scope = { kind: "class", id: opts.classHash, classes: [{ class_hash: opts.classHash, class_id: Number(opts.classId) }], assignments: [], clue_source: CLUE_SOURCE, dataset: "pkg-0", output_dir: "/tmp/out" };
   // The cc-data the image was built with, read from the pin rather than written twice.
   const ref = fs.readFileSync(path.join(HERE, "..", "Dockerfile"), "utf8").match(/^ARG CC_DATA_REF=(\S+)$/m)?.[1] ?? fail("the Dockerfile pins no CC_DATA_REF");
@@ -114,8 +117,8 @@ function image(opts) {
     `HOME=/tmp/home CC_DATA_ROOT=/tmp/cc-data CC_DATA_PORTAL=${portal} RD_DATASET=${portal}/pkg-0 RD_SCOPE_FILE=/tmp/in/scope.json python3.11 /smoke/run.py`,
     "cat /tmp/out/display.md"
   ].join("\n");
-  const out = execFileSync("docker", ["run", "--rm", "--platform", "linux/arm64", "-e", "RD_SMOKE_REPORT_SERVER_TOKEN",
-    "-v", `${PACKAGE}:/smoke:ro`, "--entrypoint", "/bin/sh", "researcher-dashboard-runner", "-c", script],
+  const out = execFileSync("docker", ["run", "--rm", "--platform", platform, "-e", "RD_SMOKE_REPORT_SERVER_TOKEN",
+    "-v", `${PACKAGE}:/smoke:ro`, "--entrypoint", "/bin/sh", imageName, "-c", script],
   { encoding: "utf8", env: { ...process.env, RD_SMOKE_REPORT_SERVER_TOKEN: token } });
   if (!out.includes(MARKER)) fail(`the smoke package did not report ${MARKER}:\n${out}`);
   console.log(out);

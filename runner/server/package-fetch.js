@@ -34,12 +34,6 @@ export async function sha256File(file) {
   return `sha256:${hash.digest("hex")}`;
 }
 
-// `sha256:<hex>`, as the catalog, rigse and /work carry it, compared after normalizing
-// case so a catalog written by a different tool still matches.
-export function checksumsMatch(a, b) {
-  return typeof a === "string" && typeof b === "string" && a.toLowerCase() === b.toLowerCase();
-}
-
 // The bucket prefix packages are published under, beside `researchers/`. The broker's
 // session policy grants read on it.
 export const PACKAGES_PREFIX = "packages";
@@ -131,7 +125,7 @@ export async function fetchPackage({ backend, pkg, workRoot, unzip, measure = in
   }
 
   const actual = await sha256File(archive);
-  if (!checksumsMatch(actual, pkg.checksum)) {
+  if (actual !== pkg.checksum) {
     // Removed rather than left: an archive that failed is not evidence of anything, and
     // leaving it would let the next run's existence check skip the fetch and re-verify
     // the same bad bytes.

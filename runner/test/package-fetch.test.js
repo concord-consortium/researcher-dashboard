@@ -5,7 +5,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test, { afterEach, beforeEach } from "node:test";
-import { MAX_UNPACKED_BYTES, PackageUnreadable, checksumsMatch, fetchPackage, inflatedSize, packageDocId, packageKey, readManifest, sha256File } from "../server/package-fetch.js";
+import { MAX_UNPACKED_BYTES, PackageUnreadable, fetchPackage, inflatedSize, packageDocId, packageKey, readManifest, sha256File } from "../server/package-fetch.js";
 
 let root;
 beforeEach(async () => { root = await mkdtemp(path.join(tmpdir(), "rd-fetch-")); });
@@ -157,13 +157,6 @@ test("an archive holding a symbolic link is refused and its directory removed", 
     /holds a symbolic link, link/
   );
   assert.ok(!fs.existsSync(path.join(workRoot, "packages", "users__136__class-counts", "1.0.0")));
-});
-
-test("checksums compare case-insensitively", async () => {
-  const c = await checksumOf("x");
-  assert.ok(checksumsMatch(c, c.toUpperCase()));
-  assert.ok(!checksumsMatch(c, "sha256:" + "0".repeat(64)));
-  assert.ok(!checksumsMatch(c, undefined));
 });
 
 function writeManifest(name, manifest) {

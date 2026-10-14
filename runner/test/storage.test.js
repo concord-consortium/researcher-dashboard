@@ -127,6 +127,28 @@ test("a resume marks the credentials stale whatever the clock says", async () =>
   assert.equal(fetched, 2);
 });
 
+test("a fetch under way when the VM resumes is not the one the next use takes", async () => {
+  let fetched = 0;
+  const releases = [];
+  const creds = new StorageCredentials({
+    bucket: "researcher-dashboard-runner-staging",
+    prefix: "researchers/439/",
+    fetchCredentials: () => { fetched += 1; const n = fetched; return new Promise((r) => releases.push(() => r(ANSWER({ access_key_id: `ASIA${n}` })))); },
+    makeClient: (c) => ({ key: c.accessKeyId })
+  });
+  const before = creds.client();
+  await new Promise((r) => setImmediate(r));
+  creds.markStale();
+  const after = creds.client();
+  releases[0]();
+  for (let i = 0; i < 100 && releases.length < 2; i++) await new Promise((r) => setImmediate(r));
+  assert.equal(releases.length, 2, "a second fetch starts once the first answers for the earlier generation");
+  releases[1]();
+  assert.equal((await after).key, "ASIA2", "the use after the resume gets credentials fetched after it");
+  assert.equal((await before).key, "ASIA2");
+  assert.equal(fetched, 2);
+});
+
 test("concurrent uses share one fetch", async () => {
   let fetched = 0;
   const creds = new StorageCredentials({ bucket: "researcher-dashboard-runner-staging", prefix: "researchers/439/", fetchCredentials: async () => { fetched += 1; await new Promise((r) => setTimeout(r, 5)); return ANSWER(); }, makeClient: () => ({}) });

@@ -79,7 +79,7 @@ smoke-build:
 smoke-image:
 	$(if $(SMOKE_CLASS_ID),,$(error SMOKE_CLASS_ID is required: the smoke class's portal id))
 	$(if $(SMOKE_CLASS_HASH),,$(error SMOKE_CLASS_HASH is required: the smoke class's hash))
-	node smoke/smoke.mjs image --class-id $(SMOKE_CLASS_ID) --class-hash $(SMOKE_CLASS_HASH)
+	IMAGE=$(IMAGE) PLATFORM=$(PLATFORM) node smoke/smoke.mjs image --class-id $(SMOKE_CLASS_ID) --class-hash $(SMOKE_CLASS_HASH)
 
 clean:
 	docker image rm $(IMAGE) || true

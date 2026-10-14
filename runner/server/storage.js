@@ -30,6 +30,9 @@ export class StorageCredentials {
   #client = null;
   #stale = true;
   #inFlight = null;
+  // Each resume starts a generation; credentials fetched under an earlier one are stale.
+  #generation = 0;
+  #fetchedGeneration = -1;
 
   // `fetchCredentials` calls POST /storage-credentials with the current session's ID
   // token; `bucket` and `prefix` are what the payload says this VM may reach.
@@ -43,6 +46,7 @@ export class StorageCredentials {
 
   markStale() {
     this.#stale = true;
+    this.#generation += 1;
   }
 
   #usable() {
@@ -50,18 +54,22 @@ export class StorageCredentials {
     return this.#fetched.expiresAt - this.now() > REFRESH_MARGIN_MS;
   }
 
+  // A fetch started before a resume answers for the earlier generation, so it is waited
+  // out and followed by a fetch of this one.
   async client() {
-    if (this.#usable()) return this.#client;
-    if (!this.#inFlight) {
-      this.#inFlight = this.#refresh().finally(() => {
-        this.#inFlight = null;
-      });
+    for (;;) {
+      if (this.#usable()) return this.#client;
+      if (!this.#inFlight) {
+        this.#inFlight = this.#refresh(this.#generation).finally(() => {
+          this.#inFlight = null;
+        });
+      }
+      await this.#inFlight;
+      if (this.#fetchedGeneration === this.#generation) return this.#client;
     }
-    await this.#inFlight;
-    return this.#client;
   }
 
-  async #refresh() {
+  async #refresh(generation) {
     const answer = await this.fetchCredentials();
     // The broker names what it issued. A session for another bucket or prefix would sync
     // one researcher's corpus somewhere it does not belong, so it is refused, not used.
@@ -83,7 +91,8 @@ export class StorageCredentials {
       expiration: new Date(expiresAt)
     });
     this.#fetched = { expiresAt };
-    this.#stale = false;
+    this.#fetchedGeneration = generation;
+    this.#stale = generation !== this.#generation;
     log.info("storage.credentials_fetched", { expiration: answer.expiration });
   }
 }

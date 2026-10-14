@@ -1557,6 +1557,18 @@ test("/resume writes nothing and answers at once, and the next /work forces a fr
   assert.ok(fn.routes().length > 0);
 });
 
+test("a resume after a suspend logs no missing suspend", async () => {
+  const { runner } = await started();
+  await runner.loop;
+  await runner.suspend();
+  const lines = await captured(async () => {
+    runner.resume();
+    await runner.loop;
+  });
+  assert.ok(lines.length > 0, "the resumed loop logged");
+  assert.ok(!lines.some((l) => l.event === "lifecycle.resume_without_suspend"));
+});
+
 test("a resume with no suspend since the last activity is logged", async () => {
   const lines = [];
   const original = process.stdout.write;
