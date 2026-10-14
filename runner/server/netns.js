@@ -6,7 +6,7 @@ const run = promisify(execFile);
 
 // The package namespace: a package's only route out is the egress proxy.
 //
-// Built rather than empty, because a package makes its own report-service pulls now. The
+// Built rather than empty, because a package makes its own report-service pulls. The
 // shape is chosen so that "what may a package reach" is answered by routing rather than
 // by filtering: the namespace holds one /30, so the single address it can reach is the
 // host end of the veth, and the proxy is what listens there. The metadata endpoint, the
