@@ -1533,8 +1533,27 @@ test("a VM whose suspend was refused goes on taking work without a resume", asyn
   await assert.rejects(() => runner.suspend());
   runner.syncer.flushAndVerify = flush;
   fn.queue({ identity: "users/1/after" });
+  let stateDuringRun = null;
+  const steps = runner.steps;
+  const runPackage = steps.runPackage;
+  steps.runPackage = async (args) => { stateDuringRun = runner.state; return runPackage(args); };
   await runner.loop;
   assert.equal(result(docs, "users/1/after").status, "done");
+  assert.equal(stateDuringRun, "running", "the VM reads running during the run");
+  assert.equal(runnerDoc(docs).state, "ready", "the runner document is back in service once drained");
+  assert.notEqual(runner.state, "failed");
+});
+
+test("a VM whose suspend was refused, with nothing to do, reads ready again", async () => {
+  const { runner, docs } = await started();
+  await runner.loop;
+  const flush = runner.syncer.flushAndVerify;
+  runner.syncer.flushAndVerify = async () => ({ ok: false, reason: "sync incomplete" });
+  await assert.rejects(() => runner.suspend());
+  assert.equal(runnerDoc(docs).state, "failed");
+  runner.syncer.flushAndVerify = flush;
+  await runner.loop;
+  assert.equal(runnerDoc(docs).state, "ready");
 });
 
 test("a failed terminate after a failed suspend still writes the runner document failed", async () => {

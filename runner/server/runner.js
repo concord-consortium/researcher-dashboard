@@ -301,6 +301,8 @@ export class Runner {
         }
         this.syncer.start();
         refreshed = true;
+        // A refused suspend left the VM failed; the loop now running puts it back in service.
+        if (this.#vm.state === STATES.FAILED) this.#vm.to(STATES.READY);
       }
       if (this.#run) await this.#run.done;
       if (!this.#current(epoch)) return;
@@ -726,6 +728,7 @@ export class Runner {
       await this.status.writeFromHook("suspend", { state: STATES.FAILED, error: result.reason, ...this.#runningPackage() });
       // The VM stays awake, and the loop that asked /idle to suspend it has ended, so a new
       // one takes up the work as after a resume.
+      this.#lastWritten = null;
       this.#epoch += 1;
       this.#startLoop({ afterResume: true });
       throw new HookError(500, result.reason);
