@@ -311,7 +311,7 @@ export class Runner {
       if (next) {
         idleSince = null;
         // A claim that could not be written is tried again after one idle poll, not at once.
-        if (!(await this.#runPackage(request, next))) await this.sleep(this.env.idlePollMs);
+        if (!(await this.#runPackage(request, next, epoch))) await this.sleep(this.env.idlePollMs);
         continue;
       }
 
@@ -429,7 +429,7 @@ export class Runner {
           await bounded(docs.failed(docIdOf(entry), { pkg, error }));
           this.#resolved(entry, resolved);
         } catch (err) {
-          this.#noteClaimFailure(entry, err);
+          this.#noteClaimFailure(entry, err, epoch);
         }
       };
 
@@ -492,7 +492,7 @@ export class Runner {
           log.warn("report_server.refused", { call: "applies", scope: entry.class_hash, package: entry.identity, status: err.status ?? null, error: err.message });
           if (err.refusal) {
             await refuse(`report-server would not check this package against this class: ${err.message}`);
-          } else if (this.#noteClaimFailure(entry, err) >= CLAIM_ATTEMPTS) {
+          } else if (this.#noteClaimFailure(entry, err, epoch) >= CLAIM_ATTEMPTS) {
             // Left queued, the package would keep the VM awake until its cap, since /idle
             // declines to suspend while work is queued.
             await refuse(`report-server could not say whether the package applies to this class (${err.message}); run it again`);
@@ -503,7 +503,7 @@ export class Runner {
           await refuse(`the package does not apply to this class: ${verdict.reason}`);
           continue;
         }
-        this.#applies.add(appliesKey);
+        if (this.#current(epoch)) this.#applies.add(appliesKey);
       }
       candidates.push({ entry, pkg, docId, docs, store, scope, manifest, declared });
     }
@@ -521,7 +521,7 @@ export class Runner {
         await bounded(candidate.docs.failed(candidate.docId, {
           pkg: candidate.pkg,
           error: `VM window exhausted: ${Math.max(0, Math.floor(left / 1000))}s left, and this package and the ones before it declare ${Math.floor(sum / 1000)}s`
-        })).then(() => this.#resolved(candidate.entry, resolved), (err) => this.#noteClaimFailure(candidate.entry, err));
+        })).then(() => this.#resolved(candidate.entry, resolved), (err) => this.#noteClaimFailure(candidate.entry, err, epoch));
         continue;
       }
       runnable ??= candidate;
@@ -540,7 +540,10 @@ export class Runner {
     resolved?.add(this.#claimKey(entry));
   }
 
-  #noteClaimFailure(entry, err) {
+  // A failure that settles after a resume belongs to the period the resume ended, whose
+  // counts the resume cleared, so it is not charged to the new one.
+  #noteClaimFailure(entry, err, epoch) {
+    if (!this.#current(epoch)) return 0;
     const key = this.#claimKey(entry);
     const count = (this.#claimFailures.get(key) ?? 0) + 1;
     this.#claimFailures.set(key, count);
@@ -567,16 +570,16 @@ export class Runner {
     return this.#run ? { current_package: this.currentPackage } : {};
   }
 
-  async #runPackage(request, next) {
+  async #runPackage(request, next, epoch) {
     const { entry, pkg, docId, docs, store, scope, manifest, declared, resolved } = next;
     let resolveDone;
-    this.#run = { docId, classHash: entry.class_hash, identity: entry.identity, store, docs, pkg, done: new Promise((r) => { resolveDone = r; }) };
+    this.#run = { docId, classHash: entry.class_hash, store, docs, pkg, done: new Promise((r) => { resolveDone = r; }) };
     setContext({ scope: entry.class_hash, package: entry.identity });
     try {
       try {
         await docs.claim(docId, { pkg, imageVersion: this.env.imageVersion, microvmId: this.microvmId, expectedDurationSeconds: declared, heartbeatSeconds: HEARTBEAT_SECONDS });
       } catch (err) {
-        this.#noteClaimFailure(entry, err);
+        this.#noteClaimFailure(entry, err, epoch);
         return false;
       }
       this.#resolved(entry);

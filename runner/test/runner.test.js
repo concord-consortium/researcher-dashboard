@@ -566,6 +566,36 @@ test("a fetch that fails after a resume is refused once, by the new plan", async
   assert.equal(lines.filter((l) => l.event === "package.refused").length, 1, "the old plan refuses nothing");
 });
 
+test("a claim that fails after a resume is not charged to the new awake period", async () => {
+  let rejectOld;
+  let first = true;
+  const built = build({
+    wrapStore: (store) => {
+      const merge = store.merge.bind(store);
+      store.merge = (p, fields) => {
+        if (first && p.includes("/results/") && fields.status === "running") {
+          first = false;
+          return new Promise((_, reject) => { rejectOld = reject; });
+        }
+        return merge(p, fields);
+      };
+      return store;
+    }
+  });
+  built.fn.queue({ identity: "users/1/counts" });
+  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+  await until(() => rejectOld, "the old loop's claim");
+  const oldLoop = built.runner.loop;
+  const lines = await captured(async () => {
+    built.runner.resume();
+    rejectOld(new Error("UNAVAILABLE"));
+    await oldLoop;
+    await built.runner.loop;
+  });
+  assert.equal(lines.filter((l) => l.event === "package.claim_failed").length, 0);
+  assert.equal(result(built.docs, "users/1/counts").status, "done");
+});
+
 test("a fetch that failed is tried again when the package is run again", async () => {
   let fetches = 0;
   const built = build({
@@ -836,6 +866,39 @@ test("a queued entry whose identity is unusable is failed at its package key", a
   assert.equal(doc.status, "failed");
   assert.match(doc.error, /does not match the catalog's grammar/);
   assert.equal(built.fn.routes().at(-1), "idle", "the queue drains and the VM can suspend");
+});
+
+// Each value /work hands out is checked before it reaches a path, an S3 key or scope.json.
+test("a queued entry is refused when its version, checksum, catalog id or scope is malformed", async () => {
+  const cases = [
+    ["version", (p) => ({ ...p, version: "../1.0.0" }), null, /does not match the catalog's grammar/],
+    ["checksum", (p) => ({ ...p, checksum: "sha256:xyz" }), null, /does not match the catalog's grammar/],
+    ["catalog id", (p) => ({ ...p, catalog_id: 0 }), null, /does not match the catalog's grammar/],
+    ["scope kind", null, (sc) => ({ ...sc, kind: "school" }), /not a class scope/],
+    ["scope class", null, (sc) => ({ ...sc, classes: [{ class_hash: OTHER_CLASS, class_id: 1 }] }), /class list is not this class/],
+    ["assignments", null, (sc) => ({ ...sc, assignments: "none" }), /no assignment list/]
+  ];
+  for (const [name, entry, scope, reason] of cases) {
+    const built = build();
+    built.fn.queue({ identity: "users/1/counts" });
+    const call = built.fn.makeFunctionClient();
+    built.runner.makeFunctionClient = () => async (route, args) => {
+      const answer = await call(route, args);
+      if (route === "work") {
+        if (entry) answer.packages = answer.packages.map(entry);
+        if (scope && answer.scopes[CLASS]) answer.scopes = { [CLASS]: { ...answer.scopes[CLASS], scope: scope(answer.scopes[CLASS].scope) } };
+      }
+      return answer;
+    };
+    stopAfter(built, 40);
+    await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+    await built.runner.loop;
+    const doc = result(built.docs, "users/1/counts");
+    assert.equal(doc.status, "failed", name);
+    assert.match(doc.error, reason, name);
+    assert.equal(built.record.prepared.length, 0, `${name}: nothing prepared`);
+    assert.ok(!writesTo(built.record, resultPath(PORTAL, CLASS, USER, "users__1__counts")).some((w) => w.status === "running"), `${name}: never claimed`);
+  }
 });
 
 // ---- tokens and stores ---------------------------------------------------------
