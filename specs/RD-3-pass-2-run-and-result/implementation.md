@@ -247,7 +247,7 @@ export function queuePosition(runner: Runner | null, classHash: string, key: str
 }
 
 // The finished result a row shows: the result itself when done, otherwise the run a re-run is
-// replacing. RD-6 imports this name.
+// replacing.
 export function latestFinished(result: Result | undefined): Finished | null {
   if (!result) return null;
   return result.status === "done" ? result : result.previous ?? null;
@@ -301,6 +301,8 @@ export function runOffer(runnable: boolean, state: RowState): { enabled: boolean
 export function sessionLines(runner: Runner | null, classHash: string, results: Map<string, Result>,
   titleOf: (key: string) => string | null, requesting: boolean): string[] { /* R14, case by case */ }
 ```
+
+`latestFinished` is imported by RD-6; keep its name and signature.
 
 `sessionLines` returns R14's sentences: none with no document or no `state`; one for `starting`, `ready`, `running` (this class's `current_package` by `titleOf(key) ?? identityOfKey(key)` while `results.get(key)` is absent or `running`, "Your machine is starting its next package." once it is `done` or `failed`, or the other-class sentence); two for `suspending`/`suspended` with a non-empty `queue`; for `terminated` and `failed`, the second sentence when any of `results` is `queued` and `requesting` is false.
 
