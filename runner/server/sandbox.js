@@ -147,6 +147,34 @@ export async function killPackageProcesses({ uid, exec = run, attempts = 5 }) {
   throw new Error(`the package left processes running as uid ${uid} that ${attempts} kills did not stop`);
 }
 
+// Stops every process the package uid owns, so nothing it writes can land between
+// /suspend's flush and its verify. Repeated until pgrep finds none of the uid's processes
+// runnable, since a process forked while the signal was being sent can miss it.
+export async function freezePackageProcesses({ uid, exec = run, attempts = 5 }) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    await exec(SETPRIV, [...dropTo(uid), KILL, "-STOP", "-1"], { timeout: 5_000 })
+      .catch(() => {});
+    let left;
+    try {
+      left = String((await exec(PGREP, ["-u", String(uid), "--runstates", "R,S,D"], { timeout: 5_000 })).stdout ?? "").trim();
+    } catch (err) {
+      if (err.code !== 1) throw new Error(`could not check for the package's processes: ${err.message}`);
+      left = "";
+    }
+    if (left === "") return;
+  }
+  throw new Error(`the package left processes running as uid ${uid} that ${attempts} stops did not stop`);
+}
+
+// Continues every process the package uid owns. Exits non-zero when there was nothing to
+// signal, which is not a failure.
+export async function thawPackageProcesses({ uid, exec = run }) {
+  await exec(SETPRIV, [...dropTo(uid), KILL, "-CONT", "-1"], { timeout: 5_000 })
+    .catch((err) => {
+      if (err.code !== 1) throw err;
+    });
+}
+
 // Runs a package's entrypoint in the sandbox, as the package uid.
 //
 // The environment is replaced rather than extended: a package inherits nothing from the

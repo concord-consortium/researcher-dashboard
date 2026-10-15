@@ -25,9 +25,9 @@ const ALLOWED = Object.freeze({
   // A suspended VM resumes to READY. Lambda can also terminate it without a
   // resume, so TERMINATED is reachable from here too.
   [SUSPENDED]: [READY, TERMINATED, FAILED],
-  // FAILED is not final: a failed sync leaves the VM running, and the next resume, or the
-  // loop a refused suspend starts, puts it back in service.
-  [FAILED]: [READY, SUSPENDING, TERMINATED],
+  // A hook whose flush did not verify leaves FAILED, and Lambda then destroys the VM
+  // without /terminate; one that comes anyway still ends it.
+  [FAILED]: [TERMINATED],
   [TERMINATED]: []
 });
 

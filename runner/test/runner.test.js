@@ -127,6 +127,8 @@ function steps(record, overrides = {}) {
     },
     readPackageCounts: async () => ({ answers: 201, logs: 490, log_freshness_at: "2026-08-26T00:00:00Z" }),
     killPackageProcesses: async () => {},
+    freezePackageProcesses: async ({ uid }) => { record.signals.push(`freeze:${uid}`); },
+    thawPackageProcesses: async ({ uid }) => { record.signals.push(`thaw:${uid}`); },
     heldClasses: makeSteps().heldClasses,
     ...overrides
   };
@@ -137,7 +139,7 @@ function steps(record, overrides = {}) {
 function build({ stepOverrides = {}, envOverrides = {}, makeStore, wrapStore = (store) => store, makePackageBackend, revoke, applies, clock = { t: Date.parse("2026-09-26T12:00:00Z") } } = {}) {
   const docs = new Map();
   const fn = fakeFunction(docs);
-  const record = { resolved: [], prepared: [], stores: [], manifests: {}, sleeps: [], revoked: [], applies: [], timers: [] };
+  const record = { resolved: [], prepared: [], stores: [], manifests: {}, sleeps: [], revoked: [], applies: [], timers: [], signals: [] };
   const env = {
     ...loadEnv({ SYNC_BACKEND: "DIR", SYNC_DIR: path.join(work, "remote") }),
     dataRoot: path.join(work, "data"),
@@ -1795,50 +1797,137 @@ test("an adoption a resume has overtaken closes its own stores, not the new loop
   await built.runner.loop;
 });
 
-test("a VM whose suspend was refused goes on taking work without a resume", async () => {
-  const { runner, fn, docs } = await started();
-  await runner.loop;
-  const flush = runner.syncer.flushAndVerify;
-  runner.syncer.flushAndVerify = async () => ({ ok: false, reason: "sync incomplete" });
-  await assert.rejects(() => runner.suspend());
-  runner.syncer.flushAndVerify = flush;
-  fn.queue({ identity: "users/1/after" });
-  let stateDuringRun = null;
-  const steps = runner.steps;
-  const runPackage = steps.runPackage;
-  steps.runPackage = async (args) => { stateDuringRun = runner.state; return runPackage(args); };
-  await runner.loop;
-  assert.equal(result(docs, "users/1/after").status, "done");
-  assert.equal(stateDuringRun, "running", "the VM reads running during the run");
-  assert.equal(runnerDoc(docs).state, "ready", "the runner document is back in service once drained");
-  assert.notEqual(runner.state, "failed");
-});
-
-test("a VM whose suspend was refused, with nothing to do, reads ready again", async () => {
-  const { runner, docs } = await started();
-  await runner.loop;
-  const flush = runner.syncer.flushAndVerify;
-  runner.syncer.flushAndVerify = async () => ({ ok: false, reason: "sync incomplete" });
-  await assert.rejects(() => runner.suspend());
-  assert.equal(runnerDoc(docs).state, "failed");
-  runner.syncer.flushAndVerify = flush;
-  await runner.loop;
-  assert.equal(runnerDoc(docs).state, "ready");
-  assert.equal(runnerDoc(docs).error, null, "the refused suspend's reason is cleared");
-});
-
-test("a failed terminate after a failed suspend still writes the runner document failed", async () => {
+// Lambda terminates a VM whose /suspend answers 500 and sends no /terminate, so the refusal
+// is the VM's last word.
+test("a refused /suspend mid-run fails the run, revokes the token and stops the loop", async () => {
   const { built, finish } = await holding();
+  built.runner.syncer.flushAndVerify = async () => ({ ok: false, reason: "sync incomplete" });
+  const lines = await captured(() => assert.rejects(() => built.runner.suspend(), (err) => err instanceof HookError && err.status === 500));
+  const doc = result(built.docs, SLOW);
+  assert.equal(doc.status, "failed");
+  assert.equal(doc.error, LOST_RUN_REASON);
+  assert.equal(built.record.revoked.length, 1);
+  assert.equal(built.record.revoked[0].token, "forwarded-report-server-token");
+  assert.ok(lines.some((l) => l.event === "report_server.revoked" && l.hook === "suspend"));
+  assert.equal(runnerDoc(built.docs).state, "failed");
+  assert.equal(runnerDoc(built.docs).error, "sync incomplete");
+  const calls = built.fn.state.calls.length;
+  const writes = writesTo(built.record, resultPath(PORTAL, CLASS, USER, SLOW_KEY)).length;
+  await tick(built);
+  finish();
+  await settle(20);
+  assert.equal(writesTo(built.record, resultPath(PORTAL, CLASS, USER, SLOW_KEY)).length, writes, "no beat and no final write after the refusal");
+  assert.equal(result(built.docs, SLOW).error, LOST_RUN_REASON);
+  assert.equal(built.fn.state.calls.length, calls, "no /work after the refusal");
+  await built.runner.loop;
+});
+
+test("a refused /suspend while idle revokes the token and writes no result", async () => {
+  const { runner, docs, record, fn } = await started();
+  await runner.loop;
+  const resultWrites = record.stores.flatMap((st) => st.writes).filter((w) => w.path.includes("/results/")).length;
+  runner.syncer.flushAndVerify = async () => ({ ok: false, reason: "sync incomplete" });
+  await assert.rejects(() => runner.suspend());
+  assert.equal(record.revoked.length, 1);
+  assert.equal(record.stores.flatMap((st) => st.writes).filter((w) => w.path.includes("/results/")).length, resultWrites);
+  assert.equal(runnerDoc(docs).state, "failed");
+  const calls = fn.state.calls.length;
+  await runner.loop;
+  await settle(10);
+  assert.equal(fn.state.calls.length, calls, "no new loop asks for work");
+});
+
+test("a refused /suspend fails the run before it revokes the token", async () => {
+  const events = [];
+  const { built, finish } = await holding({
+    revoke: async () => { events.push("revoke"); },
+    wrapStore: (store) => {
+      const merge = store.merge.bind(store);
+      store.merge = (p, fields) => { if (p.includes("/results/") && fields.error === LOST_RUN_REASON) events.push("lost"); return merge(p, fields); };
+      return store;
+    }
+  });
   try {
-    built.runner.syncer.flushAndVerify = async () => ({ ok: false, reason: "sync incomplete: 1 file(s) still outstanding" });
+    built.runner.syncer.flushAndVerify = async () => ({ ok: false, reason: "sync incomplete" });
     await assert.rejects(() => built.runner.suspend());
-    built.docs.set(runnerPath(PORTAL, USER), { ...runnerDoc(built.docs), state: "suspending", current_package: null });
-    await assert.rejects(() => built.runner.terminate(), (err) => err instanceof HookError && /sync incomplete/.test(err.message));
-    assert.equal(runnerDoc(built.docs).state, "failed");
-    assert.deepEqual(runnerDoc(built.docs).current_package, { class_hash: CLASS, package_key: SLOW_KEY });
+    assert.deepEqual(events, ["lost", "revoke"]);
   } finally {
     finish();
   }
+});
+
+test("a refused /suspend leaves a runner document that records another VM", async () => {
+  const { runner, docs } = await started();
+  await runner.loop;
+  // Launched while the flush ran, after the hook's suspending write.
+  runner.syncer.flushAndVerify = async () => {
+    docs.set(runnerPath(PORTAL, USER), { ...runnerDoc(docs), microvm_id: "mvm-2", state: "starting" });
+    return { ok: false, reason: "sync incomplete" };
+  };
+  const lines = await captured(() => runner.suspend().catch(() => {}));
+  assert.equal(runnerDoc(docs).microvm_id, "mvm-2");
+  assert.equal(runnerDoc(docs).state, "starting");
+  assert.ok(lines.some((l) => l.event === "suspend.runner_doc_skipped"));
+});
+
+test("a /terminate that does come after a refused /suspend still ends the VM, or fails on its own flush", async () => {
+  for (const flushed of [true, false]) {
+    const { runner, docs } = await started();
+    await runner.loop;
+    const flush = runner.syncer.flushAndVerify;
+    runner.syncer.flushAndVerify = async () => ({ ok: false, reason: "sync incomplete" });
+    await assert.rejects(() => runner.suspend());
+    if (flushed) {
+      runner.syncer.flushAndVerify = flush;
+      await runner.terminate();
+      assert.equal(runner.state, "terminated");
+      assert.equal(runnerDoc(docs).state, "terminated");
+    } else {
+      await assert.rejects(() => runner.terminate(), (err) => err instanceof HookError && err.status === 500 && /sync incomplete/.test(err.message));
+      assert.equal(runnerDoc(docs).state, "failed");
+    }
+  }
+});
+
+test("/suspend mid-run stops the package's processes before its flush, and /resume continues them", async () => {
+  const { built, finish } = await holding();
+  const flush = built.runner.syncer.flushAndVerify.bind(built.runner.syncer);
+  built.runner.syncer.flushAndVerify = (h) => { built.record.signals.push(`flush:${h}`); return flush(h); };
+  await built.runner.suspend();
+  assert.deepEqual(built.record.signals, [`freeze:${built.env.packageUid}`, "flush:suspend"]);
+  built.runner.resume();
+  assert.deepEqual(built.record.signals.slice(2), [`thaw:${built.env.packageUid}`], "continued from the hook, without waiting for the loop");
+  finish();
+  await built.runner.loop;
+  assert.equal(result(built.docs, SLOW).status, "done");
+});
+
+test("/suspend while idle stops nothing, and /resume continues nothing", async () => {
+  const { runner, record } = await started();
+  await runner.loop;
+  await runner.suspend();
+  runner.resume();
+  await runner.loop;
+  assert.deepEqual(record.signals, []);
+});
+
+test("a package that cannot be stopped is left to the flush's verify, and a failed continue is logged", async () => {
+  const { built, finish } = await holding({
+    stepOverrides: {
+      freezePackageProcesses: async () => { throw new Error("5 stops did not stop"); },
+      thawPackageProcesses: async () => { throw new Error("kill failed"); }
+    }
+  });
+  const lines = await captured(async () => {
+    await built.runner.suspend();
+    built.runner.resume();
+    await settle(10);
+  });
+  assert.equal(runnerDoc(built.docs).state, "suspended", "the flush still ran and verified");
+  assert.ok(lines.some((l) => l.event === "package.freeze_failed" && /5 stops/.test(l.error)));
+  assert.ok(lines.some((l) => l.event === "package.thaw_failed" && /kill failed/.test(l.error)));
+  finish();
+  await built.runner.loop;
 });
 
 test("a denied PutObject leaves failed, never suspended, and fails the hook", async () => {
@@ -1853,6 +1942,17 @@ test("a denied PutObject leaves failed, never suspended, and fails the hook", as
   const states = writesTo(record, runnerPath(PORTAL, USER)).map((w) => w.state).filter(Boolean);
   assert.deepEqual(states.slice(-2), ["suspending", "failed"]);
   assert.match(runnerDoc(docs).error, /AccessDenied/);
+});
+
+test("the drained ready write clears an error left on the runner document", async () => {
+  const { runner, docs } = await started();
+  await runner.loop;
+  await runner.suspend();
+  docs.set(runnerPath(PORTAL, USER), { ...runnerDoc(docs), error: "an earlier failure" });
+  runner.resume();
+  await runner.loop;
+  assert.equal(runnerDoc(docs).state, "ready");
+  assert.equal(runnerDoc(docs).error, null);
 });
 
 test("/resume writes nothing and answers at once, and the next /work forces a fresh ID token", async () => {

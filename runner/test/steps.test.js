@@ -7,6 +7,7 @@ import { EventEmitter } from "node:events";
 import test from "node:test";
 import { portalHost } from "../server/config.js";
 import { ccDataLogin, makeSteps } from "../server/steps.js";
+import { freezePackageProcesses, thawPackageProcesses } from "../server/sandbox.js";
 
 // Stands in for the cc-data process: records how it was invoked and what was
 // written to its stdin, then closes with the given exit code.
@@ -160,6 +161,29 @@ test("a package that fails or times out still has its processes killed", async (
     await assert.rejects(makeSteps().runPackage({ manifest: { name: "x", version: "1.0.0", entrypoint: "run.py", dir }, paths: { outputDir }, env: {}, uid: 1000, exec }), /timed out/);
     assert.ok(calls.some((c) => c.endsWith("kill -KILL -1")));
   });
+});
+
+test("a freeze stops every process of the package uid, again until none is runnable", async () => {
+  const { exec, calls } = processExec({ left: ["4242", 1] });
+  await freezePackageProcesses({ uid: 1000, exec });
+  assert.match(calls[0], /^\/usr\/bin\/setpriv --reuid=1000 --regid=1000 .* \/usr\/bin\/kill -STOP -1$/);
+  // A stopped process is in state T, so it is not counted.
+  assert.equal(calls[1], "/usr/bin/pgrep -u 1000 --runstates R,S,D");
+  assert.equal(calls.filter((c) => c.endsWith("kill -STOP -1")).length, 2);
+});
+
+test("a freeze that cannot stop the package, or cannot check, fails", async () => {
+  await assert.rejects(freezePackageProcesses({ uid: 1000, exec: processExec({ left: ["4242", "4242", "4242", "4242", "4242"] }).exec }), /5 stops did not stop/);
+  await assert.rejects(freezePackageProcesses({ uid: 1000, exec: processExec({ left: [Object.assign(new Error("spawn ENOENT"), { code: "ENOENT" })] }).exec }), /could not check/);
+});
+
+test("a thaw continues every process of the package uid, and nothing to continue is not a failure", async () => {
+  const { exec, calls } = processExec();
+  await thawPackageProcesses({ uid: 1000, exec });
+  assert.equal(calls.length, 1);
+  assert.match(calls[0], /^\/usr\/bin\/setpriv --reuid=1000 --regid=1000 .* \/usr\/bin\/kill -CONT -1$/);
+  await thawPackageProcesses({ uid: 1000, exec: async () => { throw Object.assign(new Error("kill exited 1"), { code: 1 }); } });
+  await assert.rejects(thawPackageProcesses({ uid: 1000, exec: async () => { throw Object.assign(new Error("spawn ENOENT"), { code: "ENOENT" }); } }), /ENOENT/);
 });
 
 function captureLog(run) {

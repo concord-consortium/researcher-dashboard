@@ -61,6 +61,11 @@ export class Runner {
   #ready = false;
   #suspendSeen = false;
   #terminating = false;
+  // Set while /suspend has stopped the package's processes, until /resume continues them.
+  #frozen = false;
+  // A hook's last runner-document write is made only while the document still records
+  // this VM: a VM launched since owns it now.
+  #ownDocument = (doc) => doc?.microvm_id === this.microvmId;
   // Failed claim attempts per queued entry, for this awake period: cleared when the
   // entry's result is written and on every resume.
   #claimFailures = new Map();
@@ -303,8 +308,6 @@ export class Runner {
         if (!this.#current(epoch)) return;
         this.syncer.start();
         refreshed = true;
-        // A refused suspend left the VM failed; the loop now running puts it back in service.
-        if (this.#vm.state === STATES.FAILED) this.#vm.to(STATES.READY);
       }
       if (this.#run) {
         await this.#run.done;
@@ -744,20 +747,31 @@ export class Runner {
     this.#suspendSeen = true;
     this.#vm.to(STATES.SUSPENDING);
     await this.status.writeFromHook("suspend", { state: STATES.SUSPENDING, ...this.#runningPackage() });
+    // A package still writing would fail the verify, so it is stopped where it stands
+    // until /resume. One that cannot be stopped is left to the verify.
+    if (this.#run) {
+      this.#frozen = true;
+      try {
+        await this.steps.freezePackageProcesses({ uid: this.env.packageUid });
+      } catch (err) {
+        log.error("package.freeze_failed", { error: err.message });
+      }
+    }
     this.syncer.stop();
 
     // The one hook result that is allowed to fail: a suspend on a sync that cannot be
     // proven is exactly what this contract exists to refuse.
     const result = await this.syncer.flushAndVerify("suspend");
     if (!result.ok) {
-      if (this.#vm.state !== STATES.FAILED) this.#vm.to(STATES.FAILED);
       log.error("sync.failed", { hook: "suspend", error: result.reason });
-      await this.status.writeFromHook("suspend", { state: STATES.FAILED, error: result.reason, ...this.#runningPackage() });
-      // The VM stays awake, and the loop that asked /idle to suspend it has ended, so a new
-      // one takes up the work as after a resume.
-      this.#lastWritten = null;
+      // Lambda terminates a VM whose /suspend fails, and delivers no /terminate, so this
+      // hook does /terminate's work before it answers.
+      this.#terminating = true;
       this.#epoch += 1;
-      this.#startLoop({ afterResume: true });
+      await this.#failOutstandingRun("suspend");
+      await this.#revokeToken("suspend");
+      this.#vm.to(STATES.FAILED);
+      await this.status.writeFromHook("suspend", { state: STATES.FAILED, error: result.reason, ...this.#runningPackage() }, { onlyIf: this.#ownDocument });
       throw new HookError(500, result.reason);
     }
     this.#vm.to(STATES.SUSPENDED);
@@ -779,9 +793,14 @@ export class Runner {
     this.#applies.clear();
     if (!this.#suspendSeen) log.warn("lifecycle.resume_without_suspend", {});
     this.#suspendSeen = false;
+    if (this.#frozen) {
+      this.#frozen = false;
+      this.steps.thawPackageProcesses({ uid: this.env.packageUid })
+        .catch((err) => log.error("package.thaw_failed", { error: err.message }));
+    }
     this.storage?.markStale();
     this.syncer.stop();
-    if (this.#vm.state === STATES.SUSPENDED || this.#vm.state === STATES.FAILED) this.#vm.to(STATES.READY);
+    if (this.#vm.state === STATES.SUSPENDED) this.#vm.to(STATES.READY);
     this.#startLoop({ afterResume: true });
     return { state: this.#vm.state };
   }
@@ -792,44 +811,48 @@ export class Runner {
     this.#epoch += 1;
     // First, so it lands inside the hook's 60 seconds whatever the flush costs: a run
     // outstanding at termination was interrupted, whether or not the flush completes.
-    if (this.#run) {
-      const { docs, docId, pkg } = this.#run;
-      // No wait for a beat in flight: one store sends its writes in order.
-      this.#run.heartbeat?.cancel();
-      try {
-        await bounded(docs.failed(docId, { pkg, error: LOST_RUN_REASON }));
-      } catch (err) {
-        log.error("status.write_failed", { hook: "terminate", write: "result", error: err.message });
-      }
-    }
-
+    await this.#failOutstandingRun("terminate");
     // Before the sync, because the sync can fail the hook and the credential should
     // stop working whether or not the data made it out.
-    try {
-      await bounded(this.revokeReportServerToken({
-        baseUrl: this.payload.report_server_url,
-        token: this.payload.report_server_token
-      }), REVOKE_TIMEOUT_MS, "the revocation");
-      log.info("terminate.revoked", {});
-    } catch (err) {
-      // An unrevoked token is a residual the design accepts: it expires after nine hours
-      // and the researcher's next launch revokes it.
-      log.warn("report_server.refused", { call: "revoke", error: err.message });
-    }
+    await this.#revokeToken("terminate");
 
-    // Only while the document still records this VM: a VM launched since owns it now.
-    const onlyIf = (doc) => doc?.microvm_id === this.microvmId;
     this.syncer.stop();
     const result = await this.syncer.flushAndVerify("terminate");
     if (!result.ok) {
       if (this.#vm.state !== STATES.FAILED) this.#vm.to(STATES.FAILED);
       log.error("sync.failed", { hook: "terminate", error: result.reason });
-      await this.status.writeFromHook("terminate", { state: STATES.FAILED, error: result.reason, ...this.#runningPackage() }, { onlyIf });
+      await this.status.writeFromHook("terminate", { state: STATES.FAILED, error: result.reason, ...this.#runningPackage() }, { onlyIf: this.#ownDocument });
       throw new HookError(500, result.reason);
     }
     this.#vm.to(STATES.TERMINATED);
-    await this.status.writeFromHook("terminate", { state: STATES.TERMINATED, ...this.#runningPackage() }, { onlyIf });
+    await this.status.writeFromHook("terminate", { state: STATES.TERMINATED, ...this.#runningPackage() }, { onlyIf: this.#ownDocument });
     return { state: this.#vm.state, ...result };
+  }
+
+  async #failOutstandingRun(hook) {
+    if (!this.#run) return;
+    const { docs, docId, pkg } = this.#run;
+    // No wait for a beat in flight: one store sends its writes in order.
+    this.#run.heartbeat?.cancel();
+    try {
+      await bounded(docs.failed(docId, { pkg, error: LOST_RUN_REASON }));
+    } catch (err) {
+      log.error("status.write_failed", { hook, write: "result", error: err.message });
+    }
+  }
+
+  async #revokeToken(hook) {
+    try {
+      await bounded(this.revokeReportServerToken({
+        baseUrl: this.payload.report_server_url,
+        token: this.payload.report_server_token
+      }), REVOKE_TIMEOUT_MS, "the revocation");
+      log.info("report_server.revoked", { hook });
+    } catch (err) {
+      // An unrevoked token is a residual the design accepts: it expires after nine hours
+      // and the researcher's next launch revokes it.
+      log.warn("report_server.refused", { call: "revoke", hook, error: err.message });
+    }
   }
 }
 

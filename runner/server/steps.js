@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { preparePackage, readPackageCounts, readPackageResult } from "./package-env.js";
 import { fetchPackage } from "./package-fetch.js";
-import { killPackageProcesses, runSandboxed } from "./sandbox.js";
+import { freezePackageProcesses, killPackageProcesses, runSandboxed, thawPackageProcesses } from "./sandbox.js";
 import { log } from "./log.js";
 
 // The things a package run does, kept behind one interface so the lifecycle, the pull
@@ -89,6 +89,10 @@ export function makeSteps({ login = ccDataLogin } = {}) {
     readPackageCounts: async ({ outputDir }) => readPackageCounts(outputDir),
 
     killPackageProcesses: async ({ uid }) => killPackageProcesses({ uid }),
+
+    freezePackageProcesses: async ({ uid }) => freezePackageProcesses({ uid }),
+
+    thawPackageProcesses: async ({ uid }) => thawPackageProcesses({ uid }),
 
     // The classes this VM holds pulled data for, read from the synced tree rather than
     // remembered: the tree is what `/run` syncs down from the researcher's prefix, so it
