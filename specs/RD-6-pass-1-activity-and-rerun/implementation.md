@@ -4,7 +4,7 @@
 **Requirements Spec**: [requirements.md](requirements.md)
 **Status**: **In Development**
 
-Written against RD-3 pass 2 as built (`d274bec`, PR #4): every name below (`watchClass`, `ClassListeners`, `runs.ts`'s `rowState`, `runOffer`, `RunRequest`, `latestFinished` and `millis`, `ClassDashboard`'s `run`, `requests`, `grouped` and `listShown`, `PackageList`'s `Row` and `FinishedBlock`, `ResultView`) is in that code. Every step is `app/` only: the runner writes no `inputs` (Doug, 2026-10-11).
+Written against RD-3 pass 2 as merged to `main` (`fc658fa`, PR #4): every name below (`watchClass`, `ClassListeners`, `runs.ts`'s `rowState`, `runOffer`, `RunRequest`, `latestFinished` and `millis`, `ClassDashboard`'s `run`, `requests`, `grouped` and `listShown`, `PackageList`'s `Row` and `FinishedBlock`, `ResultView`) is in that code. Every step is `app/` only: the runner writes no `inputs` (Doug, 2026-10-11).
 
 ## Implementation Plan
 
@@ -47,18 +47,18 @@ export interface ClassListeners {
   refused: (which: "profile" | "runner" | "counts" | "results" | "activity") => void;
 }
 
-// watchClass, after the results listener
-watchCollection<Activity>(db, activityPath(config.origin, scope.class_hash), on.activity, () => on.refused("activity"))
+// watchClass, inside its try, after the results listener
+stops.push(watchCollection<Activity>(db, activityPath(config.origin, scope.class_hash), on.activity, () => on.refused("activity")));
 ```
 
-`DashboardServices.watchClass`'s comment says "the four documents" and "stops all four"; both become five.
+It goes inside `watchClass`'s `try`, so an activity listener that cannot start stops the four already started before the promise rejects, as for the others. `DashboardServices.watchClass`'s comment says "the four documents" and "stops all four"; both become five.
 
-`ClassDashboard`: `activity: Map<string, Activity> | undefined` (undefined until the first snapshot) and `activityProblem: string | null`. Its `refused` handler today sends every listener other than the profile and counts to "Your runs could not be read.", so the activity branch goes before that fall-through: `if (which === "activity") { setActivity(undefined); return setActivityProblem("Class activity could not be read."); }`. With `activity` undefined the next steps have no data, so nothing is counted or re-run.
+`ClassDashboard`: `activity: Map<string, Activity> | undefined` (undefined until the first snapshot) and `activityProblem: string | null`. When `watchClass` itself rejects (the token call, the sign-in, or a listener that cannot start), its `catch` already shows `UNREACHABLE.firebase` through `refused(error, setProfileProblem, "firebase")`; its `show` callback also sets `activityProblem` to "Class activity could not be read.", so the Class activity section says so rather than staying blank. `UNREACHABLE.firebase` itself is unchanged. Its `refused` handler today sends every listener other than the profile and counts to "Your runs could not be read.", so the activity branch goes before that fall-through: `if (which === "activity") { setActivity(undefined); return setActivityProblem("Class activity could not be read."); }`. With `activity` undefined the next steps have no data, so nothing is counted or re-run.
 
 **Tests**:
 - `firebase.test.ts`: `activityPath` for the staging portal and a class hash.
-- `services.test.ts`: `watchCollection` is also called with the activity path; still one `jwt/firebase` call and one `signIn`; the returned function calls five stops (counting the stops fails if the fifth is not pushed).
-- `class-dashboard.test.tsx`: the fake's `watchClass` already captures the listeners as `on`, so tests push with `on.activity(...)` and refuse with `on.refused("activity")`; a refusal shows the line, "Your runs could not be read." does not appear (fails if the branch falls through), and the other four listeners' output still renders.
+- `services.test.ts`: `watchCollection` is also called with the activity path; still one `jwt/firebase` call (with `researcher=true`) and one `signIn`; the returned function calls five stops (counting the stops fails if the fifth is not pushed); and the activity listener failing to start stops the four started before it and rejects (fails if it is pushed outside the `try`).
+- `class-dashboard.test.tsx`: the fake's `watchClass` already captures the listeners as `on`, so tests push with `on.activity(...)` and refuse with `on.refused("activity")`; a refusal shows the line, "Your runs could not be read." does not appear (fails if the branch falls through), and the other four listeners' output still renders. A `watchClass` that rejects shows the activity line beside `UNREACHABLE.firebase`.
 - `no-writes.test.ts` is unchanged and passes.
 
 ---
@@ -290,7 +290,7 @@ async function run(row: PackageRow, resume: boolean, auto = false) {
       setStopped(true);
       return;
     }
-    const at = latestResults.current.get(key)?.updated_at?.toMillis() ?? null;
+    const at = millis(latestResults.current.get(key)?.updated_at);
     refused(error, (message) => setRequests((r) => new Map(r).set(key, { message, at })), "portal");
   }
 }
