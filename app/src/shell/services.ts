@@ -1,19 +1,27 @@
-import { classPath, emulatorsFromEnv, signIn, watchDoc } from "./firebase";
+import { classPath, emulatorsFromEnv, resultsPath, runnerPath, scopeDocPath, signIn, watchCollection, watchDoc } from "./firebase";
 import type { Token } from "./oauth";
 import type { Profile } from "./packages";
 import { Api, Portal, ReportServer, type Scope } from "./portal";
 import type { PortalConfig } from "./portals";
+import type { Counts, Result, Runner } from "./runs";
+
+export interface ClassListeners {
+  profile: (profile: Profile | null) => void;
+  runner: (runner: Runner | null) => void;
+  counts: (counts: Counts | null) => void;
+  results: (results: Map<string, Result>) => void;
+  // Which listener the rules refused, so the page can say what it could not read.
+  refused: (which: "profile" | "runner" | "counts" | "results") => void;
+}
 
 // Everything the dashboard page calls out to, gathered so a test can hand it fakes. The page is
 // given these and never the launch, so it cannot read `classId`.
 export interface DashboardServices {
   portal: Portal;
   reportServer: ReportServer;
-  // Signs in to the portal's report-service project for the scope's class and listens to the
-  // class's profile document, the one Firestore read the page makes.
-  watchProfile: (
-    scope: Scope, onValue: (profile: Profile | null) => void, onError: (error: Error) => void
-  ) => Promise<() => void>;
+  // One Firebase token and one sign-in for the scope's class, then the four documents the page
+  // reads. Resolves to a function that stops all four.
+  watchClass: (scope: Scope, on: ClassListeners) => Promise<() => void>;
   now: () => number;
 }
 
@@ -22,11 +30,18 @@ export function makeServices(config: PortalConfig, token: Token): DashboardServi
   return {
     portal,
     reportServer: new ReportServer(new Api(config.reportServer, token)),
-    async watchProfile(scope, onValue, onError) {
+    async watchClass(scope, on) {
       const customToken = await portal.firebaseToken(config.firebaseProject, scope.class_hash);
       const db = await signIn(config.firebaseProject, customToken,
         emulatorsFromEnv(import.meta.env as unknown as Record<string, string | undefined>));
-      return watchDoc<Profile>(db, classPath(config.origin, scope.class_hash), onValue, onError);
+      const uid = scope.platform_user_id;
+      const stops = [
+        watchDoc<Profile>(db, classPath(config.origin, scope.class_hash), on.profile, () => on.refused("profile")),
+        watchDoc<Runner>(db, runnerPath(config.origin, uid), on.runner, () => on.refused("runner")),
+        watchDoc<Counts>(db, scopeDocPath(config.origin, scope.class_hash, uid), on.counts, () => on.refused("counts")),
+        watchCollection<Result>(db, resultsPath(config.origin, scope.class_hash, uid), on.results, () => on.refused("results"))
+      ];
+      return () => stops.forEach((stop) => stop());
     },
     now: Date.now
   };

@@ -1,6 +1,6 @@
 import { initializeApp, type FirebaseApp } from "firebase/app";
 import { connectAuthEmulator, getAuth, inMemoryPersistence, initializeAuth, signInWithCustomToken } from "firebase/auth";
-import { connectFirestoreEmulator, doc, getFirestore, onSnapshot, type Firestore } from "firebase/firestore";
+import { collection, connectFirestoreEmulator, doc, getFirestore, onSnapshot, type Firestore } from "firebase/firestore";
 
 // The Firebase project this app reads, and the sign-in that gets it in: report-service's,
 // which holds the dashboard tree, with a custom token the portal minted for one class.
@@ -85,12 +85,38 @@ export function classPath(portalOrigin: string, classHash: string): string {
   return `researcher_dashboard/${portalSegment(portalOrigin)}/classes/${classHash}`;
 }
 
+export function runnerPath(portalOrigin: string, platformUserId: number): string {
+  return `researcher_dashboard/${portalSegment(portalOrigin)}/runners/${platformUserId}`;
+}
+
+export function scopeDocPath(portalOrigin: string, classHash: string, platformUserId: number): string {
+  return `${classPath(portalOrigin, classHash)}/researchers/${platformUserId}`;
+}
+
+export function resultsPath(portalOrigin: string, classHash: string, platformUserId: number): string {
+  return `${scopeDocPath(portalOrigin, classHash, platformUserId)}/results`;
+}
+
 export function watchDoc<T>(
   db: Firestore, path: string, onValue: (value: T | null) => void, onError: (error: Error) => void
 ): () => void {
   return onSnapshot(
     doc(db, path),
     (snapshot) => onValue(snapshot.exists() ? (snapshot.data() as T) : null),
+    (error) => {
+      console.error(`listener on ${path} failed`, error);
+      onError(error);
+    }
+  );
+}
+
+// Each document by its id, which for results is the package key.
+export function watchCollection<T>(
+  db: Firestore, path: string, onValue: (docs: Map<string, T>) => void, onError: (error: Error) => void
+): () => void {
+  return onSnapshot(
+    collection(db, path),
+    (snapshot) => onValue(new Map(snapshot.docs.map((d) => [d.id, d.data() as T]))),
     (error) => {
       console.error(`listener on ${path} failed`, error);
       onError(error);

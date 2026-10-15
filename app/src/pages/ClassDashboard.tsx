@@ -3,6 +3,7 @@ import { PackageList } from "../components/PackageList";
 import { needsRefresh, scopeUrls, type Profile } from "../shell/packages";
 import { ApiError, SessionExpired, type PackageRow, type Scope } from "../shell/portal";
 import { PROFILE_MAX_AGE_MS } from "../shell/portals";
+import type { Counts, Result, Runner } from "../shell/runs";
 import type { DashboardServices } from "../shell/services";
 import type { InfoReason } from "../shell/start";
 import { Info } from "./Info";
@@ -28,6 +29,12 @@ export function ClassDashboard({ services, onExpired }: {
   const [profile, setProfile] = useState<Profile | null | undefined>(undefined);
   const [profileProblem, setProfileProblem] = useState<string | null>(null);
   const [refreshProblem, setRefreshProblem] = useState<string | null>(null);
+  const [, setRunner] = useState<Runner | null>(null);
+  // undefined until the first snapshot; null while the document does not exist.
+  const [, setCounts] = useState<Counts | null | undefined>(undefined);
+  const [, setResults] = useState<Map<string, Result>>(new Map());
+  const [runsProblem, setRunsProblem] = useState<string | null>(null);
+  const [countsProblem, setCountsProblem] = useState<string | null>(null);
   const [rows, setRows] = useState<PackageRow[] | null>(null);
   const [listProblem, setListProblem] = useState<string | null>(null);
   const refreshed = useRef(false);
@@ -58,12 +65,22 @@ export function ClassDashboard({ services, onExpired }: {
   }, [services]);
 
   // Stopped as soon as the page turns into an info page, so a researcher told their access was
-  // withdrawn stops receiving the class's profile.
+  // withdrawn stops receiving the class's documents.
   useEffect(() => {
     if (!scope || info) return;
     let stop: (() => void) | null = null;
     let canceled = false;
-    services.watchProfile(scope, setProfile, () => setProfileProblem(UNREACHABLE.firebase))
+    services.watchClass(scope, {
+      profile: setProfile,
+      runner: setRunner,
+      counts: setCounts,
+      results: setResults,
+      refused: (which) => {
+        if (which === "profile") setProfileProblem(UNREACHABLE.firebase);
+        else if (which === "counts") setCountsProblem("Your counts could not be read.");
+        else setRunsProblem("Your runs could not be read.");
+      }
+    })
       .then((unsubscribe) => { if (canceled) unsubscribe(); else stop = unsubscribe; })
       .catch((error) => { if (!canceled) refused(error, setProfileProblem, "firebase"); });
     return () => { canceled = true; stop?.(); };
@@ -134,6 +151,8 @@ export function ClassDashboard({ services, onExpired }: {
             </p>
           )}
           {listProblem && <p className="error">{listProblem}</p>}
+          {runsProblem && <p className="error">{runsProblem}</p>}
+          {countsProblem && <p className="error">{countsProblem}</p>}
           {profile && !rows && !listProblem && !profileProblem && <p>Listing the packages that apply…</p>}
         </div>
         {profile && rows && !listProblem && !profileProblem && <PackageList rows={rows} scope={scope} />}
