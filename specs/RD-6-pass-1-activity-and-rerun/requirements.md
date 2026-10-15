@@ -5,7 +5,7 @@
 **Implementation Spec**: [implementation.md](implementation.md)
 **Status**: **In Development**
 
-**Pass**: 1 of 2. On `main` at `fc658fa`, which merged RD-3 pass 2 (PR #4), since this pass changes the page RD-3 pass 2 builds. Pass 2 follows CLUE-693 and is not this pass: the app's CLUE activity listener, and the incremental pull that uses the changed-keys map as a manifest (Doug, 2026-10-11), on whatever reads CLUE for a package now that RD-4 pass 2 has deleted the runner's CLUE pre-pull and packages read CLUE through cc-data.
+**Pass**: 1 of 2. On `main` at `fc658fa`, which merged RD-3 pass 2 (PR #4), since this pass changes the page RD-3 pass 2 builds. Pass 2 follows CLUE-693 and is not this pass: the app's CLUE activity listener only, with no runner change and no incremental pull (Doug, 2026-10-14). Packages read CLUE only through cc-data (REPORT-152), and every run pulls fresh.
 
 ## Overview
 
@@ -128,7 +128,7 @@ On class 590 as `dougresearcher`, from the branch build, after the prerequisites
 
 ## Out of Scope
 
-- RD-6 pass 2 (Doug, 2026-10-11): the CLUE activity listener (a second, separately named Firebase app signed in to CLUE's project, and a class using both platforms counting each learner once across the two collections), and the incremental pull with the changed-keys map as its manifest, on cc-data's CLUE reads; nothing here reads `changed` or `writeCount`.
+- RD-6 pass 2 (Doug, 2026-10-14): the CLUE activity listener only (a second, separately named Firebase app signed in to CLUE's project, and a class using both platforms counting each learner once and taking the newest save from either), with no runner change. Nothing here reads `changed` or `writeCount`.
 - A control to turn automatic re-runs off, or a per-package declaration of which inputs a package reads (the manifest has none; every finished, listed, runnable package re-runs on answer activity).
 - Logged-in counts, which nothing can compute; the class-activity page of `final-design.md` 15.2; teacher-facing activity.
 - Any change to report-service, rigse, report-server, the runner or REPORT-153's contract.
@@ -147,7 +147,7 @@ On class 590 as `dougresearcher`, from the branch build, after the prerequisites
 
 **Decision**: A (Doug, 2026-10-11, stage 8), after checking it against the CLUE and future-package work:
 - **CLUE.** `started_at` precedes every read a run makes, including a package's own CLUE reads through cc-data (RD-4 pass 2 deleted the runner's CLUE pre-pull), so it serves CLUE-693's documents as it serves REPORT-153's. CLUE's `lastActivityAt` is CLUE's project's server time; a few milliseconds of disagreement with report-service's clock can cost an extra re-run, not hide a save, since the claim precedes the read by seconds.
-- **RD-6 pass 2.** A per-result `inputs` cannot serve the incremental pull: the function's queued write replaces the result whole apart from `previous`, so a re-run's claim never sees the last run's other fields, and the corpus it would update incrementally is per class, not per package. Pass 2 needs a per-class "last pulled" time kept with the pulled data, on cc-data's CLUE reads.
+- **RD-6 pass 2.** No later pass needs `inputs` either: pass 2 is the CLUE listener only, with no runner change and no incremental pull (Doug, 2026-10-14), and a CLUE save makes a result behind by the same `started_at` comparison.
 - **Future packages.** What a re-run should be triggered by, and whether a costly package (a model call, a long run) should re-run on its own at all, is the package author's to declare in the manifest, since the runner cannot observe what a package reads through cc-data. That is REPORT-172 (Out of Scope), which also carries an optional per-package minimum interval.
 
 `final-design.md` 9 and 14 and RD-6's Jira text drop `inputs`, for marvin-scratch-t.
