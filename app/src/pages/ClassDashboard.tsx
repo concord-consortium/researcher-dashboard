@@ -20,8 +20,10 @@ type Source = "portal" | "report-server" | "firebase";
 const UNREACHABLE: Record<Source, string> = {
   portal: "The portal could not be reached.",
   "report-server": "The package catalog could not be reached.",
-  firebase: "This class's profile could not be read."
+  firebase: "This class's profile, your runs and your counts could not be read."
 };
+
+const PROFILE_REFUSED = "This class's profile could not be read.";
 
 // The dashboard for the class the token is bound to, never the one the launch link asked for.
 export function ClassDashboard({ services, onExpired }: {
@@ -50,21 +52,27 @@ export function ClassDashboard({ services, onExpired }: {
   const [notes, setNotes] = useState<Map<string, string | null>>(new Map());
   const asked = useRef(new Set<string>());
   const [runsProblem, setRunsProblem] = useState<string | null>(null);
-  // Without both the session and the results, a row's state cannot be told, so none is shown.
+  // While the session or the results listener is refused, a row's state cannot be told, so none is shown.
   const results = useMemo(() => (runsProblem ? new Map<string, Result>() : received), [runsProblem, received]);
   const [countsProblem, setCountsProblem] = useState<string | null>(null);
   const [rows, setRows] = useState<PackageRow[] | null>(null);
   const [listProblem, setListProblem] = useState<string | null>(null);
   const refreshed = useRef(false);
-  // An accepted Resume's timeouts, cleared when the page goes.
-  const resumeTimers = useRef(new Set<ReturnType<typeof setTimeout>>());
-  useEffect(() => () => {
-    resumeTimers.current.forEach(clearTimeout);
-    resumeTimers.current.clear();
+  // An accepted Resume's timeouts while the page is mounted, cleared when it goes; null once it has
+  // gone, so a Resume answered after that starts none.
+  const resumeTimers = useRef<Set<ReturnType<typeof setTimeout>> | null>(null);
+  useEffect(() => {
+    const timers = new Set<ReturnType<typeof setTimeout>>();
+    resumeTimers.current = timers;
+    return () => {
+      timers.forEach(clearTimeout);
+      resumeTimers.current = null;
+    };
   }, []);
 
-  // How a refused call becomes page state. Only a 403 from the portal's dashboard endpoints
-  // means the researcher check failed; its Firebase token answers that check with a 400.
+  // How a refused call becomes page state. From the portal's dashboard endpoints (the scope, the
+  // profile refresh and the run request), a 403 means the researcher check failed and a 404 that
+  // the class no longer exists. Its Firebase token call answers that check with a 400.
   function refused(error: unknown, show: (message: string) => void, from: Source) {
     if (error instanceof SessionExpired) return error.young ? setInfo("expired") : onExpired();
     if (error instanceof ApiError && error.status === 403 && from === "portal") return setInfo("withdrawn");
@@ -100,7 +108,7 @@ export function ClassDashboard({ services, onExpired }: {
       counts: setCounts,
       results: setReceived,
       refused: (which) => {
-        if (which === "profile") return setProfileProblem(UNREACHABLE.firebase);
+        if (which === "profile") return setProfileProblem(PROFILE_REFUSED);
         if (which === "counts") {
           setCounts(undefined);
           return setCountsProblem("Your counts could not be read.");
@@ -155,16 +163,18 @@ export function ClassDashboard({ services, onExpired }: {
     try {
       await services.portal.runPackage(row.identity, row.current_version.version);
       if (!resume) return forget(key);
-      const resuming: RunRequest = { resuming: true, at: latestResults.current.get(key)?.updated_at?.toMillis() ?? null };
+      const timers = resumeTimers.current;
+      if (!timers) return;
+      const resuming: RunRequest = { resuming: true, at: millis(latestResults.current.get(key)?.updated_at) };
       setRequests((r) => new Map(r).set(key, resuming));
       const timer = setTimeout(() => {
-        resumeTimers.current.delete(timer);
+        timers.delete(timer);
         forget(key, resuming);
       }, RESUME_WAIT_MS);
-      resumeTimers.current.add(timer);
+      timers.add(timer);
     } catch (error) {
       // Keyed to the result as the refusal finds it: the queued write lands before a VM step fails.
-      const at = latestResults.current.get(key)?.updated_at?.toMillis() ?? null;
+      const at = millis(latestResults.current.get(key)?.updated_at);
       refused(error, (message) => setRequests((r) => new Map(r).set(key, { message, at })), "portal");
     }
   }

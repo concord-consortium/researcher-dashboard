@@ -45,6 +45,7 @@ describe("makeServices", () => {
       expect(firebaseUrl.origin).toBe(CONFIG.origin);
       expect(firebaseUrl.pathname).toBe("/api/v1/jwt/firebase");
       expect(firebaseUrl.searchParams.get("firebase_app")).toBe("report-service-dev");
+      expect(firebaseUrl.searchParams.get("researcher")).toBe("true");
       expect(signIn).toHaveBeenCalledTimes(1);
       expect(signIn).toHaveBeenCalledWith("report-service-dev", "custom", null);
       expect(Object.fromEntries(kinds)).toEqual({
@@ -63,6 +64,23 @@ describe("makeServices", () => {
 
       stop();
       expect(stops.size).toBe(4);
+      for (const s of stops.values()) expect(s).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("stops the listeners it started when a later one cannot start, and rejects", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 201, json: async () => ({ token: "custom" }) })));
+    stops.clear();
+    watch.mockImplementationOnce((_kind, ...args) => { const stop = vi.fn(); stops.set(args[1], stop); return stop; })
+      .mockImplementationOnce((_kind, ...args) => { const stop = vi.fn(); stops.set(args[1], stop); return stop; })
+      .mockImplementationOnce(() => { throw new Error("invalid path"); });
+    try {
+      const { makeServices } = await import("../src/shell/services");
+      const on = { profile: vi.fn(), runner: vi.fn(), counts: vi.fn(), results: vi.fn(), refused: vi.fn() };
+      await expect(makeServices(CONFIG, TOKEN).watchClass(SCOPE, on)).rejects.toThrow("invalid path");
+      expect([...stops.keys()]).toEqual([PATHS.profile, PATHS.runner]);
       for (const s of stops.values()) expect(s).toHaveBeenCalledTimes(1);
     } finally {
       vi.unstubAllGlobals();

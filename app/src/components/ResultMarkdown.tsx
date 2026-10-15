@@ -12,8 +12,17 @@ function noHtml(this: Processor) {
   (data.micromarkExtensions ??= []).push({ disable: { null: ["htmlFlow", "htmlText"] } });
 }
 
+// GFM's footnotes are left out of what a result can use, so "[^1]" stays text.
+function noFootnotes(this: Processor) {
+  const data = this.data() as { micromarkExtensions?: unknown[] };
+  (data.micromarkExtensions ??= []).push({
+    disable: { null: ["gfmFootnoteDefinition", "gfmFootnoteCall", "gfmPotentialFootnoteCall"] }
+  });
+}
+
 const LINK = /^(https?:|mailto:)/i;
-// A data: image makes no request; SVG is left out because it is the image type that can carry script.
+// A data: image makes no request. SVG is left out as a precaution: it can carry script, though a
+// browser runs none of it in an <img>.
 const IMAGE = /^data:image\/(png|jpeg|gif|webp)[;,]/i;
 
 export const keepUrl: UrlTransform = (url, _key, node) =>
@@ -50,7 +59,7 @@ const COMPONENTS: Components = {
 export function ResultMarkdown({ markdown, sanitize = true }: { markdown: string; sanitize?: boolean }) {
   return (
     <div className="result-markdown">
-      <Markdown remarkPlugins={[noHtml, remarkGfm]} rehypePlugins={sanitize ? [[rehypeSanitize, SCHEMA]] : []}
+      <Markdown remarkPlugins={[noHtml, remarkGfm, noFootnotes]} rehypePlugins={sanitize ? [[rehypeSanitize, SCHEMA]] : []}
         urlTransform={keepUrl} components={COMPONENTS}>
         {markdown}
       </Markdown>

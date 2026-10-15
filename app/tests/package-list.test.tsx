@@ -39,7 +39,7 @@ describe("PackageList", () => {
   });
 
   it("says each state on its row", () => {
-    const rows = ["Not", "Queued", "Lagging", "Running", "Done", "Failed", "Stuck"].map((title) => row({ title, official: true }));
+    const rows = ["Not", "Queued", "Lagging", "Busy", "Done", "Failed", "Stuck"].map((title) => row({ title, official: true }));
     const [, queued, lagging, running, done, failed, stuck] = rows;
     const key = (r: PackageRow) => packageKey(r.identity);
     list(rows, {
@@ -56,7 +56,7 @@ describe("PackageList", () => {
     expect(stateLine("Not")).toBe("Not run.");
     expect(stateLine("Queued")).toBe("Queued, number 2 in line.");
     expect(stateLine("Lagging")).toBe("Queued.");
-    expect(stateLine("Running")).toBe("Running Running: preparing the package.");
+    expect(stateLine("Busy")).toBe("Running Busy: preparing the package.");
     expect(stateLine("Done")).toBe("6 open responses from 3 learners.");
     expect(within(item("Done")).getByText(`Finished ${formatTime(1000)}`)).toBeDefined();
     expect(stateLine("Failed")).toBe("Failed: The machine running it stopped before the run finished; run it again.");

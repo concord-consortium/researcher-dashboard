@@ -80,6 +80,20 @@ describe.each([true, false])("ResultMarkdown with the sanitizer %s", (sanitize) 
     expect(container.querySelector("h5")!.textContent).toBe("Section");
     expect(container.querySelector("h1, h2, h3")).toBeNull();
   });
+
+  it("keeps every allowed data image type and a mailto link", () => {
+    const sources = ["png", "jpeg", "gif", "webp"].map((type) => `data:image/${type};base64,AAAA`);
+    const markdown = `${sources.map((src, i) => `![${i}](${src})`).join(" ")} [mail](mailto:r@example.org)`;
+    const { container } = render(<ResultMarkdown markdown={markdown} sanitize={sanitize} />);
+    expect([...container.querySelectorAll("img")].map((i) => i.getAttribute("src"))).toEqual(sources);
+    expect(container.querySelector("a")!.getAttribute("href")).toBe("mailto:r@example.org");
+  });
+
+  it("leaves a footnote as text", () => {
+    const { container } = render(<ResultMarkdown markdown={"Claim.[^1]\n\n[^1]: The source."} sanitize={sanitize} />);
+    expect([...container.querySelectorAll("p")].map((p) => p.textContent)).toEqual(["Claim.[^1]", "[^1]: The source."]);
+    expect(container.querySelector("sup, section, a")).toBeNull();
+  });
 });
 
 describe("SCHEMA", () => {

@@ -98,7 +98,7 @@ function Row({ row, result, runner, mark, classHash, request, onRun, onShow, sho
   const refusal = request && "message" in request && request.at === resultAt ? request.message : null;
   const resume = state.kind === "stuck" && state.resumable;
   const resuming = resume && request !== undefined && "resuming" in request && request.at === resultAt;
-  // A waiting row reads as plain Queued while its own request is launching the machine.
+  // While a request from this row is in flight, a waiting row reads as queued, not as waiting for a machine.
   const shown: RowState = pending && state.kind === "queued" && state.waiting ? { ...state, waiting: false } : state;
   const line = !resuming ? rowLine(shown, title, true, finishedAt) : finishedAt === undefined ? RESUMING : updating(RESUMING);
   const offer = runOffer(row.runnable, state);

@@ -28,6 +28,7 @@ export function packageKey(identity: string): string {
   return identity.replaceAll("/", "__");
 }
 
+// The inverse of packageKey: an identity never contains "_", so every "__" in a key was a "/".
 export function identityOfKey(key: string): string {
   return key.replaceAll("__", "/");
 }

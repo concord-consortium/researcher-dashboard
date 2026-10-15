@@ -157,9 +157,9 @@ describe("ClassDashboard", () => {
     expect(s.refreshProfile).not.toHaveBeenCalled();
   });
 
-  it("says the profile could not be read when the sign-in fails", async () => {
+  it("says none of the class's documents could be read when the sign-in fails", async () => {
     await mounted(services({ watch: async () => { throw new Error("auth/network-request-failed"); } }));
-    expect(await screen.findByText("This class's profile could not be read.")).toBeDefined();
+    expect(await screen.findByText("This class's profile, your runs and your counts could not be read.")).toBeDefined();
   });
 
   // jwt/firebase answers the researcher check with a 400 and keeps 403 for a token it will not
@@ -293,6 +293,14 @@ describe("ClassDashboard", () => {
     expect(s.fake.watchClass).toHaveBeenCalledTimes(1);
   });
 
+  it("renders the class-gone page when the refresh finds no class", async () => {
+    const s = services({ refresh: async () => { throw new ApiError("The class this token was issued for no longer exists", 404); } });
+    await mounted(s);
+    await s.snapshot(null);
+    expect(await screen.findByText("This class no longer exists.")).toBeDefined();
+    expect(s.unsubscribe).toHaveBeenCalledTimes(1);
+  });
+
   it("reads a refused document as absent, so each row keeps its Run control", async () => {
     const s = services();
     await listed(s);
@@ -300,6 +308,8 @@ describe("ClassDashboard", () => {
     await s.results(new Map([[KEY, wildfire({ status: "running", microvm_id: "vm-1", updated_at: stamp(5) })]]));
     await s.counts({ data: { answers: 9 } });
     expect(runButton().getAttribute("aria-disabled")).toBe("true");
+    expect(screen.getByText("Running Wildfire open responses.")).toBeDefined();
+    expect(screen.getByText("Answers 9")).toBeDefined();
     await s.refuseRuns("results");
     expect(wildfireLine().querySelector("p")!.textContent).toBe("Not run.");
     expect(runButton().getAttribute("aria-disabled")).toBeNull();
@@ -531,7 +541,21 @@ describe("running a package", () => {
       expect(vi.getTimerCount()).toBe(0);
     });
 
-    it("keeps a resumed run running when another request moves the session document", async () => {
+    it("starts no timer for a Resume answered after the page went", async () => {
+      const answer = deferred<unknown>();
+      const s = services({ run: () => answer.promise });
+      await listed(s);
+      vi.useFakeTimers();
+      await s.runner(paused);
+      await s.results(new Map([[KEY, run()]]));
+      fireEvent.click(runButton());
+      cleanup();
+      await act(async () => { answer.resolve({ queue: [], appended: [], vm: "resumed" }); await Promise.resolve(); });
+      expect(s.runPackage).toHaveBeenCalledTimes(1);
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it("keeps a run the paused machine resumed running when another request moves the session document", async () => {
       const s = services();
       await listed(s);
       await s.runner(paused);
@@ -637,13 +661,14 @@ describe("the Results section", () => {
     expect(document.activeElement).toBe(title);
   });
 
-  it("stays open, focus unmoved, when a listener is refused", async () => {
+  it("stays open, focus unmoved, when the session and results listeners are refused", async () => {
     const s = services();
     await listed(s);
     await s.results(new Map([[KEY, done(WILDFIRE.identity, "Earlier summary", 1000)]]));
     fireEvent.click(showButton("Wildfire open responses"));
     const title = document.activeElement;
     await s.refuseRuns("runner");
+    await s.refuseRuns("results");
     expect(within(results()).getByText("Earlier summary", { selector: ".summary" })).toBeDefined();
     expect(document.activeElement).toBe(title);
     fireEvent.click(within(results()).getByRole("button", { name: "Close" }));

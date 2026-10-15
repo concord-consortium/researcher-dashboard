@@ -19,8 +19,7 @@ const firestoreImports = (source: string) =>
   [...source.matchAll(/import\s*\{([^}]*)\}\s*from\s*["']firebase\/firestore(?:\/lite)?["']/g)]
     .flatMap((m) => m[1].split(",").map((name) => name.trim().replace(/^type\s+/, "").split(/\s+as\s+/)[0]));
 
-// The page reads the dashboard tree and never writes it, and holds only the researcher token the
-// portal mints with `researcher=true`, never one carrying the runner claim.
+// The page reads the dashboard tree and never writes it.
 describe("the app's Firestore access", () => {
   it("reads the sources it means to", () => {
     expect(sources.has("shell/firebase.ts")).toBe(true);
@@ -35,11 +34,5 @@ describe("the app's Firestore access", () => {
         for (const name of WRITES) expect(source, path).not.toMatch(new RegExp(`\\b${name}\\b`));
       }
     }
-  });
-
-  it("asks for a Firebase token only as a researcher", () => {
-    const callers = [...sources].filter(([, source]) => source.includes("jwt/firebase"));
-    expect(callers.length).toBeGreaterThan(0);
-    for (const [path, source] of callers) expect(source, path).toContain('researcher: "true"');
   });
 });
