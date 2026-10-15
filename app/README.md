@@ -1,7 +1,9 @@
 # Researcher Dashboard app
 
 The page a researcher lands on from the "Researcher Dashboard" link on a project's Research
-Classes page: the class, and the packages that apply to it.
+Classes page: the class, the packages that apply to it, and the researcher's own runs of them.
+A researcher runs a package from its row, follows it through the queue to its result, and opens
+the result the package wrote.
 
 ```sh
 npm ci
@@ -34,7 +36,7 @@ The local rigse needs:
 - `PORTAL_SIGNING_KEY`, `PORTAL_SIGNING_KEY_ID` and `REPORT_SERVER_URL`, or the authorize request
   comes back with `error=server_error`;
 - `RESEARCHER_DASHBOARD_FUNCTION_URL` naming a report-service functions deployment, or the
-  profile refresh answers 503 and no class gets a profile to list from;
+  profile refresh and the run request answer 503 and no class gets a profile to list from;
 - a `Client` with app id `researcher-dashboard`, type `public`, scopes
   `class:researcher-read class:researcher-run packages:read`, and the dev server's
   `http://localhost:5173/index.html` among its redirect URIs, which the portal matches exactly;
@@ -42,7 +44,7 @@ The local rigse needs:
   client is that `Client`.
 
 The local report-server needs `http://localhost:5173` in `PACKAGES_CORS_ORIGINS`, or it
-refuses the package list's bearer from the dev server.
+refuses the bearer on the package list and resolve calls from the dev server.
 
 Then name the local portal for the dev server. A production build never reads these:
 
@@ -78,9 +80,23 @@ emulator that is fine, because an emulator accepts any signature.
 
 | | |
 |---|---|
-| the portal | the class's scope, a Firebase token for the class, and a profile refresh when the profile is missing or stale |
-| report-server | the package list, each package marked as applying to the class or not |
-| the portal's report-service Firebase project | the class's authored URL profile document, read and never written |
+| the portal | the class's scope, a Firebase token for the class, a profile refresh when the profile is missing or stale, and a run request for one package when Run or Resume is pressed |
+| report-server | the package list, each package marked as applying to the class or not, and a resolve of a package a result names that the list no longer returns |
+| the portal's report-service Firebase project | the class's authored URL profile document; the researcher's session (`runners/<platform user id>`); their scope document with its counts; and their results for the class, one per package |
+
+The app writes none of the Firebase documents. Every one is written by report-service's
+function, the runner or the watchdog, and the app only listens.
+
+## Content-Security-Policy
+
+The built `index.html` carries a Content-Security-Policy as its first `<head>` element, a
+`<meta http-equiv>` added by a build-only plugin in `vite.config.ts`. A package's result is
+markdown written by fetched code, and the policy bounds what the page can load and reach
+whatever that markdown says: images only from the page or `data:`, and connections only to
+the page, the allowlisted portals and their report-servers (from `src/shell/portals.ts`), and
+the Firebase hosts named in `src/shell/csp.ts`. A portal added to the allowlist is added to
+the policy by the same build. The dev server serves no policy, since Vite's development
+preamble is an inline script.
 
 ## Deploy
 

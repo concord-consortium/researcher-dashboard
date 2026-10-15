@@ -7,13 +7,16 @@ export const SCOPE: Scope = {
   assignments: [{ offering_id: 9, runnable_id: 8, name: "Wildfire", url: "https://ap.test/?activity=1", tool: "ActivityPlayer" }]
 };
 
+// A Firestore Timestamp, as the page reads it.
+export const stamp = (ms: number) => ({ toMillis: () => ms });
+
 let next = 1;
 export function row(over: Partial<PackageRow> & { title?: string }): PackageRow {
   const { title, ...rest } = over;
   const n = next++;
   return {
     catalog_id: n, identity: `users/200/p${n}`, name: `p${n}`, visibility: "private",
-    official: false, mine: false, project: null, applies: true,
+    official: false, mine: false, project: null, applies: true, runnable: true,
     current_version: { version: "1.0.0", title: title ?? `Package ${n}`, description: null },
     ...rest
   };

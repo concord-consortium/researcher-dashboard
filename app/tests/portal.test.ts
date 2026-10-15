@@ -52,7 +52,8 @@ describe("Api", () => {
 
   it("still fails when the body is not json", async () => {
     const broken = { ok: false, status: 502, json: async () => { throw new Error("not json"); } } as unknown as Response;
-    await expect(apiWith(broken).api.request("/x")).rejects.toEqual(new ApiError("/x failed", 502));
+    await expect(apiWith(broken).api.request("/x")).rejects.toEqual(new ApiError(null, 502, "/x"));
+    await expect(apiWith(broken).api.request("/x")).rejects.toMatchObject({ reason: null, message: "/x failed" });
   });
 });
 
@@ -72,6 +73,16 @@ describe("Portal", () => {
     expect(call(fetchImpl)[1]).toMatchObject({ method: "POST" });
     expect(call(fetchImpl)[1].body).toBeUndefined();
   });
+
+  it("runs one package at one version, and sends nothing else", async () => {
+    const { api, fetchImpl } = apiWith(respond({ queue: [], appended: [], vm: "launched" }, 202));
+    await new Portal(api).runPackage("projects/20/w", "1.0.0");
+    const [url, init] = call(fetchImpl);
+    expect(url).toBe("https://portal.test/api/v1/researcher_dashboard/run_package");
+    expect(init.method).toBe("POST");
+    expect(init.body).toBe('{"packages":[{"identity":"projects/20/w","version":"1.0.0"}]}');
+    expect(init.headers).toEqual({ "Content-Type": "application/json", Authorization: "Bearer at-1" });
+  });
 });
 
 describe("ReportServer", () => {
@@ -82,6 +93,15 @@ describe("ReportServer", () => {
     expect(call(fetchImpl)[1]).toMatchObject({ method: "POST" });
     expect(JSON.parse(call(fetchImpl)[1].body as string)).toEqual({ scope_urls: ["a", "b"] });
     expect((call(fetchImpl)[1].headers as Record<string, string>)["Content-Type"]).toBe("application/json");
+  });
+
+  it("resolves one version of a package by its identity", async () => {
+    const { api, fetchImpl } = apiWith(respond({ archived: true }), undefined, "https://rs.test");
+    expect(await new ReportServer(api).resolve("projects/20/w", "1.0.0")).toEqual({ archived: true });
+    const [url, init] = call(fetchImpl);
+    expect(url).toBe("https://rs.test/api/v1/packages/resolve?identity=projects%2F20%2Fw&version=1.0.0");
+    expect(init.method).toBeUndefined();
+    expect(init.headers).toEqual({ Authorization: "Bearer at-1" });
   });
 });
 

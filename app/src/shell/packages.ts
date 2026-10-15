@@ -22,6 +22,17 @@ export function scopeUrls(profile: Profile): string[] {
   return [...(profile.assignment_urls ?? []), ...(profile.interactive_urls ?? [])];
 }
 
+// The result document's id: the identity with "/" as "__", which the function and the runner
+// derive the same way, so the page can find a result without being told its path.
+export function packageKey(identity: string): string {
+  return identity.replaceAll("/", "__");
+}
+
+// The inverse of packageKey: an identity never contains "_", so every "__" in a key was a "/".
+export function identityOfKey(key: string): string {
+  return key.replaceAll("__", "/");
+}
+
 export interface Group {
   key: string;
   heading: string;

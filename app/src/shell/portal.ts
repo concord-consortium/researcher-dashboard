@@ -35,11 +35,19 @@ export interface PackageRow {
   project: { id: number; name: string | null } | null;
   current_version: { version: string; title: string | null; description: string | null };
   applies: boolean;
+  runnable: boolean;
 }
 
+export interface Resolved { archived: boolean }
+
+// `reason` is the server's own message, and null when its answer carried none (a proxy's HTML
+// error page, say), which the page then words for itself.
 export class ApiError extends Error {
-  constructor(message: string, readonly status: number) {
-    super(message);
+  readonly reason: string | null;
+
+  constructor(reason: string | null, readonly status: number, path = "") {
+    super(reason ?? `${path} failed`);
+    this.reason = reason;
   }
 }
 
@@ -80,8 +88,8 @@ export class Api {
     const body = await response.json().catch(() => null);
     if (!response.ok) {
       // The server's own message says which of several refusals this is.
-      const message = (body && (body.message ?? body.error)) || `${path} failed`;
-      throw new ApiError(String(message), response.status);
+      const message = body && (body.message ?? body.error);
+      throw new ApiError(message ? String(message) : null, response.status, path);
     }
     return body as T;
   }
@@ -105,6 +113,14 @@ export class Portal {
     const body = await this.api.request<{ token: string }>(`/api/v1/jwt/firebase?${query}`);
     return body.token;
   }
+
+  runPackage(identity: string, version: string): Promise<unknown> {
+    return this.api.request("/api/v1/researcher_dashboard/run_package", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ packages: [{ identity, version }] })
+    });
+  }
 }
 
 export class ReportServer {
@@ -117,5 +133,10 @@ export class ReportServer {
       body: JSON.stringify({ scope_urls: scopeUrls })
     });
     return body.packages;
+  }
+
+  resolve(identity: string, version: string): Promise<Resolved> {
+    const query = new URLSearchParams({ identity, version });
+    return this.api.request<Resolved>(`/api/v1/packages/resolve?${query}`);
   }
 }
