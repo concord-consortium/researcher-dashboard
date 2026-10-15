@@ -81,7 +81,7 @@ aws cloudformation execute-change-set --stack-name "$STACK" --change-set-name "g
 aws cloudformation wait stack-update-complete --stack-name "$STACK"
 ```
 
-A `MicrovmImage` change starts an image build. VMs already running keep their version: the function leaves a running VM alone whatever its image, and resumes a suspended one, except that at Functions 1.9.0 or later it replaces a suspended VM on an older version unless it was suspended partway through a run (`ensure-vm.ts`), so a VM picks up a new image only once it is terminated and the next run request launches another.
+A `MicrovmImage` change starts an image build. VMs already running keep their version, so a VM picks up a new image only once it is terminated and the next run request launches another. The function leaves a running VM alone whatever its image, and resumes a suspended one (`ensure-vm.ts`). At Functions 1.9.0 or later it instead replaces a suspended VM on an older version, unless that VM was suspended partway through a run.
 
 ## Releasing the runner
 
@@ -108,7 +108,7 @@ aws cloudformation create-change-set --stack-name "$STACK" --change-set-name "gi
   --parameters $PARAMS ParameterKey=CodeArtifactKey,ParameterValue="$KEY"
 ```
 
-Review, diff and execute the change set as in "Updating a stack"; the update builds the new image. With report-service's function at Functions 1.9.0 or later (REPORT-170), nothing else is needed: the function replaces a suspended VM on an older version at its researcher's next run request, and the watchdog terminates one that has work queued behind its suspend, so the researcher's next request launches on the new version. A VM already on the new version is left alone, and so is a running one on an older version, which may be in the middle of a researcher's run: it suspends once it is idle and is replaced at the next wake. A VM suspended partway through a run is resumed so the run can finish. The loop below is optional cleanup for suspended old VMs whose researchers do not come back before the VMs' 8-hour life ends, and is required only below Functions 1.9.0. Both loops in this section run with your own credentials, since the launcher cannot list VMs, and need the image and its active version, read once the update is complete:
+Review, diff and execute the change set as in "Updating a stack"; the update builds the new image. With report-service's function at Functions 1.9.0 or later (REPORT-170), nothing else is needed: the function replaces a suspended VM on an older version at its researcher's next run request, and the watchdog terminates one that has work queued behind its suspend; that work waits for the researcher's next request, which launches on the new version. A VM already on the new version is left alone, and so is a running one on an older version, which may be in the middle of a researcher's run: it suspends once it is idle and is replaced at the next wake. A VM suspended partway through a run is resumed so the run can finish. The loop below is optional cleanup for suspended old VMs whose researchers do not come back before the VMs' 8-hour life ends, and is required only below Functions 1.9.0. Unlike the function, it also terminates an old VM suspended partway through a run, whose run then fails, so skip it if you do not want to fail those runs. Both loops in this section run with your own credentials, since the launcher cannot list VMs, and need the image and its active version, read once the update is complete:
 
 ```sh
 IMAGE=$(aws cloudformation describe-stacks --stack-name "$STACK" \
@@ -117,7 +117,7 @@ ACTIVE=$(aws lambda-microvms get-microvm-image --image-identifier "$IMAGE" \
   --query latestActiveImageVersion --output text)
 ```
 
-In the optional loop, each VM's state is read again just before it is terminated, since the function may have resumed it after the listing. Unlike the function, it also terminates a VM suspended partway through a run, whose run then fails.
+In the optional loop, each VM's state is read again just before it is terminated, since the function may have resumed it after the listing. Below Functions 1.9.0, the state check only narrows the race: a run request can resume the VM just before the loop terminates it, and that request's work then fails.
 
 ```sh
 for VM in $(aws lambda-microvms list-microvms --image-identifier "$IMAGE" \
