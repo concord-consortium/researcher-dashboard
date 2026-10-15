@@ -125,18 +125,19 @@ async function reachable({ uid, netns, exec, url, acceptRefusal = false }) {
   }
 }
 
-// Kills every process the package uid owns. `execFile` returns when the entrypoint exits,
-// and anything it started in the background would otherwise run on into the next
-// package's turn as the same uid, able to write that package's output. kill(-1) from a
-// process with no capabilities reaches only its own uid, never the runner, which is root.
-export async function killPackageProcesses({ uid, exec = run, attempts = 5 }) {
+// Sends `signal` to every process the package uid owns, again until pgrep finds none of
+// them in `runstates`, since a process forked while the signal was being sent can miss it.
+// kill(-1) from a process with no capabilities reaches only its own uid, never the runner,
+// which is root.
+async function signalUntilNone({ uid, signal, runstates, verb, exec, attempts, pauseMs, sleep }) {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (attempt > 0 && pauseMs > 0) await sleep(pauseMs);
     // Exits non-zero when nothing was left to signal, which is the outcome wanted.
-    await exec(SETPRIV, [...dropTo(uid), KILL, "-KILL", "-1"], { timeout: 5_000 })
+    await exec(SETPRIV, [...dropTo(uid), KILL, signal, "-1"], { timeout: 5_000 })
       .catch(() => {});
     let left;
     try {
-      left = String((await exec(PGREP, ["-u", String(uid), "--runstates", LIVE_STATES], { timeout: 5_000 })).stdout ?? "").trim();
+      left = String((await exec(PGREP, ["-u", String(uid), "--runstates", runstates], { timeout: 5_000 })).stdout ?? "").trim();
     } catch (err) {
       // pgrep exits 1 when it finds nothing; any other failure proves nothing.
       if (err.code !== 1) throw new Error(`could not check for the package's processes: ${err.message}`);
@@ -144,26 +145,23 @@ export async function killPackageProcesses({ uid, exec = run, attempts = 5 }) {
     }
     if (left === "") return;
   }
-  throw new Error(`the package left processes running as uid ${uid} that ${attempts} kills did not stop`);
+  throw new Error(`the package left processes running as uid ${uid} that ${attempts} ${verb} did not stop`);
+}
+
+const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Kills every process the package uid owns. `execFile` returns when the entrypoint exits,
+// and anything it started in the background would otherwise run on into the next
+// package's turn as the same uid, able to write that package's output.
+export async function killPackageProcesses({ uid, exec = run, attempts = 5 }) {
+  await signalUntilNone({ uid, signal: "-KILL", runstates: LIVE_STATES, verb: "kills", exec, attempts, pauseMs: 0 });
 }
 
 // Stops every process the package uid owns, so nothing it writes can land between
-// /suspend's flush and its verify. Repeated until pgrep finds none of the uid's processes
-// runnable, since a process forked while the signal was being sent can miss it.
-export async function freezePackageProcesses({ uid, exec = run, attempts = 5 }) {
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
-    await exec(SETPRIV, [...dropTo(uid), KILL, "-STOP", "-1"], { timeout: 5_000 })
-      .catch(() => {});
-    let left;
-    try {
-      left = String((await exec(PGREP, ["-u", String(uid), "--runstates", "R,S,D"], { timeout: 5_000 })).stdout ?? "").trim();
-    } catch (err) {
-      if (err.code !== 1) throw new Error(`could not check for the package's processes: ${err.message}`);
-      left = "";
-    }
-    if (left === "") return;
-  }
-  throw new Error(`the package left processes running as uid ${uid} that ${attempts} stops did not stop`);
+// /suspend's flush and its verify. A process inside a write stops only once the write
+// returns, so the attempts are spaced out.
+export async function freezePackageProcesses({ uid, exec = run, attempts = 5, pauseMs = 200, sleep = pause }) {
+  await signalUntilNone({ uid, signal: "-STOP", runstates: "R,S,D", verb: "stops", exec, attempts, pauseMs, sleep });
 }
 
 // Continues every process the package uid owns. Exits non-zero when there was nothing to

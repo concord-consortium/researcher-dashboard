@@ -1763,7 +1763,7 @@ test("/suspend mid-run on an unverified flush names the outstanding run on its f
   await built.runner.loop;
 });
 
-test("a claim that lands while /suspend runs still runs its package", async () => {
+test("a claim that lands while /suspend runs starts its package only after the resume", async () => {
   const g = gate((p, fields) => p.includes("/results/") && fields.status === "running");
   const built = build({ wrapStore: g.wrap });
   built.fn.queue({ identity: SLOW });
@@ -1775,13 +1775,53 @@ test("a claim that lands while /suspend runs still runs its package", async () =
   const suspending = built.runner.suspend();
   await until(() => flushed, "the suspend's flush");
   g.held[0].release();
-  await until(() => built.record.prepared.length, "the package's preparation");
+  await until(() => runnerDoc(built.docs).current_package?.package_key === SLOW_KEY, "the claim's runner-document write");
+  await settle(20);
+  assert.equal(built.record.prepared.length, 0, "nothing started during the flush");
   built.runner.syncer.flushAndVerify = flush;
   flushed({ ok: true });
   await suspending;
+  await settle(20);
+  assert.equal(built.record.prepared.length, 0, "nothing started while suspended");
   built.runner.resume();
   await built.runner.loop;
+  assert.equal(built.record.prepared.length, 1);
   assert.equal(result(built.docs, SLOW).status, "done");
+});
+
+test("a claim held for the resume starts nothing once a refused suspend ends the VM", async () => {
+  const g = gate((p, fields) => p.includes("/results/") && fields.status === "running");
+  const built = build({ wrapStore: g.wrap });
+  built.fn.queue({ identity: SLOW });
+  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+  await until(() => g.held.length, "the claim's write");
+  let flushed;
+  built.runner.syncer.flushAndVerify = () => new Promise((r) => { flushed = r; });
+  const suspending = built.runner.suspend();
+  await until(() => flushed, "the suspend's flush");
+  g.held[0].release();
+  await settle(20);
+  flushed({ ok: false, reason: "PutObject denied" });
+  await assert.rejects(suspending, /PutObject denied/);
+  let ended = false;
+  built.runner.loop.then(() => { ended = true; });
+  await until(() => ended, "the held claim's end");
+  assert.equal(built.record.prepared.length, 0);
+  assert.equal(result(built.docs, SLOW).error, LOST_RUN_REASON);
+});
+
+test("a /resume after a refused /suspend claims nothing", async () => {
+  const built = build();
+  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+  await built.runner.loop;
+  built.runner.syncer.flushAndVerify = async () => ({ ok: false, reason: "PutObject denied" });
+  await assert.rejects(built.runner.suspend(), /PutObject denied/);
+  const before = built.fn.routes().length;
+  built.fn.queue({ identity: SLOW });
+  built.runner.resume();
+  await settle(50);
+  assert.deepEqual(built.fn.routes().slice(before), []);
+  assert.equal(result(built.docs, SLOW).status, "queued");
 });
 
 // A resume while the old loop is still signing in has started a new loop, whose stores
@@ -1914,7 +1954,8 @@ test("/suspend mid-run stops the package's processes before its flush, and /resu
   await built.runner.suspend();
   assert.deepEqual(built.record.signals, [`freeze:${built.env.packageUid}`, "flush:suspend"]);
   built.runner.resume();
-  assert.deepEqual(built.record.signals.slice(2), [`thaw:${built.env.packageUid}`], "continued from the hook, without waiting for the loop");
+  await settle(2);
+  assert.deepEqual(built.record.signals.slice(2), [`thaw:${built.env.packageUid}`], "continued without waiting for the loop");
   finish();
   await built.runner.loop;
   assert.equal(result(built.docs, SLOW).status, "done");
@@ -1983,6 +2024,30 @@ test("a resume with no /suspend before it leaves the bound armed once", async (t
   built.runner.terminate().catch(() => {});
 });
 
+test("a /resume continues the package only once a stop that outlasted the hook has ended", async (t) => {
+  let stopped;
+  const { built, finish } = await holding({ stepOverrides: {
+    freezePackageProcesses: () => new Promise((r) => { stopped = () => { built.record.signals.push("stopped"); r(); }; })
+  } });
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    const suspending = built.runner.suspend();
+    await settle(10);
+    t.mock.timers.tick(FREEZE_TIMEOUT_MS + 1000);
+    await suspending;
+    built.runner.resume();
+    await settle(10);
+    assert.deepEqual(built.record.signals, [], "no continue while the stop is under way");
+    stopped();
+    await settle(10);
+    assert.deepEqual(built.record.signals, ["stopped", `thaw:${built.env.packageUid}`]);
+  } finally {
+    t.mock.timers.reset();
+    finish();
+  }
+  await built.runner.loop;
+});
+
 test("a claim that lands while /suspend runs has its bound armed by the resume", async (t) => {
   const g = gate((p, fields) => p.includes("/results/") && fields.status === "running");
   let signal;
@@ -1999,12 +2064,16 @@ test("a claim that lands while /suspend runs has its bound armed by the resume",
   t.mock.timers.enable({ apis: ["setTimeout"] });
   try {
     g.held[0].release();
-    await until(() => signal, "the package step");
+    await settle(20);
     t.mock.timers.tick(5000);
     await settle(10);
-    assert.equal(signal.aborted, false, "not armed while suspended");
+    assert.equal(signal, undefined, "no package step while suspended");
     built.runner.resume();
-    t.mock.timers.tick(1000);
+    await until(() => signal, "the package step");
+    t.mock.timers.tick(999);
+    await settle(10);
+    assert.equal(signal.aborted, false, "armed at the resume, not before");
+    t.mock.timers.tick(1);
     await settle(10);
     assert.equal(signal.aborted, true);
   } finally {

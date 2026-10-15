@@ -101,8 +101,14 @@ export class Runner {
   #ready = false;
   #suspendSeen = false;
   #terminating = false;
-  // Set while /suspend has stopped the package's processes, until /resume continues them.
+  // Set while /suspend has stopped the package's processes, until /resume continues them;
+  // the stop itself, which can outlast the hook's wait for it.
   #frozen = false;
+  #freezing = null;
+  // Settled by the next /resume, or by the VM ending: a claim that lands while /suspend
+  // runs waits on it before its package starts.
+  #awake = null;
+  #wake = null;
   // A hook's last runner-document write is made only while the document still records
   // this VM: a VM launched since owns it now.
   #ownDocument = (doc) => doc?.microvm_id === this.microvmId;
@@ -298,7 +304,7 @@ export class Runner {
   }
 
   #current(epoch) {
-    return epoch === this.#epoch && !this.#vm.isTerminal;
+    return epoch === this.#epoch && !this.#vm.isTerminal && !this.#terminating;
   }
 
   // Asks for work, runs it one package at a time, asking again after each, and once
@@ -333,9 +339,7 @@ export class Runner {
 
       if (!request) return;
 
-      // A run the suspend held is running again, so the document says so and names it,
-      // rather than keeping /suspend's `suspended` until the run ends. Not once the run's
-      // final write is under way, since that settles before anything else is written.
+      // A run held across the suspend reads running again, unless its final write is under way.
       if (this.#run && !this.#run.finishing && this.#vm.state === STATES.READY) {
         this.#vm.to(STATES.RUNNING);
         await this.status.writeFromHook("work", { state: STATES.RUNNING, ...this.#runningPackage() });
@@ -655,8 +659,7 @@ export class Runner {
       // The VM is ending: the hook has written this run failed and the runner document
       // terminated, which may by now name a newer VM, so nothing more is written or run.
       if (this.#terminating) return true;
-      // A claim that lands while /suspend runs still runs its package; the hook's state
-      // stands until the resume.
+      // A claim that lands while /suspend runs leaves the hook's state standing until the resume.
       if (this.#vm.state !== STATES.RUNNING && canTransition(this.#vm.state, STATES.RUNNING)) this.#vm.to(STATES.RUNNING);
       // What is still queued: not the claimed entry, nor one this plan failed.
       const queue = request.packages
@@ -673,6 +676,12 @@ export class Runner {
       });
       // A /terminate that arrived during that write leaves the run to the hook, unstarted.
       if (this.#terminating) return true;
+      // A package started while /suspend flushes could fail its verify, so it starts after
+      // the resume.
+      if (this.#awake) {
+        await this.#awake;
+        if (this.#terminating) return true;
+      }
       this.#run.heartbeat = this.#startHeartbeat(docs, docId);
       const heartbeat = this.#run.heartbeat;
 
@@ -690,8 +699,7 @@ export class Runner {
         }, this.now);
       });
       this.#run.bound = bound;
-      // A claim that lands while /suspend runs is armed by the resume.
-      if (this.#vm.state !== STATES.SUSPENDING && this.#vm.state !== STATES.SUSPENDED) bound.start();
+      bound.start();
       const running = this.#steps({ entry, docId, docs, scope, manifest, signal: abort.signal, cancelled: () => timedOut });
       try {
         const result = await Promise.race([running, timeout]).finally(() => { this.#run.finishing = true; });
@@ -802,14 +810,16 @@ export class Runner {
     this.#requireStarted();
     this.#suspendSeen = true;
     this.#vm.to(STATES.SUSPENDING);
+    this.#awake ??= new Promise((resolve) => { this.#wake = resolve; });
     this.#run?.bound?.pause();
     await this.status.writeFromHook("suspend", { state: STATES.SUSPENDING, ...this.#runningPackage() });
     // A package still writing would fail the verify, so it is stopped where it stands
     // until /resume. One that cannot be stopped is left to the verify.
     if (this.#run) {
       this.#frozen = true;
+      this.#freezing = this.steps.freezePackageProcesses({ uid: this.env.packageUid });
       try {
-        await bounded(this.steps.freezePackageProcesses({ uid: this.env.packageUid }), FREEZE_TIMEOUT_MS, "stopping the package");
+        await bounded(this.#freezing, FREEZE_TIMEOUT_MS, "stopping the package");
       } catch (err) {
         log.error("package.freeze_failed", { error: err.message });
       }
@@ -825,6 +835,7 @@ export class Runner {
       // hook does /terminate's work before it answers.
       this.#terminating = true;
       this.#epoch += 1;
+      this.#wakeClaims();
       await this.#failOutstandingRun("suspend");
       await this.#revokeToken("suspend");
       this.#vm.to(STATES.FAILED);
@@ -852,13 +863,18 @@ export class Runner {
     this.#suspendSeen = false;
     if (this.#frozen) {
       this.#frozen = false;
-      this.steps.thawPackageProcesses({ uid: this.env.packageUid })
+      // After the stop has ended, or a stop still under way would land after the continue.
+      const freezing = this.#freezing;
+      this.#freezing = null;
+      freezing.catch(() => {})
+        .then(() => this.steps.thawPackageProcesses({ uid: this.env.packageUid }))
         .catch((err) => log.error("package.thaw_failed", { error: err.message }));
     }
     this.storage?.markStale();
     this.syncer.stop();
     if (this.#vm.state === STATES.SUSPENDED) this.#vm.to(STATES.READY);
     this.#run?.bound?.start();
+    this.#wakeClaims();
     this.#startLoop({ afterResume: true });
     return { state: this.#vm.state };
   }
@@ -867,6 +883,7 @@ export class Runner {
     this.#requireStarted();
     this.#terminating = true;
     this.#epoch += 1;
+    this.#wakeClaims();
     // First, so it lands inside the hook's 60 seconds whatever the flush costs: a run
     // outstanding at termination was interrupted, whether or not the flush completes.
     await this.#failOutstandingRun("terminate");
@@ -885,6 +902,12 @@ export class Runner {
     this.#vm.to(STATES.TERMINATED);
     await this.status.writeFromHook("terminate", { state: STATES.TERMINATED, ...this.#runningPackage() }, { onlyIf: this.#ownDocument });
     return { state: this.#vm.state, ...result };
+  }
+
+  #wakeClaims() {
+    this.#wake?.();
+    this.#awake = null;
+    this.#wake = null;
   }
 
   async #failOutstandingRun(hook) {

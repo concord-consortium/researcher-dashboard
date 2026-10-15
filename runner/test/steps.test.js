@@ -165,9 +165,11 @@ test("a package that fails or times out still has its processes killed", async (
   });
 });
 
+const noPause = async () => {};
+
 test("a freeze stops every process of the package uid, again until none is runnable", async () => {
   const { exec, calls } = processExec({ left: ["4242", 1] });
-  await freezePackageProcesses({ uid: 1000, exec });
+  await freezePackageProcesses({ uid: 1000, exec, sleep: noPause });
   assert.match(calls[0], /^\/usr\/bin\/setpriv --reuid=1000 --regid=1000 .* \/usr\/bin\/kill -STOP -1$/);
   // A stopped process is in state T, so it is not counted.
   assert.equal(calls[1], "/usr/bin/pgrep -u 1000 --runstates R,S,D");
@@ -175,8 +177,16 @@ test("a freeze stops every process of the package uid, again until none is runna
 });
 
 test("a freeze that cannot stop the package, or cannot check, fails", async () => {
-  await assert.rejects(freezePackageProcesses({ uid: 1000, exec: processExec({ left: ["4242", "4242", "4242", "4242", "4242"] }).exec }), /5 stops did not stop/);
-  await assert.rejects(freezePackageProcesses({ uid: 1000, exec: processExec({ left: [Object.assign(new Error("spawn ENOENT"), { code: "ENOENT" })] }).exec }), /could not check/);
+  await assert.rejects(freezePackageProcesses({ uid: 1000, sleep: noPause, exec: processExec({ left: ["4242", "4242", "4242", "4242", "4242"] }).exec }), /5 stops did not stop/);
+  await assert.rejects(freezePackageProcesses({ uid: 1000, sleep: noPause, exec: processExec({ left: [Object.assign(new Error("spawn ENOENT"), { code: "ENOENT" })] }).exec }), /could not check/);
+});
+
+test("a freeze waits between its attempts, so a process inside a write can stop", async () => {
+  const events = [];
+  const { exec } = processExec({ left: ["4242", "4242", 1] });
+  const recording = (...args) => { if (args[0] === "/usr/bin/pgrep") events.push("check"); return exec(...args); };
+  await freezePackageProcesses({ uid: 1000, exec: recording, sleep: async (ms) => { events.push(`pause:${ms}`); } });
+  assert.deepEqual(events, ["check", "pause:200", "check", "pause:200", "check"]);
 });
 
 test("a thaw continues every process of the package uid, and nothing to continue is not a failure", async () => {
