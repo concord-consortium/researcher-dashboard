@@ -293,6 +293,22 @@ describe("ClassDashboard", () => {
     expect(s.fake.watchClass).toHaveBeenCalledTimes(1);
   });
 
+  it("reads a refused document as absent, so each row keeps its Run control", async () => {
+    const s = services();
+    await listed(s);
+    await s.runner({ state: "running", microvm_id: "vm-1", updated_at: stamp(1), current_package: { class_hash: SCOPE.class_hash, package_key: KEY } });
+    await s.results(new Map([[KEY, wildfire({ status: "running", microvm_id: "vm-1", updated_at: stamp(5) })]]));
+    await s.counts({ data: { answers: 9 } });
+    expect(runButton().getAttribute("aria-disabled")).toBe("true");
+    await s.refuseRuns("results");
+    expect(wildfireLine().querySelector("p")!.textContent).toBe("Not run.");
+    expect(runButton().getAttribute("aria-disabled")).toBeNull();
+    await s.refuseRuns("runner");
+    expect(screen.queryByText("Running Wildfire open responses.")).toBeNull();
+    await s.refuseCounts();
+    expect(screen.queryByText("Answers 9")).toBeNull();
+  });
+
   it("says which of the researcher's documents could not be read, and still lists the packages", async () => {
     const s = services();
     await mounted(s);

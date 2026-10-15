@@ -91,10 +91,20 @@ export function ClassDashboard({ services, onExpired }: {
       },
       counts: setCounts,
       results: setResults,
+      // A refused document is read as absent, so no row shows a state the page can no longer follow.
       refused: (which) => {
-        if (which === "profile") setProfileProblem(UNREACHABLE.firebase);
-        else if (which === "counts") setCountsProblem("Your counts could not be read.");
-        else setRunsProblem("Your runs could not be read.");
+        if (which === "profile") return setProfileProblem(UNREACHABLE.firebase);
+        if (which === "counts") {
+          setCounts(undefined);
+          return setCountsProblem("Your counts could not be read.");
+        }
+        if (which === "runner") {
+          setRunner(null);
+          setMark(null);
+        } else {
+          setResults(new Map());
+        }
+        setRunsProblem("Your runs could not be read.");
       }
     })
       .then((unsubscribe) => { if (canceled) unsubscribe(); else stop = unsubscribe; })
