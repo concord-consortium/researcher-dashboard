@@ -4,7 +4,7 @@
 **Requirements Spec**: [requirements.md](requirements.md)
 **Status**: **In Development**
 
-Written against RD-3 pass 2's implementation plan (`specs/RD-3-pass-2-run-and-result/implementation.md`, `97d0849`), whose code is implemented on 2026-10-15 and is this branch's base by then. Names below (`watchClass`, `ClassListeners`, `runs.ts`, `rowState`, `runOffer`, `requests`, `open`, `ResultView`, `PackageList`'s row) are that plan's. If RD-3 pass 2's implementation renamed any of them, follow the code. Every step is `app/` only: the runner writes no `inputs` (Doug, 2026-10-11).
+Written against RD-3 pass 2 as built (`d274bec`, PR #4): every name below (`watchClass`, `ClassListeners`, `runs.ts`'s `rowState`, `runOffer`, `RunRequest`, `latestFinished` and `millis`, `ClassDashboard`'s `run`, `requests`, `grouped` and `listShown`, `PackageList`'s `Row` and `FinishedBlock`, `ResultView`) is in that code. Every step is `app/` only: the runner writes no `inputs` (Doug, 2026-10-11).
 
 ## Implementation Plan
 
@@ -16,7 +16,7 @@ Written against RD-3 pass 2's implementation plan (`specs/RD-3-pass-2-run-and-re
 - `app/src/shell/firebase.ts`: `activityPath`
 - `app/src/shell/activity.ts` (new): the `Activity` type only, in this step
 - `app/src/shell/services.ts`: `ClassListeners.activity`, `"activity"` in `refused`'s union, the fifth listener
-- `app/src/pages/ClassDashboard.tsx`: `activity` and `activityProblem` state
+- `app/src/pages/ClassDashboard.tsx`: `activity` and `activityProblem` state, and an `"activity"` branch in `watchClass`'s `refused`
 - `app/tests/firebase.test.ts`, `app/tests/services.test.ts`, `app/tests/class-dashboard.test.tsx`
 
 **Estimated diff size**: ~90 lines
@@ -51,12 +51,14 @@ export interface ClassListeners {
 watchCollection<Activity>(db, activityPath(config.origin, scope.class_hash), on.activity, () => on.refused("activity"))
 ```
 
-`ClassDashboard`: `activity: Map<string, Activity> | undefined` (undefined until the first snapshot) and `activityProblem: string | null`; `refused("activity")` sets it to "Class activity could not be read." and leaves `activity` undefined, which the next steps read as "no data", so nothing is counted or re-run.
+`DashboardServices.watchClass`'s comment says "the four documents" and "stops all four"; both become five.
+
+`ClassDashboard`: `activity: Map<string, Activity> | undefined` (undefined until the first snapshot) and `activityProblem: string | null`. Its `refused` handler today sends every listener other than the profile and counts to "Your runs could not be read.", so the activity branch goes before that fall-through: `if (which === "activity") { setActivity(undefined); return setActivityProblem("Class activity could not be read."); }`. With `activity` undefined the next steps have no data, so nothing is counted or re-run.
 
 **Tests**:
 - `firebase.test.ts`: `activityPath` for the staging portal and a class hash.
 - `services.test.ts`: `watchCollection` is also called with the activity path; still one `jwt/firebase` call and one `signIn`; the returned function calls five stops (counting the stops fails if the fifth is not pushed).
-- `class-dashboard.test.tsx`: the fake's `watchClass` gains an `activity` pusher and `refuseActivity`; a refusal shows the line, and the other four listeners' output still renders.
+- `class-dashboard.test.tsx`: the fake's `watchClass` already captures the listeners as `on`, so tests push with `on.activity(...)` and refuse with `on.refused("activity")`; a refusal shows the line, "Your runs could not be read." does not appear (fails if the branch falls through), and the other four listeners' output still renders.
 - `no-writes.test.ts` is unchanged and passes.
 
 ---
@@ -76,22 +78,22 @@ watchCollection<Activity>(db, activityPath(config.origin, scope.class_hash), on.
 // activity.ts
 import type { PackageRow } from "./portal";
 import { packageKey } from "./packages";
-import { latestFinished, rowState, runOffer, type Result, type RunRequest, type Runner, type Stamp } from "./runs";
+import {
+  latestFinished, millis, rowState, runOffer,
+  type Result, type RunRequest, type Runner, type SessionMark, type Stamp
+} from "./runs";
 
 export const ACTIVE_WINDOW_MINUTES = 5;
 const WINDOW_MS = ACTIVE_WINDOW_MINUTES * 60_000;
 
 export const windowLabel = (minutes: number) => `in the last ${minutes} minutes`;
 
-const millis = (a: Activity) =>
-  typeof a.lastActivityAt?.toMillis === "function" ? a.lastActivityAt.toMillis() : null;
-
 // Learners who saved work within the window of the page's clock. A time ahead of that clock
 // is a laptop running behind the server, and still counts.
 export function activeCount(docs: Map<string, Activity>, now: number, windowMs = WINDOW_MS): number {
   let n = 0;
   for (const doc of docs.values()) {
-    const at = millis(doc);
+    const at = millis(doc.lastActivityAt);
     if (at !== null && at >= now - windowMs) n += 1;
   }
   return n;
@@ -101,7 +103,7 @@ export function activeCount(docs: Map<string, Activity>, now: number, windowMs =
 export function nextChangeIn(docs: Map<string, Activity>, now: number, windowMs = WINDOW_MS): number | null {
   let soonest: number | null = null;
   for (const doc of docs.values()) {
-    const at = millis(doc);
+    const at = millis(doc.lastActivityAt);
     if (at === null || at < now - windowMs) continue;
     const leaves = Math.max(at, now) + windowMs - now;
     soonest = soonest === null ? leaves : Math.min(soonest, leaves);
@@ -112,7 +114,7 @@ export function nextChangeIn(docs: Map<string, Activity>, now: number, windowMs 
 export function newestActivity(docs: Map<string, Activity>): number | null {
   let newest: number | null = null;
   for (const doc of docs.values()) {
-    const at = millis(doc);
+    const at = millis(doc.lastActivityAt);
     if (at !== null && (newest === null || at > newest)) newest = at;
   }
   return newest;
@@ -121,33 +123,33 @@ export function newestActivity(docs: Map<string, Activity>): number | null {
 // A finished result whose run began reading the class before some learner's last save. Both
 // times are the server's.
 export function isBehind(result: Result | undefined, newest: number | null): boolean {
-  const started = result?.started_at?.toMillis() ?? null;
+  const started = millis(result?.started_at);
   return result?.status === "done" && started !== null && newest !== null && newest > started;
 }
 
 // The listed rows the page would re-run now, by package key (R7), with the result's updated_at,
 // which is what the hook requests once per.
-export function behindRows({ listed, results, runner, classHash, newest, requests }: {
-  listed: PackageRow[]; results: Map<string, Result>; runner: Runner | null; classHash: string;
-  newest: number | null; requests: Map<string, RunRequest>;
+export function behindRows({ listed, results, runner, mark, classHash, newest, requests }: {
+  listed: PackageRow[]; results: Map<string, Result>; runner: Runner | null; mark: SessionMark | null;
+  classHash: string; newest: number | null; requests: Map<string, RunRequest>;
 }): Map<string, { row: PackageRow; at: number | null }> {
   const behind = new Map<string, { row: PackageRow; at: number | null }>();
   for (const row of listed) {
     const key = packageKey(row.identity);
     const result = results.get(key);
     if (held(requests.get(key), result) || !isBehind(result, newest)) continue;
-    if (!runOffer(row.runnable, rowState(result, runner, classHash, key)).enabled) continue;
-    behind.set(key, { row, at: result?.updated_at?.toMillis() ?? null });
+    if (!runOffer(row.runnable, rowState(result, runner, mark, classHash, key)).enabled) continue;
+    behind.set(key, { row, at: millis(result?.updated_at) });
   }
   return behind;
 }
 
-// A request in flight, or a refusal the row still shows: RD-3 pass 2 keeps a refusal's entry in
-// `requests` and shows it only while the result's updated_at is still the one it was made against.
+// A request in flight, or a refusal or Resume the row still shows: `Row` shows each only while the
+// result's updated_at is still the one it was made against.
 function held(request: RunRequest | undefined, result: Result | undefined): boolean {
   if (!request) return false;
   if ("pending" in request) return true;
-  return request.at === (result?.updated_at?.toMillis() ?? null);
+  return request.at === millis(result?.updated_at);
 }
 
 // R12: the latest finished result is older than some learner's save, and nothing is about to
@@ -155,12 +157,12 @@ function held(request: RunRequest | undefined, result: Result | undefined): bool
 export function outOfDate(key: string, result: Result | undefined, newest: number | null,
   behind: Map<string, unknown>): boolean {
   if (!result || result.status === "queued" || result.status === "running" || behind.has(key)) return false;
-  const started = latestFinished(result)?.started_at?.toMillis() ?? null;
+  const started = millis(latestFinished(result)?.started_at);
   return started !== null && newest !== null && newest > started;
 }
 ```
 
-`RunRequest` moves from `PackageList.tsx` to `runs.ts` (exported, used by both), since a shell module cannot import a component's type. `listed` is the rows in `groupPackages`'s groups, the set RD-3 pass 2 builds for R21, not `rows`. `latestFinished` is RD-3 pass 2's helper (the result itself when `done`, otherwise REPORT-143's `previous`); this pass uses it and does not define it.
+`listed` is the rows in `groupPackages`' groups, which `ClassDashboard` already builds as `grouped` for R21, not `rows`. `latestFinished`, `millis` and `RunRequest` are RD-3 pass 2's, in `runs.ts`; this pass uses them and defines none of them. `millis` returns null for an absent stamp, so a document without `lastActivityAt` is not counted (R5).
 
 ```ts
 // rerun.ts
@@ -189,7 +191,7 @@ export function useAutoRerun<T>(behind: Map<string, { row: T; at: number | null 
 - `nextChangeIn`: the earliest counted learner's exit; a future time measured from now; null when none is counted.
 - `newestActivity`: the maximum, not the last in the map (a fixture whose last entry is not the newest), and null for an empty map.
 - `isBehind`: true for `done` with activity after `started_at`; false for activity equal to it, for `started_at` absent, for each other status, for no activity.
-- `behindRows`: the one behind row; each exclusion alone (a pending request, a refusal whose `at` equals the result's `updated_at`, `runnable: false`, a stuck row, a row not in `listed`); and a refusal whose `at` is an older `updated_at` does not exclude the row (fails if `held` is reduced to `requests.has`); `at` is the result's `updated_at`.
+- `behindRows`: the one behind row; each exclusion alone (a pending request, a refusal whose `at` equals the result's `updated_at`, `runnable: false`, a stuck row given a `mark` and a runner on another VM, a row not in `listed`); and a refusal whose `at` is an older `updated_at` does not exclude the row (fails if `held` is reduced to `requests.has`); `at` is the result's `updated_at`.
 - `outOfDate`: true for a `failed` result whose `previous.started_at` is older than the newest save; false for a `queued` or `running` result, for a key in `behind`, for no activity after `started_at`, and for no finished run at all.
 
 **Tests** (`rerun.test.tsx`, a probe component, no timers): one request for a behind item on the first render; none for a re-render with a new map holding the same `at` (fails without the `asked` check); one more when the item comes back with a new `at`; none while `stopped`. These were run in a throwaway copy of the app (Open Questions).
@@ -202,7 +204,7 @@ export function useAutoRerun<T>(behind: Map<string, { row: T; at: number | null 
 
 **Files affected**:
 - `app/src/components/ClassActivity.tsx` (new)
-- `app/src/pages/ClassDashboard.tsx`: the section between the header and Packages
+- `app/src/pages/ClassDashboard.tsx`: the section directly after the class header, before Assignments
 - `app/src/pages/Info.tsx`: "What it can show" gains the class's recent activity
 - `app/README.md`: the activity collection in "What it reads"; what the count counts; when a package re-runs on its own
 - `app/src/styles.css`
@@ -268,33 +270,35 @@ The effect depends on `wait` and `at`, both recomputed each render, so each tick
 const [stopped, setStopped] = useState(false);
 const newest = activity ? newestActivity(activity) : null;
 const behind = useMemo(
-  () => listed && !stopped ? behindRows({ listed, results, runner, classHash: scope.class_hash, newest, requests }) : new Map(),
-  [listed, stopped, results, runner, scope, newest, requests]
+  () => listShown && scope && !stopped
+    ? behindRows({ listed: grouped, results, runner, mark, classHash: scope.class_hash, newest, requests })
+    : new Map<string, { row: PackageRow; at: number | null }>(),
+  [listShown, stopped, grouped, results, runner, mark, scope, newest, requests]
 );
-const auto = useCallback((_key: string, row: PackageRow) => { void run(row, { auto: true }); }, [run]);
-useAutoRerun(behind, stopped, auto);
+useAutoRerun(behind, stopped, (_key, row) => { void run(row, false, true); });
 ```
 
-`listed` is the array of rows in `groupPackages`'s groups (RD-3 pass 2 builds it as a set of identities for R21; this step keeps the rows too), `undefined` while the list is loading or failed, so nothing is re-run before the page knows what is listed. `run` becomes a `useCallback` over `services`, `results` and `onExpired`, gaining one option:
+The memo sits with `grouped` and `listedTitles`, after `run` and before the early returns, and guards on `scope` as `grouped` does. `grouped` is empty while the list is loading, and `listShown` is false while the list or the profile failed, so nothing is re-run before the page knows what is listed. `results` is RD-3 pass 2's masked map, empty while a runs listener is refused, so a refused runner or results listener re-runs nothing. `run` keeps its `(row, resume)` signature for `PackageList` and gains a third parameter; an automatic run is never a Resume, since a behind result is `done`:
 
 ```ts
-async function run(row: PackageRow, { auto = false } = {}) {
+async function run(row: PackageRow, resume: boolean, auto = false) {
   // ...RD-3 pass 2's body, with its catch becoming:
   } catch (error) {
     // An automatic request never re-authorizes: that navigates away under a researcher who pressed nothing.
     if (auto && error instanceof SessionExpired) {
-      setRequests((r) => { const next = new Map(r); next.delete(key); return next; });
+      forget(key);
       setStopped(true);
       return;
     }
+    const at = latestResults.current.get(key)?.updated_at?.toMillis() ?? null;
     refused(error, (message) => setRequests((r) => new Map(r).set(key, { message, at })), "portal");
   }
 }
 ```
 
-`Api.request` throws `SessionExpired` before sending when the token is within its margin, so a stopped page sent nothing. `stopped` is never cleared within the page's life; Run re-authorizes, which reloads the page. The hook's effect re-runs whenever `auto` or `behind` is a new value, which is every snapshot; the `asked` map is what makes that harmless.
+The automatic branch comes before `refused`, which would otherwise show the young-token info page or call `onExpired`, and it applies to a young token too (R10). `Api.request` throws `SessionExpired` before sending when the token is within its margin, and after a 401; either way nothing ran. `stopped` is never cleared within the page's life; Run re-authorizes, which reloads the page. The hook's effect re-runs on every render, since `behind` follows each snapshot and the request callback is a new function each time; the `asked` map is what makes that harmless, so neither needs memoizing for it.
 
-`PackageList` receives `newest` and `behind` and, for a row where `outOfDate(key, result, newest, behind)` holds, adds "Students have saved work since this result." under the row's latest finished result (R12). `ResultView` renders "Read the class's data from <formatTime(started_at)>" beside "Finished", from the `Finished` it is given (RD-3 pass 2 passes `latestFinished(results.get(open.key))`), and renders nothing for it when that run has no `started_at`.
+`PackageList` receives `newest` and `behind` in `ListProps`, which `Rows` and `GroupSection` pass on to `Row` through their rest props. `Row` adds `<p className="notice">Students have saved work since this result.</p>` after its `FinishedBlock` when `outOfDate(key, result, newest, behind)` holds (R12). It is not a `FinishedBlock` child, since those render inside its "Finished" line, and not in the row's live region, so a save does not announce on every row. Rows under "Packages no longer listed" (`Unlisted`) are never re-run and get no line: they have no Run to press. `ResultView` appends " · Read the class's data from <formatTime(started_at)>" to its `.when` line ("Version … · Finished …"), from the `Finished` it is given (`ClassDashboard` passes `latestFinished(received.get(open.key))`), and appends nothing when that run has no `started_at`.
 
 **Tests** (`class-dashboard.test.tsx`, the fake services' `runPackage` a spy):
 - A done Mine row with `started_at` at 1,000 and an activity snapshot with a learner at 2,000: `runPackage` is called once, at once, with the row's identity and current version.
@@ -341,7 +345,7 @@ Stage 7, unattended. Roles: commit reviewer, test writer, Senior Engineer (again
 ### Senior Engineer
 
 #### RESOLVED: A refused automatic request would stop that package re-running for the page's life
-RD-3 pass 2 keeps a refusal in `requests` as `{message, at}` and shows it only while the result's `updated_at` equals `at` (its "The Run control and each row's state", `PackageList`'s row); nothing deletes the entry when the result changes. `behindRows` tested `requests.has(key)`, so after one 409 the package was excluded even once its result had moved on, contradicting R9's "until its result changes". Fixed: `held` applies RD-3 pass 2's own showing rule, and `behindRows` and the page test cover a stale refusal. `RunRequest` moves to `runs.ts` so the shell can name it.
+RD-3 pass 2 keeps a refusal in `requests` as `{message, at}` and shows it only while the result's `updated_at` equals `at` (its "The Run control and each row's state", `PackageList`'s row); nothing deletes the entry when the result changes. `behindRows` tested `requests.has(key)`, so after one 409 the package was excluded even once its result had moved on, contradicting R9's "until its result changes". Fixed: `held` applies RD-3 pass 2's own showing rule, and `behindRows` and the page test cover a stale refusal.
 
 ### Commit reviewer
 
