@@ -56,6 +56,12 @@ export function ClassDashboard({ services, onExpired }: {
   const [rows, setRows] = useState<PackageRow[] | null>(null);
   const [listProblem, setListProblem] = useState<string | null>(null);
   const refreshed = useRef(false);
+  // An accepted Resume's timeouts, cleared when the page goes.
+  const resumeTimers = useRef(new Set<ReturnType<typeof setTimeout>>());
+  useEffect(() => () => {
+    resumeTimers.current.forEach(clearTimeout);
+    resumeTimers.current.clear();
+  }, []);
 
   // How a refused call becomes page state. Only a 403 from the portal's dashboard endpoints
   // means the researcher check failed; its Firebase token answers that check with a 400.
@@ -151,7 +157,11 @@ export function ClassDashboard({ services, onExpired }: {
       if (!resume) return forget(key);
       const resuming: RunRequest = { resuming: true, at: latestResults.current.get(key)?.updated_at?.toMillis() ?? null };
       setRequests((r) => new Map(r).set(key, resuming));
-      setTimeout(() => forget(key, resuming), RESUME_WAIT_MS);
+      const timer = setTimeout(() => {
+        resumeTimers.current.delete(timer);
+        forget(key, resuming);
+      }, RESUME_WAIT_MS);
+      resumeTimers.current.add(timer);
     } catch (error) {
       // Keyed to the result as the refusal finds it: the queued write lands before a VM step fails.
       const at = latestResults.current.get(key)?.updated_at?.toMillis() ?? null;
@@ -208,6 +218,9 @@ export function ClassDashboard({ services, onExpired }: {
     const key = open?.key;
     setOpen(null);
     const button = key ? showButtons.current.get(key) : undefined;
+    // A Community row's button is hidden while its disclosure is closed, and cannot take focus.
+    const disclosure = button?.closest("details");
+    if (disclosure) disclosure.open = true;
     (button ?? resultsHeading.current)?.focus();
   };
   // The open view keeps the result it read even if a listener is refused later.

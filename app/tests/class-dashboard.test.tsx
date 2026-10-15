@@ -518,6 +518,19 @@ describe("running a package", () => {
       expect(runButton().getAttribute("aria-disabled")).toBeNull();
     });
 
+    it("leaves no timer behind when the page goes during a resume", async () => {
+      const s = services();
+      await listed(s);
+      vi.useFakeTimers();
+      await s.runner(paused);
+      await s.results(new Map([[KEY, run()]]));
+      fireEvent.click(runButton());
+      await act(async () => { await Promise.resolve(); });
+      expect(vi.getTimerCount()).toBe(1);
+      cleanup();
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
     it("keeps a resumed run running when another request moves the session document", async () => {
       const s = services();
       await listed(s);
@@ -635,6 +648,20 @@ describe("the Results section", () => {
     expect(document.activeElement).toBe(title);
     fireEvent.click(within(results()).getByRole("button", { name: "Close" }));
     expect(document.activeElement).toBe(screen.getByRole("heading", { level: 2, name: "Results" }));
+  });
+
+  it("reopens a Community disclosure collapsed while its result was open, so Close returns focus to its row", async () => {
+    const stranger = row({ title: "Stranger's", visibility: "public", identity: "users/9/stranger" });
+    const s = services({ list: async () => [WILDFIRE, stranger] });
+    await listed(s);
+    await s.results(new Map([["users__9__stranger", done(stranger.identity, "Stranger summary", 1000)]]));
+    const details = showButton("Stranger's").closest("details")!;
+    details.open = true;
+    fireEvent.click(showButton("Stranger's"));
+    details.open = false;
+    fireEvent.click(within(results()).getByRole("button", { name: "Close" }));
+    expect(details.open).toBe(true);
+    expect(document.activeElement).toBe(showButton("Stranger's"));
   });
 
   it("closes, with focus on the Results heading, when no finished result is left", async () => {
