@@ -2,8 +2,8 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ClassDashboard } from "../src/pages/ClassDashboard";
 import type { Profile } from "../src/shell/packages";
-import { ApiError, SessionExpired, type PackageRow, type Portal, type ReportServer, type Scope } from "../src/shell/portal";
-import type { Counts, Result, Runner } from "../src/shell/runs";
+import { ApiError, SessionExpired, type PackageRow, type Portal, type ReportServer, type Resolved, type Scope } from "../src/shell/portal";
+import { formatTime, type Counts, type Result, type Runner } from "../src/shell/runs";
 import type { ClassListeners, DashboardServices } from "../src/shell/services";
 import { row, SCOPE, stamp } from "./fixtures";
 
@@ -23,20 +23,22 @@ function services(over: {
   watch?: () => Promise<() => void>;
   list?: (urls: string[]) => Promise<PackageRow[]>;
   run?: (identity: string, version: string) => Promise<unknown>;
+  resolve?: (identity: string, version: string) => Promise<Resolved>;
 } = {}) {
   let on: ClassListeners | null = null;
   const unsubscribe = vi.fn();
   const refreshProfile = vi.fn(over.refresh ?? (async () => ({ queued: true })));
   const listPackages = vi.fn(over.list ?? (async () => [WILDFIRE]));
   const runPackage = vi.fn(over.run ?? (async () => ({ queue: [], appended: [], vm: "launched" })));
+  const resolve = vi.fn(over.resolve ?? (async () => ({ archived: false })));
   const fake: DashboardServices = {
     portal: { scope: over.scope ?? (async () => SCOPE), refreshProfile, runPackage } as unknown as Portal,
-    reportServer: { listPackages } as unknown as ReportServer,
+    reportServer: { listPackages, resolve } as unknown as ReportServer,
     watchClass: vi.fn(over.watch ?? (async (_scope, listeners) => { on = listeners; return unsubscribe; })),
     now: () => NOW
   };
   return {
-    fake, refreshProfile, listPackages, runPackage, unsubscribe,
+    fake, refreshProfile, listPackages, runPackage, resolve, unsubscribe,
     snapshot: (p: Profile | null) => act(() => on!.profile(p)),
     refuse: () => act(() => on!.refused("profile")),
     runner: (r: Runner | null) => act(() => on!.runner(r)),
@@ -518,5 +520,166 @@ describe("what the page says of the researcher's own runs", () => {
   it("says the results and counts are the researcher's own", async () => {
     await mounted(services());
     expect(screen.getByText("Results and counts on this page are your own. Another researcher of this class sees their own runs.")).toBeDefined();
+  });
+});
+
+describe("the Results section", () => {
+  const SECOND = row({ title: "Second package", official: true, identity: "projects/20/second" });
+  const SECOND_KEY = "projects__20__second";
+  const done = (identity: string, summary: string, finishedAt: number, over: Partial<Result> = {}): Result => ({
+    status: "done", package: { identity, version: "1.0.0", checksum: "c" }, summary, display: `# ${summary}`,
+    finished_at: stamp(finishedAt), updated_at: stamp(finishedAt), ...over
+  });
+  const results = () => screen.getByRole("heading", { level: 2, name: "Results" }).closest("section")!;
+  const showButton = (title: string) => screen.getByRole("button", { name: `Show result for ${title}` });
+  const unlistedRow = (identity: string) => screen.getByText(identity, { selector: ".identity" }).closest("li")!;
+
+  it("says how to open a result while none is open, and not once one is", async () => {
+    const s = services();
+    await listed(s);
+    expect(within(results()).getByText("Open a finished package's result to read it here.")).toBeDefined();
+    await s.results(new Map([[KEY, done(WILDFIRE.identity, "6 open responses from 3 learners.", 1000)]]));
+    fireEvent.click(showButton("Wildfire open responses"));
+    expect(within(results()).queryByText("Open a finished package's result to read it here.")).toBeNull();
+  });
+
+  it("opens a result with its title focused, and Close returns focus to its row", async () => {
+    const s = services({ list: async () => [WILDFIRE, SECOND] });
+    await listed(s);
+    await s.results(new Map([
+      [KEY, done(WILDFIRE.identity, "6 open responses from 3 learners.", 1000)],
+      [SECOND_KEY, done(SECOND.identity, "Second summary", 2000)]
+    ]));
+    fireEvent.click(showButton("Wildfire open responses"));
+    const title = within(results()).getByRole("heading", { level: 3, name: "Wildfire open responses" });
+    expect(document.activeElement).toBe(title);
+    expect(within(results()).getByText("6 open responses from 3 learners.", { selector: ".summary" })).toBeDefined();
+    expect(within(results()).getByRole("heading", { level: 4, name: "6 open responses from 3 learners." })).toBeDefined();
+    showButton("Second package").focus();
+    fireEvent.click(showButton("Second package"));
+    expect(document.activeElement).toBe(within(results()).getByRole("heading", { level: 3, name: "Second package" }));
+    showButton("Second package").focus();
+    fireEvent.click(showButton("Second package"));
+    expect(document.activeElement).toBe(within(results()).getByRole("heading", { level: 3, name: "Second package" }));
+    fireEvent.click(within(results()).getByRole("button", { name: "Close" }));
+    expect(within(results()).queryByRole("heading", { level: 3, name: "Second package" })).toBeNull();
+    expect(document.activeElement).toBe(showButton("Second package"));
+  });
+
+  it("stays open on the same result through a re-run, and shows the new one in place when it lands", async () => {
+    const s = services();
+    await listed(s);
+    const first = done(WILDFIRE.identity, "Earlier summary", 1000);
+    await s.results(new Map([[KEY, first]]));
+    fireEvent.click(showButton("Wildfire open responses"));
+    const title = document.activeElement;
+    const previous = { package: first.package, summary: first.summary, display: first.display, finished_at: first.finished_at };
+    for (const over of [{ status: "queued" }, { status: "running", stage: "run_package" }, { status: "failed", error: "boom" }] as const) {
+      await s.results(new Map([[KEY, wildfire({ ...over, previous, updated_at: stamp(1100) })]]));
+      expect(within(results()).getByText("Earlier summary", { selector: ".summary" })).toBeDefined();
+      expect(document.activeElement).toBe(title);
+      expect(within(results()).getByRole("status").textContent).toBe("");
+    }
+    await s.results(new Map([[KEY, done(WILDFIRE.identity, "Newer summary", 3000, { previous })]]));
+    expect(within(results()).getByText("Newer summary", { selector: ".summary" })).toBeDefined();
+    expect(within(results()).getByRole("status").textContent).toBe(`Updated ${formatTime(3000)}`);
+    expect(document.activeElement).toBe(title);
+  });
+
+  it("closes, with focus on the Results heading, when no finished result is left", async () => {
+    const s = services();
+    await listed(s);
+    await s.results(new Map([[KEY, done(WILDFIRE.identity, "Earlier summary", 1000)]]));
+    fireEvent.click(showButton("Wildfire open responses"));
+    await s.results(new Map([[KEY, wildfire()]]));
+    expect(within(results()).queryByText("Earlier summary")).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole("heading", { level: 2, name: "Results" }));
+  });
+
+  it("lists results of packages the list returned but the page does not show, with the list's reason", async () => {
+    const gone = row({ title: "Gone", official: true, applies: false, identity: "projects/20/gone" });
+    const elsewhere = row({ title: "Elsewhere", visibility: "project", project: { id: 99, name: "Other" }, identity: "projects/99/elsewhere" });
+    const s = services({ list: async () => [WILDFIRE, gone, elsewhere] });
+    await listed(s);
+    await s.results(new Map([
+      ["projects__20__gone", done(gone.identity, "Gone summary", 1000)],
+      ["projects__99__elsewhere", done(elsewhere.identity, "Elsewhere summary", 1000)]
+    ]));
+    const section = screen.getByRole("heading", { level: 3, name: "Packages no longer listed" }).closest("section")!;
+    expect(within(unlistedRow(gone.identity)).getByText("This package no longer applies to this class.")).toBeDefined();
+    expect(within(unlistedRow(elsewhere.identity)).getByText("This package is not offered in any of this class's groups.")).toBeDefined();
+    expect(within(section).getAllByRole("listitem")).toHaveLength(2);
+    expect(s.resolve).not.toHaveBeenCalled();
+  });
+
+  it("asks about packages the list did not return, once each, and notes the archived and the gone", async () => {
+    const s = services({
+      resolve: async (identity) => {
+        if (identity === "projects/20/archived") return { archived: true };
+        throw new ApiError("Not found", 404);
+      }
+    });
+    await listed(s);
+    const unlisted = new Map([
+      ["projects__20__archived", done("projects/20/archived", "Archived summary", 1000)],
+      ["users__7__hidden", done("users/7/hidden", "Hidden summary", 1000)]
+    ]);
+    await s.results(unlisted);
+    await s.results(new Map(unlisted));
+    expect(await within(unlistedRow("projects/20/archived")).findByText("This package has been archived.")).toBeDefined();
+    expect(await within(unlistedRow("users/7/hidden")).findByText("This package is no longer available to you.")).toBeDefined();
+    expect(s.resolve).toHaveBeenCalledTimes(2);
+    expect(s.resolve).toHaveBeenCalledWith("projects/20/archived", "1.0.0");
+  });
+
+  it("notes nothing for any other answer, and re-authorizes on an expired token", async () => {
+    const s = services({ resolve: async () => { throw new ApiError("Server error", 500); } });
+    await listed(s);
+    await s.results(new Map([["users__7__hidden", done("users/7/hidden", "Hidden summary", 1000)]]));
+    await vi.waitFor(() => expect(s.resolve).toHaveBeenCalledTimes(1));
+    await act(async () => {});
+    expect(unlistedRow("users/7/hidden").querySelector(".notice")).toBeNull();
+    cleanup();
+    const expired = services({ resolve: async () => { throw new SessionExpired(false); } });
+    const onExpired = await listed(expired);
+    await expired.results(new Map([["users__7__hidden", done("users/7/hidden", "Hidden summary", 1000)]]));
+    await vi.waitFor(() => expect(onExpired).toHaveBeenCalledTimes(1));
+  });
+
+  it("opens an unlisted result, and Close returns focus to its row", async () => {
+    const s = services({ resolve: async () => ({ archived: false }) });
+    await listed(s);
+    await s.results(new Map([["users__7__hidden", done("users/7/hidden", "Hidden summary", 1000)]]));
+    showButton("users/7/hidden").focus();
+    fireEvent.click(showButton("users/7/hidden"));
+    expect(document.activeElement).toBe(within(results()).getByRole("heading", { level: 3, name: "users/7/hidden" }));
+    fireEvent.click(within(results()).getByRole("button", { name: "Close" }));
+    expect(document.activeElement).toBe(showButton("users/7/hidden"));
+  });
+
+  it("offers no Run on an unlisted result, and words a waiting one without asking for a run", async () => {
+    const s = services({ resolve: async () => ({ archived: false }) });
+    await listed(s);
+    await s.runner({ state: "terminated" });
+    await s.results(new Map([["users__7__hidden", wildfire({ package: { identity: "users/7/hidden", version: "1.0.0", checksum: "c" } })]]));
+    const section = screen.getByRole("heading", { level: 3, name: "Packages no longer listed" }).closest("section")!;
+    expect(within(section).getByText("Queued, waiting for a machine.")).toBeDefined();
+    expect(within(section).queryByRole("button", { name: /^(Run|Resume) / })).toBeNull();
+  });
+
+  it("places no result there while the list is pending or after it failed", async () => {
+    const pending = services({ list: () => new Promise<PackageRow[]>(() => {}) });
+    await mounted(pending);
+    await pending.snapshot(CURRENT);
+    await pending.results(new Map([[KEY, done(WILDFIRE.identity, "Summary", 1000)]]));
+    expect(screen.queryByText("Packages no longer listed")).toBeNull();
+    cleanup();
+    const failed = services({ list: async () => { throw new TypeError("Failed to fetch"); } });
+    await mounted(failed);
+    await failed.snapshot(CURRENT);
+    await screen.findByText("The package catalog could not be reached.");
+    await failed.results(new Map([[KEY, done(WILDFIRE.identity, "Summary", 1000)]]));
+    expect(screen.queryByText("Packages no longer listed")).toBeNull();
+    expect(failed.resolve).not.toHaveBeenCalled();
   });
 });

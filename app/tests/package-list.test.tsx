@@ -23,7 +23,7 @@ function list(rows: PackageRow[], over: {
 } = {}) {
   render(
     <PackageList rows={rows} scope={SCOPE} results={over.results ?? new Map()} runner={over.runner ?? null} mark={null}
-      requests={over.requests ?? new Map()} onRun={over.onRun ?? vi.fn()} onShow={over.onShow ?? vi.fn()} />
+      requests={over.requests ?? new Map()} onRun={over.onRun ?? vi.fn()} onShow={over.onShow ?? vi.fn()} showRef={vi.fn()} />
   );
 }
 

@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Counts } from "../components/Counts";
 import { PackageList } from "../components/PackageList";
+import { ResultView } from "../components/ResultView";
+import { Unlisted } from "../components/Unlisted";
 import { groupPackages, needsRefresh, packageKey, scopeUrls, titleOf, type Profile } from "../shell/packages";
 import { ApiError, SessionExpired, type PackageRow, type Scope } from "../shell/portal";
 import { PROFILE_MAX_AGE_MS } from "../shell/portals";
 import {
-  nextMark, RESUME_WAIT_MS, sessionLines,
+  latestFinished, millis, nextMark, RESUME_WAIT_MS, sessionLines,
   type Counts as CountsDoc, type Result, type Runner, type RunRequest, type SessionMark
 } from "../shell/runs";
 import type { DashboardServices } from "../shell/services";
@@ -39,6 +41,14 @@ export function ClassDashboard({ services, onExpired }: {
   const [counts, setCounts] = useState<CountsDoc | null | undefined>(undefined);
   const [results, setResults] = useState<Map<string, Result>>(new Map());
   const [requests, setRequests] = useState<Map<string, RunRequest>>(new Map());
+  // The open result, by package key, and the finish time of the result it opened on. Each opening
+  // is numbered, so opening the result already open mounts its view again and takes focus to it.
+  const [open, setOpen] = useState<{ key: string; shownAt: number | null; opening: number } | null>(null);
+  const showButtons = useRef(new Map<string, HTMLButtonElement>());
+  const resultsHeading = useRef<HTMLHeadingElement>(null);
+  // What the page says of a result whose package it no longer lists, by identity.
+  const [notes, setNotes] = useState<Map<string, string | null>>(new Map());
+  const asked = useRef(new Set<string>());
   const [runsProblem, setRunsProblem] = useState<string | null>(null);
   const [countsProblem, setCountsProblem] = useState<string | null>(null);
   const [rows, setRows] = useState<PackageRow[] | null>(null);
@@ -143,9 +153,58 @@ export function ClassDashboard({ services, onExpired }: {
     }
   }
 
-  const listedTitles = useMemo(() => new Map(
-    rows && scope ? groupPackages(rows, scope).flatMap((g) => g.rows).map((r) => [packageKey(r.identity), titleOf(r)]) : []
-  ), [rows, scope]);
+  const listShown = Boolean(profile && rows && !listProblem && !profileProblem);
+  const grouped = useMemo(() => (rows && scope ? groupPackages(rows, scope).flatMap((g) => g.rows) : []), [rows, scope]);
+  const listedTitles = useMemo(() => new Map(grouped.map((r) => [packageKey(r.identity), titleOf(r)])), [grouped]);
+
+  // While the list is loading or failed, every result would look unlisted, so none is placed.
+  const unlisted = useMemo(
+    () => (listShown ? [...results.values()].filter((r) => !listedTitles.has(packageKey(r.package.identity))) : []),
+    [listShown, results, listedTitles]
+  );
+
+  // A package the list returned says why from its own row; any other is asked about once.
+  const rowNotes = useMemo(() => new Map((rows ?? []).map((r) => [r.identity, r.applies
+    ? "This package is not offered in any of this class's groups."
+    : "This package no longer applies to this class."])), [rows]);
+
+  useEffect(() => {
+    for (const result of unlisted) {
+      const { identity, version } = result.package;
+      if (rowNotes.has(identity) || asked.current.has(identity)) continue;
+      asked.current.add(identity);
+      const note = (text: string | null) => setNotes((n) => new Map(n).set(identity, text));
+      services.reportServer.resolve(identity, version)
+        .then((resolved) => note(resolved.archived ? "This package has been archived." : null))
+        .catch((error) => {
+          if (error instanceof SessionExpired) return refused(error, () => {}, "report-server");
+          note(error instanceof ApiError && error.status === 404 ? "This package is no longer available to you." : null);
+        });
+    }
+  }, [unlisted, rowNotes, services]);
+
+  // A result queued before the function kept the last finished run has nothing left to show.
+  useEffect(() => {
+    if (open && !latestFinished(results.get(open.key))) {
+      setOpen(null);
+      resultsHeading.current?.focus();
+    }
+  }, [open, results]);
+
+  const showRef = (key: string, button: HTMLButtonElement | null) => {
+    if (button) showButtons.current.set(key, button);
+    else showButtons.current.delete(key);
+  };
+  const show = (key: string) => setOpen((o) => ({
+    key, shownAt: millis(latestFinished(results.get(key))?.finished_at), opening: (o?.opening ?? 0) + 1
+  }));
+  const close = () => {
+    const key = open?.key;
+    setOpen(null);
+    if (key) showButtons.current.get(key)?.focus();
+  };
+  const opened = open ? latestFinished(results.get(open.key)) : null;
+  const openedAt = millis(opened?.finished_at);
 
   if (info) return <Info reason={info} />;
   if (!scope) {
@@ -201,10 +260,23 @@ export function ClassDashboard({ services, onExpired }: {
             [...requests.values()].some((r) => "pending" in r)).map((line) => <p key={line} className="session">{line}</p>)}
           {profile && !rows && !listProblem && !profileProblem && <p>Listing the packages that apply…</p>}
         </div>
-        {profile && rows && !listProblem && !profileProblem && (
+        {listShown && rows && (
           <PackageList rows={rows} scope={scope} results={results} runner={runner} mark={mark} requests={requests}
-            onRun={run} onShow={() => {}} />
+            onRun={run} onShow={show} showRef={showRef} />
         )}
+      </section>
+
+      <section aria-labelledby="results-heading">
+        <h2 id="results-heading" ref={resultsHeading} tabIndex={-1}>Results</h2>
+        {open && opened && (
+          <ResultView key={`${open.key}:${open.opening}`} title={listedTitles.get(open.key) ?? opened.package.identity} finished={opened}
+            updated={openedAt !== null && open.shownAt !== null && openedAt > open.shownAt ? openedAt : null} onClose={close} />
+        )}
+        {unlisted.length > 0 && (
+          <Unlisted results={unlisted} notes={new Map([...notes, ...rowNotes])} runner={runner} mark={mark}
+            classHash={scope.class_hash} onShow={show} showRef={showRef} />
+        )}
+        {!(open && opened) && unlisted.length === 0 && <p>Open a finished package's result to read it here.</p>}
       </section>
     </main>
   );

@@ -35,3 +35,8 @@ section { border-top: 1px solid var(--line); padding-top: 0.5rem; }
 .when, .reason { color: var(--muted); }
 .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-top: 0.3rem; }
 button[aria-disabled="true"] { opacity: 0.55; cursor: not-allowed; }
+.result-view { border: 1px solid var(--line); border-radius: 4px; padding: 0 1rem 1rem; background: #fff; }
+.result-markdown { overflow-x: auto; }
+.result-markdown table { border-collapse: collapse; }
+.result-markdown th, .result-markdown td { border: 1px solid var(--line); padding: 0.25rem 0.5rem; }
+.result-markdown img { max-width: 100%; }

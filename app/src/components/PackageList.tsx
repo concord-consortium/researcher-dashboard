@@ -1,8 +1,9 @@
 import { groupPackages, packageKey, titleOf, type Group } from "../shell/packages";
 import type { PackageRow, Scope } from "../shell/portal";
+import type { ReactNode } from "react";
 import {
-  formatTime, latestFinished, millis, rowState, runOffer, stageWords, WAITING,
-  type Result, type RowState, type Runner, type RunRequest, type SessionMark
+  finishedWhen, formatTime, latestFinished, millis, rowState, runOffer, stageWords, WAITING,
+  type Finished, type Result, type RowState, type Runner, type RunRequest, type SessionMark
 } from "../shell/runs";
 
 // A sentence from text that may already end in one.
@@ -44,6 +45,39 @@ export function rowLine(state: RowState, title: string, listed: boolean, finishe
 
 const updating = (text: string) => `Updating: ${text[0].toLowerCase()}${text.slice(1)}`;
 
+// A row's state line in its polite live region, with what else the row has to announce.
+export function StateRegion({ state, line, children }: { state: RowState; line: string; children?: ReactNode }) {
+  return (
+    <div className="state" aria-live="polite">
+      <p>{line}</p>
+      {state.kind === "failed" && state.finishedAt !== null && <p className="when">{formatTime(state.finishedAt)}</p>}
+      {children}
+    </div>
+  );
+}
+
+// The latest finished result a row keeps. A done row's state line already holds its summary.
+export function FinishedBlock({ state, finished, children }: { state: RowState; finished: Finished; children?: ReactNode }) {
+  return (
+    <div className="finished">
+      {state.kind !== "done" && <p className="summary">{finished.summary ?? "Finished."}</p>}
+      <p className="when">{finishedWhen(millis(finished.finished_at))}{children}</p>
+    </div>
+  );
+}
+
+export function ShowButton({ name, resultKey, onShow, showRef }: {
+  name: string;
+  resultKey: string;
+  onShow: (key: string) => void;
+  showRef: (key: string, button: HTMLButtonElement | null) => void;
+}) {
+  return (
+    <button type="button" aria-label={`Show result for ${name}`} ref={(b) => showRef(resultKey, b)}
+      onClick={() => onShow(resultKey)}>Show result</button>
+  );
+}
+
 export interface RowProps {
   row: PackageRow;
   result: Result | undefined;
@@ -53,9 +87,10 @@ export interface RowProps {
   request: RunRequest | undefined;
   onRun: (row: PackageRow, resume: boolean) => void;
   onShow: (key: string) => void;
+  showRef: (key: string, button: HTMLButtonElement | null) => void;
 }
 
-function Row({ row, result, runner, mark, classHash, request, onRun, onShow }: RowProps) {
+function Row({ row, result, runner, mark, classHash, request, onRun, onShow, showRef }: RowProps) {
   const key = packageKey(row.identity);
   const title = titleOf(row);
   const state = rowState(result, runner, mark, classHash, key);
@@ -78,20 +113,14 @@ function Row({ row, result, runner, mark, classHash, request, onRun, onShow }: R
       <span className="title">{title}</span> <span className="version">{row.current_version.version}</span>
       {row.current_version.description && <p className="description">{row.current_version.description}</p>}
       <code className="identity">{row.identity}</code>
-      <div className="state" aria-live="polite">
-        <p>{line}</p>
-        {state.kind === "failed" && state.finishedAt !== null && <p className="when">{formatTime(state.finishedAt)}</p>}
+      <StateRegion state={state} line={line}>
         {pending && <p>Requesting…</p>}
         {refusal && <p className="error">{refusal}</p>}
-      </div>
+      </StateRegion>
       {finished && (
-        <div className="finished">
-          {state.kind !== "done" && <p className="summary">{finished.summary ?? "Finished."}</p>}
-          <p className="when">
-            Finished {finishedAt != null ? formatTime(finishedAt) : "at an unknown time"}
-            {finished.package.version !== row.current_version.version && <> · from {finished.package.version}</>}
-          </p>
-        </div>
+        <FinishedBlock state={state} finished={finished}>
+          {finished.package.version !== row.current_version.version && <> · from {finished.package.version}</>}
+        </FinishedBlock>
       )}
       <div className="controls">
         <button
@@ -104,9 +133,7 @@ function Row({ row, result, runner, mark, classHash, request, onRun, onShow }: R
           {resume ? "Resume" : "Run"}
         </button>
         {offer.reason && <p id={reasonId} className="reason">{offer.reason}</p>}
-        {finished && (
-          <button type="button" aria-label={`Show result for ${title}`} onClick={() => onShow(key)}>Show result</button>
-        )}
+        {finished && <ShowButton name={title} resultKey={key} onShow={onShow} showRef={showRef} />}
       </div>
     </li>
   );
@@ -121,6 +148,7 @@ export interface ListProps {
   requests: Map<string, RunRequest>;
   onRun: (row: PackageRow, resume: boolean) => void;
   onShow: (key: string) => void;
+  showRef: (key: string, button: HTMLButtonElement | null) => void;
 }
 
 type RowsProps = Omit<ListProps, "rows" | "scope"> & { rows: PackageRow[]; classHash: string };

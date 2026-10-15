@@ -141,6 +141,8 @@ export type RunRequest =
 
 export const formatTime = (ms: number) => new Date(ms).toLocaleString();
 
+export const finishedWhen = (ms: number | null) => `Finished ${ms !== null ? formatTime(ms) : "at an unknown time"}`;
+
 // The line above the list. `titleOf` names a package of this class by its key, or returns null;
 // `requesting` is whether any run request from the page is in flight.
 export function sessionLines(runner: Runner | null, classHash: string, results: Map<string, Result>,
