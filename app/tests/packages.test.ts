@@ -1,5 +1,7 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { groupPackages, needsRefresh, scopeUrls, titleOf } from "../src/shell/packages";
+import { readFileSync } from "node:fs";
+import { groupPackages, identityOfKey, needsRefresh, packageKey, scopeUrls, titleOf } from "../src/shell/packages";
 import { row, SCOPE } from "./fixtures";
 
 const DAY = 24 * 3600 * 1000;
@@ -65,5 +67,23 @@ describe("groupPackages", () => {
     const groups = groupPackages([row({ name: "named", title: "", mine: true })], SCOPE);
     expect(groups.map((g) => g.heading)).toEqual(["Mine"]);
     expect(titleOf(groups[0].rows[0])).toBe("named");
+  });
+});
+
+const contract = JSON.parse(readFileSync(new URL("../../fixtures/package-contract.json", import.meta.url), "utf8")) as {
+  identity: { value: string; valid: boolean }[];
+  package_key: { identity: string; key: string }[];
+};
+
+describe("packageKey", () => {
+  it("is the contract's key for each of its cases", () => {
+    expect(contract.package_key.length).toBeGreaterThan(0);
+    for (const { identity, key } of contract.package_key) expect(packageKey(identity)).toBe(key);
+  });
+
+  it("turns back into the identity for every valid identity", () => {
+    const valid = contract.identity.filter((c) => c.valid).map((c) => c.value);
+    expect(valid.length).toBeGreaterThan(0);
+    for (const identity of valid) expect(identityOfKey(packageKey(identity))).toBe(identity);
   });
 });

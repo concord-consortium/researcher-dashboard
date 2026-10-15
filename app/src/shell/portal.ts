@@ -35,7 +35,10 @@ export interface PackageRow {
   project: { id: number; name: string | null } | null;
   current_version: { version: string; title: string | null; description: string | null };
   applies: boolean;
+  runnable: boolean;
 }
+
+export interface Resolved { archived: boolean }
 
 export class ApiError extends Error {
   constructor(message: string, readonly status: number) {
@@ -105,6 +108,14 @@ export class Portal {
     const body = await this.api.request<{ token: string }>(`/api/v1/jwt/firebase?${query}`);
     return body.token;
   }
+
+  runPackage(identity: string, version: string): Promise<unknown> {
+    return this.api.request("/api/v1/researcher_dashboard/run_package", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ packages: [{ identity, version }] })
+    });
+  }
 }
 
 export class ReportServer {
@@ -117,5 +128,10 @@ export class ReportServer {
       body: JSON.stringify({ scope_urls: scopeUrls })
     });
     return body.packages;
+  }
+
+  resolve(identity: string, version: string): Promise<Resolved> {
+    const query = new URLSearchParams({ identity, version });
+    return this.api.request<Resolved>(`/api/v1/packages/resolve?${query}`);
   }
 }
