@@ -90,6 +90,13 @@ describe("PackageList", () => {
     list([r], { results: new Map([[packageKey(r.identity), result(r)]]) });
     expect(within(item("Versioned")).getByText(/from 1\.0\.0/)).toBeDefined();
     cleanup();
+    const rerun = row({ title: "Rerun", official: true, current_version: { version: "1.1.0", title: "Rerun", description: null } });
+    const previous = { package: { identity: rerun.identity, version: "1.0.0", checksum: "c" }, summary: "Earlier", finished_at: stamp(1000) };
+    list([rerun], { results: new Map([[packageKey(rerun.identity), result(rerun, {
+      status: "queued", package: { identity: rerun.identity, version: "1.1.0", checksum: "c" }, previous
+    })]]) });
+    expect(within(item("Rerun")).getByText(/from 1\.0\.0/)).toBeDefined();
+    cleanup();
     const same = row({ title: "Same", official: true });
     list([same], { results: new Map([[packageKey(same.identity), result(same)]]) });
     expect(within(item("Same")).queryByText(/from 1\.0\.0/)).toBeNull();

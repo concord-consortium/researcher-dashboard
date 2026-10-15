@@ -39,7 +39,7 @@ export function ClassDashboard({ services, onExpired }: {
   const [mark, setMark] = useState<SessionMark | null>(null);
   // undefined until the first snapshot; null while the document does not exist.
   const [counts, setCounts] = useState<CountsDoc | null | undefined>(undefined);
-  const [results, setResults] = useState<Map<string, Result>>(new Map());
+  const [received, setReceived] = useState<Map<string, Result>>(new Map());
   const [requests, setRequests] = useState<Map<string, RunRequest>>(new Map());
   // The open result, by package key, and the finish time of the result it opened on. Each opening
   // is numbered, so opening the result already open mounts its view again and takes focus to it.
@@ -50,6 +50,8 @@ export function ClassDashboard({ services, onExpired }: {
   const [notes, setNotes] = useState<Map<string, string | null>>(new Map());
   const asked = useRef(new Set<string>());
   const [runsProblem, setRunsProblem] = useState<string | null>(null);
+  // Without both the session and the results, a row's state cannot be told, so none is shown.
+  const results = useMemo(() => (runsProblem ? new Map<string, Result>() : received), [runsProblem, received]);
   const [countsProblem, setCountsProblem] = useState<string | null>(null);
   const [rows, setRows] = useState<PackageRow[] | null>(null);
   const [listProblem, setListProblem] = useState<string | null>(null);
@@ -90,20 +92,14 @@ export function ClassDashboard({ services, onExpired }: {
         setMark((m) => nextMark(m, next));
       },
       counts: setCounts,
-      results: setResults,
-      // A refused document is read as absent, so no row shows a state the page can no longer follow.
+      results: setReceived,
       refused: (which) => {
         if (which === "profile") return setProfileProblem(UNREACHABLE.firebase);
         if (which === "counts") {
           setCounts(undefined);
           return setCountsProblem("Your counts could not be read.");
         }
-        if (which === "runner") {
-          setRunner(null);
-          setMark(null);
-        } else {
-          setResults(new Map());
-        }
+        if (which === "runner") setRunner(null);
         setRunsProblem("Your runs could not be read.");
       }
     })
@@ -195,11 +191,11 @@ export function ClassDashboard({ services, onExpired }: {
 
   // A result queued before the function kept the last finished run has nothing left to show.
   useEffect(() => {
-    if (open && !latestFinished(results.get(open.key))) {
+    if (open && !latestFinished(received.get(open.key))) {
       setOpen(null);
       resultsHeading.current?.focus();
     }
-  }, [open, results]);
+  }, [open, received]);
 
   const showRef = (key: string, button: HTMLButtonElement | null) => {
     if (button) showButtons.current.set(key, button);
@@ -211,9 +207,11 @@ export function ClassDashboard({ services, onExpired }: {
   const close = () => {
     const key = open?.key;
     setOpen(null);
-    if (key) showButtons.current.get(key)?.focus();
+    const button = key ? showButtons.current.get(key) : undefined;
+    (button ?? resultsHeading.current)?.focus();
   };
-  const opened = open ? latestFinished(results.get(open.key)) : null;
+  // The open view keeps the result it read even if a listener is refused later.
+  const opened = open ? latestFinished(received.get(open.key)) : null;
   const openedAt = millis(opened?.finished_at);
 
   if (info) return <Info reason={info} />;

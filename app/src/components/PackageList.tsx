@@ -2,12 +2,9 @@ import { groupPackages, packageKey, titleOf, type Group } from "../shell/package
 import type { PackageRow, Scope } from "../shell/portal";
 import type { ReactNode } from "react";
 import {
-  finishedWhen, formatTime, latestFinished, millis, rowState, runOffer, stageWords, WAITING,
+  finishedWhen, formatTime, latestFinished, millis, rowState, runOffer, sentence, stageWords, WAITING,
   type Finished, type Result, type RowState, type Runner, type RunRequest, type SessionMark
 } from "../shell/runs";
-
-// A sentence from text that may already end in one.
-const sentence = (text: string) => (/[.!?…]$/.test(text) ? text : `${text}.`);
 
 // What a row says of its result. `listed` rows carry the Run control the waiting and paused
 // states tell the researcher to press.

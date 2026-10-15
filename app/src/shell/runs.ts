@@ -141,6 +141,9 @@ export type RunRequest =
 
 export const formatTime = (ms: number) => new Date(ms).toLocaleString();
 
+// A sentence from text that may already end in one.
+export const sentence = (text: string) => (/[.!?…]$/.test(text) ? text : `${text}.`);
+
 export const finishedWhen = (ms: number | null) => `Finished ${ms !== null ? formatTime(ms) : "at an unknown time"}`;
 
 // The line above the list. `titleOf` names a package of this class by its key, or returns null;
@@ -168,7 +171,7 @@ export function sessionLines(runner: Runner | null, classHash: string, results: 
     case "terminated":
       return ["Your machine has stopped.", ...waiting()];
     case "failed":
-      return [`Your machine stopped with an error: ${runner.error ?? "no reason was given"}.`, ...waiting()];
+      return [`Your machine stopped with an error: ${sentence(runner.error ?? "no reason was given")}`, ...waiting()];
     default:
       return [];
   }

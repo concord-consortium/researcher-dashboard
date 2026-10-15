@@ -219,8 +219,9 @@ describe("sessionLines", () => {
       .toEqual(["Your machine stopped with an error: sync failed.", "Queued, waiting for a machine: run it to start one."]);
   });
 
-  it("says a session failed with no reason given", () => {
+  it("says a session failed, with or without a reason given", () => {
     expect(lines(runner({ state: "failed" }))).toEqual(["Your machine stopped with an error: no reason was given."]);
+    expect(lines(runner({ state: "failed", error: "The sync did not verify." }))).toEqual(["Your machine stopped with an error: The sync did not verify."]);
   });
 
   it("does not ask for a run while one is being requested", () => {

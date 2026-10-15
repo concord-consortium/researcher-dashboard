@@ -309,6 +309,25 @@ describe("ClassDashboard", () => {
     expect(screen.queryByText("Answers 9")).toBeNull();
   });
 
+  it("shows no result's state once the session is refused, whatever the results say", async () => {
+    const queued = row({ title: "Queued package", official: true, identity: "projects/20/queued" });
+    const s = services({ list: async () => [WILDFIRE, queued] });
+    await listed(s);
+    await s.runner({ state: "running", microvm_id: "vm-1", updated_at: stamp(1), queue: [{ class_hash: SCOPE.class_hash, package_key: "projects__20__queued" }] });
+    const results = new Map([
+      [KEY, wildfire({ status: "running", microvm_id: "vm-1", updated_at: stamp(5) })],
+      ["projects__20__queued", wildfire({ package: { identity: queued.identity, version: "1.0.0", checksum: "c" } })]
+    ]);
+    await s.results(results);
+    await s.refuseRuns("runner");
+    await s.results(new Map(results));
+    for (const title of ["Wildfire open responses", "Queued package"]) {
+      const item = screen.getByText(title, { selector: ".title" }).closest("li")!;
+      expect(item.querySelector(".state p")!.textContent, title).toBe("Not run.");
+      expect(within(item).getByRole("button", { name: `Run ${title}` }).getAttribute("aria-disabled"), title).toBeNull();
+    }
+  });
+
   it("says which of the researcher's documents could not be read, and still lists the packages", async () => {
     const s = services();
     await mounted(s);
@@ -523,6 +542,9 @@ describe("what the page says of the researcher's own runs", () => {
     const s = services();
     await mounted(s);
     expect(screen.queryByRole("heading", { name: "Your counts" })).toBeNull();
+    await s.counts({ data: { answers: 9, logs: 4, last_pull_at: stamp(1000), log_freshness_at: stamp(2000) } });
+    expect(screen.getByText("Logs 4")).toBeDefined();
+    expect(screen.getByText(`Logs current to ${formatTime(2000)}`)).toBeDefined();
     await s.counts({ data: { answers: 9, last_pull_at: stamp(1000) } });
     const section = screen.getByRole("heading", { level: 2, name: "Your counts" }).closest("section")!;
     expect(within(section).getByText("Answers 9")).toBeDefined();
@@ -600,6 +622,19 @@ describe("the Results section", () => {
     expect(within(results()).getByText("Newer summary", { selector: ".summary" })).toBeDefined();
     expect(within(results()).getByRole("status").textContent).toBe(`Updated ${formatTime(3000)}`);
     expect(document.activeElement).toBe(title);
+  });
+
+  it("stays open, focus unmoved, when a listener is refused", async () => {
+    const s = services();
+    await listed(s);
+    await s.results(new Map([[KEY, done(WILDFIRE.identity, "Earlier summary", 1000)]]));
+    fireEvent.click(showButton("Wildfire open responses"));
+    const title = document.activeElement;
+    await s.refuseRuns("runner");
+    expect(within(results()).getByText("Earlier summary", { selector: ".summary" })).toBeDefined();
+    expect(document.activeElement).toBe(title);
+    fireEvent.click(within(results()).getByRole("button", { name: "Close" }));
+    expect(document.activeElement).toBe(screen.getByRole("heading", { level: 2, name: "Results" }));
   });
 
   it("closes, with focus on the Results heading, when no finished result is left", async () => {
