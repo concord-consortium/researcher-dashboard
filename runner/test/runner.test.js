@@ -778,15 +778,21 @@ test("the ceiling admits a package declaring exactly the most report-server acce
   assert.match(result(built.docs, "users/1/over").error, /over the runner's ceiling/);
 });
 
-test("a package's run is bounded by its declared duration plus the margin by default", async () => {
-  const bounds = [];
-  const built = build({ stepOverrides: { runPackage: async ({ timeoutMs }) => { bounds.push(timeoutMs); return { display: "x", summary: "y" }; } } });
-  built.fn.queue({ identity: "users/1/minute" });
-  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
-  await built.runner.loop;
-
-  assert.equal(result(built.docs, "users/1/minute").status, "done");
-  assert.deepEqual(bounds, [60_000 + PACKAGE_TIMEOUT_MARGIN_MS]);
+test("a package's run is bounded by its declared duration plus the margin by default", async (t) => {
+  const { built, signal } = await bounded(t, {});
+  try {
+    t.mock.timers.tick(60_000 + PACKAGE_TIMEOUT_MARGIN_MS - 1);
+    await settle(10);
+    assert.equal(signal().aborted, false);
+    t.mock.timers.tick(1);
+    await settle(10);
+    assert.equal(signal().aborted, true, "the bound ends the sandboxed process");
+  } finally {
+    t.mock.timers.reset();
+  }
+  await until(() => result(built.docs, SLOW).status === "failed", "the failure");
+  assert.match(result(built.docs, SLOW).error, /ran past its 660s bound/);
+  built.runner.terminate().catch(() => {});
 });
 
 // /run is at 12:00, so the VM's cap is 20:00, less five minutes. At 16:30, 3h25m are
@@ -825,6 +831,18 @@ function killable(events) {
     runPackage: () => new Promise((_, reject) => { die = reject; }),
     killPackageProcesses: async () => { events.push("kill"); die?.(new Error("killed")); }
   };
+}
+
+// A hung package started under mocked timers, with the signal its bound aborts.
+async function bounded(t, envOverrides) {
+  let signal;
+  const stopped = killable([]);
+  const built = build({ envOverrides, stepOverrides: { ...stopped, runPackage: (args) => { signal = args.signal; return stopped.runPackage(args); } } });
+  built.fn.queue({ identity: SLOW });
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+  await until(() => signal, "the package step");
+  return { built, signal: () => signal };
 }
 
 test("a package that outruns its bound fails rather than hanging", async () => {
@@ -1922,6 +1940,155 @@ test("a freeze that never ends is given up on at its bound, and the suspend goes
   }
 });
 
+// The VM's clock runs on while it is suspended, so a bound counted on it would end a run
+// held across a long suspend as soon as it resumed.
+test("a package's bound counts only the time the VM is awake", async (t) => {
+  const { built, signal } = await bounded(t, { packageTimeoutMs: 1000 });
+  const pass = async (ms) => {
+    built.clock.t += ms;
+    t.mock.timers.tick(ms);
+    await settle(10);
+  };
+  try {
+    await pass(600);
+    await built.runner.suspend();
+    await pass(3600_000);
+    assert.equal(signal().aborted, false, "not while suspended");
+    built.runner.resume();
+    await pass(399);
+    assert.equal(signal().aborted, false, "400 ms of the bound were left");
+    assert.equal(result(built.docs, SLOW).status, "running");
+    await pass(1);
+    assert.equal(signal().aborted, true);
+  } finally {
+    t.mock.timers.reset();
+  }
+  await until(() => result(built.docs, SLOW).status === "failed", "the failure");
+  assert.match(result(built.docs, SLOW).error, /ran past its 1s bound/);
+  built.runner.terminate().catch(() => {});
+});
+
+test("a resume with no /suspend before it leaves the bound armed once", async (t) => {
+  const { built, signal } = await bounded(t, { packageTimeoutMs: 1000 });
+  try {
+    built.runner.resume();
+    await settle(10);
+    await built.runner.suspend();
+    t.mock.timers.tick(5000);
+    await settle(10);
+    assert.equal(signal().aborted, false, "the suspend paused the only timer");
+  } finally {
+    t.mock.timers.reset();
+  }
+  built.runner.terminate().catch(() => {});
+});
+
+test("a claim that lands while /suspend runs has its bound armed by the resume", async (t) => {
+  const g = gate((p, fields) => p.includes("/results/") && fields.status === "running");
+  let signal;
+  const stopped = killable([]);
+  const built = build({
+    envOverrides: { packageTimeoutMs: 1000 },
+    wrapStore: g.wrap,
+    stepOverrides: { ...stopped, runPackage: (args) => { signal = args.signal; return stopped.runPackage(args); } }
+  });
+  built.fn.queue({ identity: SLOW });
+  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+  await until(() => g.held.length === 1, "the claim");
+  await built.runner.suspend();
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    g.held[0].release();
+    await until(() => signal, "the package step");
+    t.mock.timers.tick(5000);
+    await settle(10);
+    assert.equal(signal.aborted, false, "not armed while suspended");
+    built.runner.resume();
+    t.mock.timers.tick(1000);
+    await settle(10);
+    assert.equal(signal.aborted, true);
+  } finally {
+    t.mock.timers.reset();
+  }
+  built.runner.terminate().catch(() => {});
+});
+
+test("a run that finishes disarms its bound", async (t) => {
+  let signal;
+  const built = build({
+    envOverrides: { packageTimeoutMs: 1000 },
+    stepOverrides: { runPackage: async (args) => { signal = args.signal; return { display: "x", summary: "y" }; } }
+  });
+  built.fn.queue({ identity: SLOW });
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+    await until(() => result(built.docs, SLOW)?.status === "done", "the run");
+    t.mock.timers.tick(5000);
+    await settle(10);
+    assert.equal(signal.aborted, false);
+  } finally {
+    t.mock.timers.reset();
+  }
+  built.runner.terminate().catch(() => {});
+});
+
+test("a suspend during the post-resume /work leaves the held run's document to that suspend", async () => {
+  const { built, finish } = await holding();
+  await built.runner.suspend();
+  let release;
+  built.fn.state.block = { route: "work", promise: new Promise((r) => { release = r; }) };
+  const calls = built.fn.state.calls.length;
+  const lines = await captured(async () => {
+    built.runner.resume();
+    await until(() => built.fn.state.calls.length > calls, "the post-resume /work");
+    await built.runner.suspend();
+    built.fn.state.block = null;
+    release();
+    await settle(20);
+  });
+  assert.equal(runnerDoc(built.docs).state, "suspended");
+  assert.ok(!lines.some((l) => l.event === "work.loop_failed"), "the loop goes on");
+  built.runner.resume();
+  finish();
+  await built.runner.loop;
+  assert.equal(result(built.docs, SLOW).status, "done");
+});
+
+test("a resume mid-run writes the runner document running, naming the held run, before the run ends", async () => {
+  const { built, finish } = await holding();
+  await built.runner.suspend();
+  assert.equal(runnerDoc(built.docs).state, "suspended");
+  // As if an earlier write had been lost: the running write names the run itself.
+  built.docs.set(runnerPath(PORTAL, USER), { ...runnerDoc(built.docs), current_package: null });
+  built.runner.resume();
+  await until(() => runnerDoc(built.docs).state === "running", "the running write");
+  assert.deepEqual(runnerDoc(built.docs).current_package, { class_hash: CLASS, package_key: SLOW_KEY });
+  assert.equal(built.runner.state, "running");
+  assert.equal(result(built.docs, SLOW).status, "running");
+  finish();
+  await built.runner.loop;
+  assert.equal(result(built.docs, SLOW).status, "done");
+  assert.equal(runnerDoc(built.docs).state, "ready");
+});
+
+test("a resume while the held run's final write is under way leaves the runner document to that write", async () => {
+  const g = gate((p, fields) => p.includes("/results/") && fields.status === "done");
+  const { built, finish } = await holding({ wrapStore: g.wrap });
+  finish();
+  await until(() => g.held.length === 1, "the final write");
+  await built.runner.suspend();
+  const calls = built.fn.state.calls.length;
+  built.runner.resume();
+  await until(() => built.fn.state.calls.length > calls, "the post-resume /work");
+  await settle(20);
+  assert.equal(runnerDoc(built.docs).state, "suspended");
+  g.held[0].release();
+  await built.runner.loop;
+  assert.equal(result(built.docs, SLOW).status, "done");
+  assert.equal(runnerDoc(built.docs).state, "ready");
+});
+
 test("/suspend while idle stops nothing, and /resume continues nothing", async () => {
   const { runner, record } = await started();
   await runner.loop;
@@ -1938,12 +2105,14 @@ test("a package that cannot be stopped is left to the flush's verify, and a fail
       thawPackageProcesses: async () => { throw new Error("kill failed"); }
     }
   });
+  let suspendedAs;
   const lines = await captured(async () => {
     await built.runner.suspend();
+    suspendedAs = runnerDoc(built.docs).state;
     built.runner.resume();
     await settle(10);
   });
-  assert.equal(runnerDoc(built.docs).state, "suspended", "the flush still ran and verified");
+  assert.equal(suspendedAs, "suspended", "the flush still ran and verified");
   assert.ok(lines.some((l) => l.event === "package.freeze_failed" && /5 stops/.test(l.error)));
   assert.ok(lines.some((l) => l.event === "package.thaw_failed" && /kill failed/.test(l.error)));
   finish();

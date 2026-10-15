@@ -181,11 +181,11 @@ export async function thawPackageProcesses({ uid, exec = run }) {
 // runner's process, which holds credentials in its own $HOME and whatever the SDK has
 // cached after a resume. What it gets is what package-env named, plus the proxy, which
 // is the only route out of the namespace.
-export async function runSandboxed({ uid, netns, command, args = [], env, cwd, timeout, proxyUrl, exec = run }) {
+export async function runSandboxed({ uid, netns, command, args = [], env, cwd, signal, proxyUrl, exec = run }) {
   const spec = sandboxCommand({ uid, netns, command, args });
   return exec(spec.command, spec.args, {
     cwd,
-    timeout,
+    signal,
     env: proxyUrl ? { ...env, HTTPS_PROXY: proxyUrl, https_proxy: proxyUrl } : env,
     killSignal: "SIGKILL",
     maxBuffer: 8 * 1024 * 1024

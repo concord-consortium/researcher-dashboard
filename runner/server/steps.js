@@ -110,7 +110,7 @@ export function makeSteps({ login = ccDataLogin } = {}) {
 
     // The entrypoint runs as the package uid in the sandbox, with the environment
     // package-env named and nothing inherited from the runner's own process.
-    runPackage: async ({ manifest, paths, env, uid, timeoutMs, proxyUrl, exec }) => {
+    runPackage: async ({ manifest, paths, env, uid, signal, proxyUrl, exec }) => {
       const entrypoint = path.resolve(manifest.dir, manifest.entrypoint);
       const interpreter = entrypoint.endsWith(".py") ? "python3.11" : entrypoint;
       const args = entrypoint.endsWith(".py") ? [entrypoint] : [];
@@ -126,7 +126,7 @@ export function makeSteps({ login = ccDataLogin } = {}) {
           args,
           env,
           cwd: manifest.dir,
-          timeout: timeoutMs,
+          signal,
           proxyUrl,
           ...(exec ? { exec } : {})
         });

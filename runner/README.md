@@ -9,7 +9,7 @@ Everything per VM arrives in `runHookPayload` at `/run`. The image's environment
 | Variable | Default | What it bounds |
 |---|---|---|
 | `PACKAGE_MAX_DURATION_SECONDS` | 7200 | A manifest declaring more is refused. The default is report-server's publish limit (the contract fixture's `limits.max_duration_seconds`); a value below it or above 28800 stops the runner at startup |
-| `PACKAGE_TIMEOUT_MS` | unset | Unset, a package's process is bounded at its declared duration plus 10 minutes |
+| `PACKAGE_TIMEOUT_MS` | unset | Unset, a package's process is bounded at its declared duration plus 10 minutes of the VM's awake time |
 | `IDLE_PERIOD_MS` | 300000 | How long a drained VM keeps asking for work before it asks to be suspended; under the watchdog's 30 minutes |
 | `IDLE_POLL_MS` | 30000 | How often it asks meanwhile |
 | `PACKAGE_UID` | 1000 | The package user, which the image creates first |

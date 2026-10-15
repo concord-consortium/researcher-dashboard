@@ -73,6 +73,7 @@ async function withPackageDir(fn) {
 test("runPackage runs the entrypoint as the package uid with only the named environment", async () => {
   await withPackageDir(async (dir, outputDir) => {
     const calls = [];
+    const { signal } = new AbortController();
     fs.writeFileSync(path.join(outputDir, "display.md"), "# ok");
     fs.writeFileSync(path.join(outputDir, "summary.txt"), "ok\n");
     const result = await makeSteps().runPackage({
@@ -80,7 +81,7 @@ test("runPackage runs the entrypoint as the package uid with only the named envi
       paths: { outputDir },
       env: { HOME: "/work/home/x", CC_DATA_LOCAL: "/data/classes/x" },
       uid: 1000,
-      timeoutMs: 1000,
+      signal,
       proxyUrl: "http://10.201.0.1:8123",
       exec: async (command, args, options) => { calls.push({ command, args, options }); return { stdout: "", stderr: "" }; }
     });
@@ -90,7 +91,8 @@ test("runPackage runs the entrypoint as the package uid with only the named envi
     assert.ok(call.args.includes("netns") && call.args.includes("package"));
     assert.ok(call.args.includes("--reuid=1000") && call.args.includes("--no-new-privs"));
     assert.deepEqual(Object.keys(call.options.env).sort(), ["CC_DATA_LOCAL", "HOME", "HTTPS_PROXY", "https_proxy"]);
-    assert.equal(call.options.timeout, 1000);
+    assert.equal(call.options.signal, signal, "the runner's bound ends the process");
+    assert.equal(call.options.timeout, undefined, "no bound of its own, which would count time the VM was suspended");
     assert.equal(call.options.killSignal, "SIGKILL", "a package that traps SIGTERM still ends at its bound");
   });
 });
@@ -197,7 +199,7 @@ test("runPackage logs what the package printed, truncated from the head", async 
   await withPackageDir(async (dir, outputDir) => {
     fs.writeFileSync(path.join(outputDir, "display.md"), "# ok");
     const lines = await captureLog(() => makeSteps().runPackage({
-      manifest: { name: "class-counts", version: "1.0.0", entrypoint: "run.py", dir }, paths: { outputDir }, env: {}, uid: 1000, timeoutMs: 1000,
+      manifest: { name: "class-counts", version: "1.0.0", entrypoint: "run.py", dir }, paths: { outputDir }, env: {}, uid: 1000,
       exec: processExec({ run: async () => ({ stdout: `${"x".repeat(9000)}THE END`, stderr: "dataset: x" }) }).exec
     }));
     const output = lines.find((l) => l.event === "package.output");
@@ -210,7 +212,7 @@ test("a package that fails has its output logged before the failure is raised", 
   await withPackageDir(async (dir, outputDir) => {
     const failure = Object.assign(new Error("exited 1"), { stdout: "", stderr: "cc-data: NOT_AUTHENTICATED" });
     const lines = await captureLog(async () => {
-      await assert.rejects(makeSteps().runPackage({ manifest: { name: "x", version: "1.0.0", entrypoint: "run.py", dir }, paths: { outputDir }, env: {}, uid: 1000, timeoutMs: 1000, exec: processExec({ run: async () => { throw failure; } }).exec }), /^Error: exited 1$|^exited 1$/);
+      await assert.rejects(makeSteps().runPackage({ manifest: { name: "x", version: "1.0.0", entrypoint: "run.py", dir }, paths: { outputDir }, env: {}, uid: 1000, exec: processExec({ run: async () => { throw failure; } }).exec }), /^Error: exited 1$|^exited 1$/);
     });
     const output = lines.find((l) => l.event === "package.output");
     assert.equal(output.level, "error");

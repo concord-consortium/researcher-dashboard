@@ -43,6 +43,44 @@ const everyInterval = (ms, fn) => {
   return () => clearInterval(timer);
 };
 
+// A package's bound, counted in the VM's awake time only. The VM's clock runs on while it
+// is suspended, so /suspend pauses the bound and /resume arms it again with what was left.
+class AwakeBound {
+  #left;
+  #armedAt = null;
+  #timer = null;
+  #ended = false;
+
+  constructor(ms, onExpire, now) {
+    this.#left = ms;
+    this.onExpire = onExpire;
+    this.now = now;
+  }
+
+  start() {
+    if (this.#ended || this.#timer !== null) return;
+    this.#armedAt = this.now();
+    this.#timer = setTimeout(() => {
+      this.#ended = true;
+      this.#timer = null;
+      this.onExpire();
+    }, Math.max(0, this.#left));
+  }
+
+  pause() {
+    if (this.#timer === null) return;
+    clearTimeout(this.#timer);
+    this.#timer = null;
+    this.#left -= this.now() - this.#armedAt;
+  }
+
+  end() {
+    this.#ended = true;
+    clearTimeout(this.#timer);
+    this.#timer = null;
+  }
+}
+
 // Orchestrates the VM's lifecycle and its pull loop. Everything that touches the world is
 // injected: the stores, the function, the storage credentials, the sync and package
 // backends, the egress setup and the package steps. That is what lets the tests drive the
@@ -294,6 +332,15 @@ export class Runner {
       }
 
       if (!request) return;
+
+      // A run the suspend held is running again, so the document says so and names it,
+      // rather than keeping /suspend's `suspended` until the run ends. Not once the run's
+      // final write is under way, since that settles before anything else is written.
+      if (this.#run && !this.#run.finishing && this.#vm.state === STATES.READY) {
+        this.#vm.to(STATES.RUNNING);
+        await this.status.writeFromHook("work", { state: STATES.RUNNING, ...this.#runningPackage() });
+        if (!this.#current(epoch)) return;
+      }
 
       // After a resume: fresh credentials before the syncer ticks again, and nothing
       // claimed until a package the suspend interrupted has finished and /work has been
@@ -630,17 +677,24 @@ export class Runner {
       const heartbeat = this.#run.heartbeat;
 
       const timeoutMs = this.env.packageTimeoutMs ?? declared * 1000 + PACKAGE_TIMEOUT_MARGIN_MS;
-      let timer;
       let timedOut = false;
+      // The bound ends the sandboxed process too: a timeout of the process's own would count
+      // the time the VM spent suspended.
+      const abort = new AbortController();
+      let bound;
       const timeout = new Promise((_, reject) => {
-        timer = setTimeout(() => {
+        bound = new AwakeBound(timeoutMs, () => {
           timedOut = true;
+          abort.abort();
           reject(new Error(`the package ran past its ${Math.round(timeoutMs / 1000)}s bound`));
-        }, timeoutMs);
+        }, this.now);
       });
-      const running = this.#steps({ entry, docId, docs, scope, manifest, timeoutMs, cancelled: () => timedOut });
+      this.#run.bound = bound;
+      // A claim that lands while /suspend runs is armed by the resume.
+      if (this.#vm.state !== STATES.SUSPENDING && this.#vm.state !== STATES.SUSPENDED) bound.start();
+      const running = this.#steps({ entry, docId, docs, scope, manifest, signal: abort.signal, cancelled: () => timedOut });
       try {
-        const result = await Promise.race([running, timeout]);
+        const result = await Promise.race([running, timeout]).finally(() => { this.#run.finishing = true; });
         // /terminate has written this run failed, the last word on it: what the package
         // left after the hook's flush was never synced.
         if (this.#terminating) return true;
@@ -660,7 +714,7 @@ export class Runner {
         await docs.failed(docId, { pkg, error: err.message })
           .catch((writeErr) => log.error("status.write_failed", { write: "result", error: writeErr.message }));
       } finally {
-        clearTimeout(timer);
+        bound.end();
       }
       return true;
     } finally {
@@ -686,7 +740,7 @@ export class Runner {
       .catch((err) => log.error("package.kill_failed", { error: err.message }));
   }
 
-  async #steps({ entry, docId, docs, scope, manifest, timeoutMs, cancelled }) {
+  async #steps({ entry, docId, docs, scope, manifest, signal, cancelled }) {
     const stage = async (name, fn) => {
       if (cancelled()) throw new Error("the package's run was ended before its next stage");
       await docs.stage(docId, name);
@@ -724,7 +778,7 @@ export class Runner {
         paths: prepared.paths,
         env: prepared.env,
         uid: this.env.packageUid,
-        timeoutMs,
+        signal,
         proxyUrl: this.proxyUrl
       })
     );
@@ -748,6 +802,7 @@ export class Runner {
     this.#requireStarted();
     this.#suspendSeen = true;
     this.#vm.to(STATES.SUSPENDING);
+    this.#run?.bound?.pause();
     await this.status.writeFromHook("suspend", { state: STATES.SUSPENDING, ...this.#runningPackage() });
     // A package still writing would fail the verify, so it is stopped where it stands
     // until /resume. One that cannot be stopped is left to the verify.
@@ -803,6 +858,7 @@ export class Runner {
     this.storage?.markStale();
     this.syncer.stop();
     if (this.#vm.state === STATES.SUSPENDED) this.#vm.to(STATES.READY);
+    this.#run?.bound?.start();
     this.#startLoop({ afterResume: true });
     return { state: this.#vm.state };
   }
