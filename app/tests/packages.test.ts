@@ -2,13 +2,12 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { groupPackages, identityOfKey, needsRefresh, packageKey, scopeUrls, titleOf } from "../src/shell/packages";
-import { row, SCOPE } from "./fixtures";
+import { row, SCOPE, stamp } from "./fixtures";
 
 const DAY = 24 * 3600 * 1000;
-const at = (ms: number) => ({ toMillis: () => ms });
 
 describe("needsRefresh", () => {
-  const current = { assignment_fingerprint: "v1:abc", derived_at: at(10 * DAY) };
+  const current = { assignment_fingerprint: "v1:abc", derived_at: stamp(10 * DAY) };
 
   it("refreshes a missing, changed, undated or old profile", () => {
     expect(needsRefresh(null, SCOPE, 10 * DAY, DAY)).toBe(true);

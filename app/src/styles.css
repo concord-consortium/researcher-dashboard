@@ -29,3 +29,9 @@ section { border-top: 1px solid var(--line); padding-top: 0.5rem; }
 .identity { color: var(--muted); font-size: 0.85rem; }
 .community summary { cursor: pointer; }
 .disclosure { color: var(--warn); }
+.ownership { color: var(--muted); }
+.counts { list-style: none; padding: 0; }
+.state p, .finished p, .reason { margin: 0.2rem 0; }
+.when, .reason { color: var(--muted); }
+.controls { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-top: 0.3rem; }
+button[aria-disabled="true"] { opacity: 0.55; cursor: not-allowed; }

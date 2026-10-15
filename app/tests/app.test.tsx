@@ -16,6 +16,13 @@ describe("App", () => {
     expect(document.body.textContent).not.toMatch(/Analy[sz]/);
   });
 
+  it("says the dashboard runs packages and shows their results and counts", () => {
+    render(<App start={{ kind: "info", reason: "no-launch" }} reauthorize={none} />);
+    const list = screen.getByRole("heading", { name: "What it can show" }).nextElementSibling!;
+    expect(list.textContent).toMatch(/Running a package for the class, and the result it wrote\./);
+    expect(list.textContent).toMatch(/The counts from your own runs\./);
+  });
+
   it("says why it is not showing a class, with the portal's error where it sent one", () => {
     render(<App start={{ kind: "info", reason: "authorize-error", detail: "server_error" }} reauthorize={none} />);
     expect(screen.getByRole("status").textContent).toMatch(/could not sign you in.*server_error/);

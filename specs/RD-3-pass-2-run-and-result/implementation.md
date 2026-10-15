@@ -328,8 +328,9 @@ export function sessionLines(runner: Runner | null, classHash: string, results: 
 - `app/src/components/Counts.tsx` (new)
 - `app/src/pages/ClassDashboard.tsx`: the run handler, request state, session line, counts, ownership line
 - `app/src/pages/Info.tsx`: "What it can show"
+- `app/src/shell/portal.ts`: `ApiError.reason`, the server's own message or null
 - `app/src/styles.css`
-- `app/tests/class-dashboard.test.tsx`, `app/tests/package-list.test.tsx` (new), `app/tests/app.test.tsx` (the info page's list)
+- `app/tests/class-dashboard.test.tsx`, `app/tests/package-list.test.tsx` (new), `app/tests/app.test.tsx` (the info page's list), `app/tests/portal.test.ts`
 
 **Estimated diff size**: ~380 lines, about half tests
 
@@ -377,7 +378,7 @@ The runner listener keeps the mark beside the document: `on.runner` sets `runner
 
 The session line is `sessionLines(runner, scope.class_hash, results, titleForKey, [...requests.values()].some((r) => "pending" in r))`, where `titleForKey` looks the key up among the grouped rows.
 
-`refused` gains one rule, `ApiError` 404 from the portal renders `class-gone`, so the run request's 404 and a refresh's 404 behave as the scope's already does, and the scope effect's own 404 branch (`ClassDashboard.tsx:54`) is deleted, since `refused` now covers it; pass 1's "renders the class-gone page on a 404" test keeps guarding it. Its other rules already give R6's 401, young-token, 403 and unreachable handling.
+`refused` gains one rule, `ApiError` 404 from the portal renders `class-gone`, so the run request's 404 and a refresh's 404 behave as the scope's already does, and the scope effect's own 404 branch (`ClassDashboard.tsx:54`) is deleted, since `refused` now covers it; pass 1's "renders the class-gone page on a 404" test keeps guarding it. Its other rules already give R6's 401, young-token and 403 handling. For the rest, `refused` shows an `ApiError`'s `reason`, the server's own message, and otherwise the source's unreachable line: `Api.request` sets `reason` to null when the answer carries no `message` or `error` (a proxy's HTML error page), so R6's "The portal could not be reached." covers a bare 502 or 504 as it does a failed fetch.
 
 `Counts` renders R20's block from `counts` (`undefined` before the first snapshot renders nothing; `null` renders "No runs yet."), formatting each timestamp with `formatTime(ms) = new Date(ms).toLocaleString()`, which `runs.ts` exports and the row uses too. The ownership line is a `<p className="ownership">` under the header's meta line. The session lines join the Packages section's live region.
 

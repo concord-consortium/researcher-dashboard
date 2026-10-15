@@ -1,18 +1,20 @@
-import { act, cleanup, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ClassDashboard } from "../src/pages/ClassDashboard";
 import type { Profile } from "../src/shell/packages";
 import { ApiError, SessionExpired, type PackageRow, type Portal, type ReportServer, type Scope } from "../src/shell/portal";
 import type { Counts, Result, Runner } from "../src/shell/runs";
 import type { ClassListeners, DashboardServices } from "../src/shell/services";
-import { row, SCOPE } from "./fixtures";
+import { row, SCOPE, stamp } from "./fixtures";
 
 afterEach(cleanup);
 
 const NOW = 100 * 24 * 3600 * 1000;
+const WILDFIRE = row({ title: "Wildfire open responses", official: true, identity: "projects/20/wildfire-responses" });
+const KEY = "projects__20__wildfire-responses";
 const CURRENT: Profile = {
   assignment_urls: ["https://ap.test/?activity=1"], interactive_urls: ["https://qi.test/open-response/"],
-  assignment_fingerprint: SCOPE.assignment_fingerprint, derived_at: { toMillis: () => NOW - 1000 }
+  assignment_fingerprint: SCOPE.assignment_fingerprint, derived_at: stamp(NOW - 1000)
 };
 
 function services(over: {
@@ -20,19 +22,21 @@ function services(over: {
   refresh?: () => Promise<unknown>;
   watch?: () => Promise<() => void>;
   list?: (urls: string[]) => Promise<PackageRow[]>;
+  run?: (identity: string, version: string) => Promise<unknown>;
 } = {}) {
   let on: ClassListeners | null = null;
   const unsubscribe = vi.fn();
   const refreshProfile = vi.fn(over.refresh ?? (async () => ({ queued: true })));
-  const listPackages = vi.fn(over.list ?? (async () => [row({ title: "Wildfire open responses", official: true })]));
+  const listPackages = vi.fn(over.list ?? (async () => [WILDFIRE]));
+  const runPackage = vi.fn(over.run ?? (async () => ({ queue: [], appended: [], vm: "launched" })));
   const fake: DashboardServices = {
-    portal: { scope: over.scope ?? (async () => SCOPE), refreshProfile } as unknown as Portal,
+    portal: { scope: over.scope ?? (async () => SCOPE), refreshProfile, runPackage } as unknown as Portal,
     reportServer: { listPackages } as unknown as ReportServer,
     watchClass: vi.fn(over.watch ?? (async (_scope, listeners) => { on = listeners; return unsubscribe; })),
     now: () => NOW
   };
   return {
-    fake, refreshProfile, listPackages, unsubscribe,
+    fake, refreshProfile, listPackages, runPackage, unsubscribe,
     snapshot: (p: Profile | null) => act(() => on!.profile(p)),
     refuse: () => act(() => on!.refused("profile")),
     runner: (r: Runner | null) => act(() => on!.runner(r)),
@@ -125,13 +129,13 @@ describe("ClassDashboard", () => {
   it("refreshes an old profile, and never a current one", async () => {
     const old = services();
     await mounted(old);
-    await old.snapshot({ ...CURRENT, derived_at: { toMillis: () => 0 } });
+    await old.snapshot({ ...CURRENT, derived_at: stamp(0) });
     expect(old.refreshProfile).toHaveBeenCalledTimes(1);
     cleanup();
     const current = services();
     await mounted(current);
     await current.snapshot(CURRENT);
-    await current.snapshot({ ...CURRENT, derived_at: { toMillis: () => NOW } });
+    await current.snapshot({ ...CURRENT, derived_at: stamp(NOW) });
     expect(current.refreshProfile).not.toHaveBeenCalled();
   });
 
@@ -183,7 +187,7 @@ describe("ClassDashboard", () => {
     const s = services();
     await mounted(s);
     await s.snapshot(CURRENT);
-    await s.snapshot({ ...CURRENT, derived_at: { toMillis: () => NOW } });
+    await s.snapshot({ ...CURRENT, derived_at: stamp(NOW) });
     expect(s.listPackages).toHaveBeenCalledTimes(1);
     await s.snapshot({ ...CURRENT, interactive_urls: [] });
     expect(s.listPackages).toHaveBeenCalledTimes(2);
@@ -302,5 +306,217 @@ describe("ClassDashboard", () => {
     await results.refuseRuns("results");
     expect(screen.getByText("Your runs could not be read.")).toBeDefined();
     expect(screen.queryByText("Your counts could not be read.")).toBeNull();
+  });
+});
+
+// A deferred answer, so a test can look at the page while a request is in flight.
+function deferred<T>() {
+  let resolve: (value: T) => void = () => {}, reject: (error: unknown) => void = () => {};
+  const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej; });
+  return { promise, resolve, reject };
+}
+
+function wildfire(over: Partial<Result> = {}): Result {
+  return { status: "queued", package: { identity: WILDFIRE.identity, version: "1.0.0", checksum: "c" }, updated_at: stamp(10), ...over };
+}
+
+async function listed(s: ReturnType<typeof services>, onExpired = vi.fn()) {
+  await mounted(s, onExpired);
+  await s.snapshot(CURRENT);
+  await screen.findByText("Wildfire open responses");
+  return onExpired;
+}
+
+const wildfireRow = () => screen.getByText("Wildfire open responses", { selector: ".title" }).closest("li")!;
+const wildfireLine = () => wildfireRow().querySelector(".state")!;
+const runButton = () => within(wildfireRow()).getByRole("button", { name: /^(Run|Resume) Wildfire open responses$/ });
+
+describe("running a package", () => {
+  it("asks the portal to run the row's package at its current version, and says so while it asks", async () => {
+    const answer = deferred<unknown>();
+    const s = services({ run: () => answer.promise });
+    await listed(s);
+    runButton().focus();
+    fireEvent.click(runButton());
+    expect(s.runPackage).toHaveBeenCalledWith("projects/20/wildfire-responses", "1.0.0");
+    expect(within(wildfireLine() as HTMLElement).getByText("Requesting…")).toBeDefined();
+    expect(runButton().getAttribute("aria-disabled")).toBe("true");
+    expect(runButton().hasAttribute("disabled")).toBe(false);
+    expect(document.activeElement).toBe(runButton());
+    fireEvent.click(runButton());
+    expect(s.runPackage).toHaveBeenCalledTimes(1);
+    await act(async () => answer.resolve({ queue: [], appended: [KEY], vm: "launched" }));
+    expect(screen.queryByText("Requesting…")).toBeNull();
+  });
+
+  it("reads as plain Queued, without asking for a run, while its own request is launching the machine", async () => {
+    const answer = deferred<unknown>();
+    const s = services({ run: () => answer.promise });
+    await listed(s);
+    fireEvent.click(runButton());
+    await s.runner({ queue: [{ class_hash: SCOPE.class_hash, package_key: KEY }], updated_at: stamp(10) });
+    await s.results(new Map([[KEY, wildfire()]]));
+    expect(wildfireLine().querySelector("p")!.textContent).toBe("Queued, number 1 in line.");
+    expect(screen.queryByText(/run it to start one/)).toBeNull();
+    await act(async () => answer.resolve({}));
+    expect(wildfireLine().querySelector("p")!.textContent).toBe("Queued, waiting for a machine: run it to start one.");
+  });
+
+  it("does not ask for a run above the list while one is being requested", async () => {
+    const answer = deferred<unknown>();
+    const s = services({ run: () => answer.promise });
+    await listed(s);
+    await s.runner({ state: "terminated", queue: [{ class_hash: SCOPE.class_hash, package_key: KEY }] });
+    await s.results(new Map([[KEY, wildfire()]]));
+    const status = () => document.querySelector(".status")!.textContent;
+    expect(status()).toContain("Queued, waiting for a machine: run it to start one.");
+    fireEvent.click(runButton());
+    expect(status()).toContain("Your machine has stopped.");
+    expect(status()).not.toContain("run it to start one");
+    await act(async () => answer.resolve({}));
+    expect(status()).toContain("Queued, waiting for a machine: run it to start one.");
+  });
+
+  it("shows a refusal on its row until the result changes", async () => {
+    const other = row({ title: "Other package", official: true });
+    const s = services({
+      list: async () => [WILDFIRE, other],
+      run: async () => { throw new ApiError("projects/20/wildfire-responses@1.0.0 cannot be run", 409); }
+    });
+    await listed(s);
+    await s.results(new Map([[KEY, wildfire({ status: "done", summary: "Earlier", updated_at: stamp(5) })]]));
+    fireEvent.click(runButton());
+    const message = await within(wildfireLine() as HTMLElement).findByText("projects/20/wildfire-responses@1.0.0 cannot be run");
+    expect(message.className).toBe("error");
+    expect(screen.getAllByText(/cannot be run/)).toHaveLength(1);
+    await s.results(new Map([[KEY, wildfire({ status: "done", summary: "Earlier", updated_at: stamp(5) })]]));
+    expect(screen.getByText(/cannot be run/)).toBeDefined();
+    await s.results(new Map([[KEY, wildfire({ updated_at: stamp(6) })]]));
+    expect(screen.queryByText(/cannot be run/)).toBeNull();
+  });
+
+  it("shows a refusal from the machine's launch that arrives after the package was queued", async () => {
+    const answer = deferred<unknown>();
+    const s = services({ run: () => answer.promise });
+    await listed(s);
+    fireEvent.click(runButton());
+    await s.results(new Map([[KEY, wildfire({ updated_at: stamp(20) })]]));
+    await act(async () => answer.reject(new ApiError("report-service could not start a machine", 502)));
+    expect(within(wildfireLine() as HTMLElement).getByText("report-service could not start a machine")).toBeDefined();
+    await s.results(new Map([[KEY, wildfire({ updated_at: stamp(21) })]]));
+    expect(screen.queryByText("report-service could not start a machine")).toBeNull();
+  });
+
+  it("says the portal could not be reached when its refusal carries no message", async () => {
+    const s = services({ run: async () => { throw new ApiError(null, 502, "/api/v1/researcher_dashboard/run_package"); } });
+    await listed(s);
+    fireEvent.click(runButton());
+    expect(await within(wildfireLine() as HTMLElement).findByText("The portal could not be reached.")).toBeDefined();
+    expect(screen.queryByText(/run_package failed/)).toBeNull();
+  });
+
+  it("says the portal could not be reached on the row", async () => {
+    const s = services({ run: async () => { throw new TypeError("Failed to fetch"); } });
+    await listed(s);
+    fireEvent.click(runButton());
+    expect(await within(wildfireLine() as HTMLElement).findByText("The portal could not be reached.")).toBeDefined();
+  });
+
+  it("re-authorizes on a 401, and renders the withdrawn and class-gone pages", async () => {
+    const expired = services({ run: async () => { throw new SessionExpired(false); } });
+    const onExpired = await listed(expired);
+    fireEvent.click(runButton());
+    await vi.waitFor(() => expect(onExpired).toHaveBeenCalledTimes(1));
+    cleanup();
+    const withdrawn = services({ run: async () => { throw new ApiError("You do not have access to this class as a researcher", 403); } });
+    await listed(withdrawn);
+    fireEvent.click(runButton());
+    expect(await screen.findByText(/access to this class has been withdrawn/)).toBeDefined();
+    cleanup();
+    const gone = services({ run: async () => { throw new ApiError("Not found", 404); } });
+    await listed(gone);
+    fireEvent.click(runButton());
+    expect(await screen.findByText("This class no longer exists.")).toBeDefined();
+    expect(screen.queryByText("Wildfire open responses")).toBeNull();
+    expect(screen.queryByText("Not found")).toBeNull();
+  });
+
+  describe("resuming a paused run", () => {
+    afterEach(() => { vi.useRealTimers(); });
+
+    const paused = { state: "suspended", microvm_id: "vm-1", updated_at: stamp(100) };
+    const run = (over: Partial<Result> = {}) => wildfire({ status: "running", stage: "run_package", microvm_id: "vm-1", updated_at: stamp(90), ...over });
+
+    it("says it is resuming until the run writes again", async () => {
+      const s = services();
+      await listed(s);
+      await s.runner(paused);
+      await s.results(new Map([[KEY, run()]]));
+      expect(wildfireLine().querySelector("p")!.textContent).toBe("Paused partway through: resume it to finish.");
+      fireEvent.click(runButton());
+      await vi.waitFor(() => expect(wildfireLine().querySelector("p")!.textContent).toBe("Resuming: it will continue within a minute or two."));
+      expect(s.runPackage).toHaveBeenCalledTimes(1);
+      expect(runButton().getAttribute("aria-disabled")).toBe("true");
+      await s.results(new Map([[KEY, run({ updated_at: stamp(150) })]]));
+      expect(wildfireLine().querySelector("p")!.textContent).toBe("Running Wildfire open responses: running the package.");
+      await s.runner({ ...paused, state: "suspending", updated_at: stamp(160) });
+      await s.runner({ ...paused, updated_at: stamp(170) });
+      expect(wildfireLine().querySelector("p")!.textContent).toBe("Paused partway through: resume it to finish.");
+      expect(runButton().getAttribute("aria-disabled")).toBeNull();
+    });
+
+    it("offers Resume again after three minutes with no write", async () => {
+      const s = services();
+      await listed(s);
+      vi.useFakeTimers();
+      await s.runner(paused);
+      await s.results(new Map([[KEY, run()]]));
+      fireEvent.click(runButton());
+      await act(async () => { await Promise.resolve(); });
+      expect(wildfireLine().querySelector("p")!.textContent).toBe("Resuming: it will continue within a minute or two.");
+      await act(async () => { vi.advanceTimersByTime(3 * 60_000 - 1); });
+      expect(wildfireLine().querySelector("p")!.textContent).toBe("Resuming: it will continue within a minute or two.");
+      await act(async () => { vi.advanceTimersByTime(1); });
+      expect(wildfireLine().querySelector("p")!.textContent).toBe("Paused partway through: resume it to finish.");
+      expect(runButton().getAttribute("aria-disabled")).toBeNull();
+    });
+
+    it("keeps a resumed run running when another request moves the session document", async () => {
+      const s = services();
+      await listed(s);
+      await s.runner(paused);
+      await s.results(new Map([[KEY, run({ updated_at: stamp(150) })]]));
+      await s.runner({ ...paused, updated_at: stamp(200) });
+      expect(wildfireLine().querySelector("p")!.textContent).toBe("Running Wildfire open responses: running the package.");
+    });
+  });
+});
+
+describe("what the page says of the researcher's own runs", () => {
+  it("says what the researcher's machine is doing", async () => {
+    const s = services();
+    await listed(s);
+    await s.runner({ state: "running", current_package: { class_hash: SCOPE.class_hash, package_key: KEY } });
+    const line = screen.getByText("Running Wildfire open responses.");
+    expect(line.closest("[aria-live]")).not.toBeNull();
+  });
+
+  it("shows the researcher's counts, and says when there are none", async () => {
+    const s = services();
+    await mounted(s);
+    expect(screen.queryByRole("heading", { name: "Your counts" })).toBeNull();
+    await s.counts({ data: { answers: 9, last_pull_at: stamp(1000) } });
+    const section = screen.getByRole("heading", { level: 2, name: "Your counts" }).closest("section")!;
+    expect(within(section).getByText("Answers 9")).toBeDefined();
+    expect(within(section).getByText("Logs not reported")).toBeDefined();
+    expect(within(section).getByText(/^From your last run, /)).toBeDefined();
+    expect(within(section).queryByText(/Logs current to/)).toBeNull();
+    await s.counts(null);
+    expect(within(screen.getByRole("heading", { name: "Your counts" }).closest("section")!).getByText("No runs yet.")).toBeDefined();
+  });
+
+  it("says the results and counts are the researcher's own", async () => {
+    await mounted(services());
+    expect(screen.getByText("Results and counts on this page are your own. Another researcher of this class sees their own runs.")).toBeDefined();
   });
 });

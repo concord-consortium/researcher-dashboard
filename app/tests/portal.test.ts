@@ -52,7 +52,8 @@ describe("Api", () => {
 
   it("still fails when the body is not json", async () => {
     const broken = { ok: false, status: 502, json: async () => { throw new Error("not json"); } } as unknown as Response;
-    await expect(apiWith(broken).api.request("/x")).rejects.toEqual(new ApiError("/x failed", 502));
+    await expect(apiWith(broken).api.request("/x")).rejects.toEqual(new ApiError(null, 502, "/x"));
+    await expect(apiWith(broken).api.request("/x")).rejects.toMatchObject({ reason: null, message: "/x failed" });
   });
 });
 

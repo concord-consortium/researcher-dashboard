@@ -40,9 +40,14 @@ export interface PackageRow {
 
 export interface Resolved { archived: boolean }
 
+// `reason` is the server's own message, and null when its answer carried none (a proxy's HTML
+// error page, say), which the page then words for itself.
 export class ApiError extends Error {
-  constructor(message: string, readonly status: number) {
-    super(message);
+  readonly reason: string | null;
+
+  constructor(reason: string | null, readonly status: number, path = "") {
+    super(reason ?? `${path} failed`);
+    this.reason = reason;
   }
 }
 
@@ -83,8 +88,8 @@ export class Api {
     const body = await response.json().catch(() => null);
     if (!response.ok) {
       // The server's own message says which of several refusals this is.
-      const message = (body && (body.message ?? body.error)) || `${path} failed`;
-      throw new ApiError(String(message), response.status);
+      const message = body && (body.message ?? body.error);
+      throw new ApiError(message ? String(message) : null, response.status, path);
     }
     return body as T;
   }

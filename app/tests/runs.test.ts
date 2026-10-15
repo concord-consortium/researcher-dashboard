@@ -3,8 +3,8 @@ import {
   isStuck, latestFinished, nextMark, queuePosition, rowState, runOffer, sessionLines, sessionTakes, stageWords,
   type Result, type Runner, type SessionMark
 } from "../src/shell/runs";
+import { stamp } from "./fixtures";
 
-const stamp = (ms: number) => ({ toMillis: () => ms });
 const PKG = { identity: "projects/20/w", version: "1.0.0", checksum: "sha256:x" };
 const H = "hash223", K = "projects__20__w";
 

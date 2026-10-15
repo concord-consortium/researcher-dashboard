@@ -1,9 +1,13 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Counts } from "../components/Counts";
 import { PackageList } from "../components/PackageList";
-import { needsRefresh, scopeUrls, type Profile } from "../shell/packages";
+import { groupPackages, needsRefresh, packageKey, scopeUrls, titleOf, type Profile } from "../shell/packages";
 import { ApiError, SessionExpired, type PackageRow, type Scope } from "../shell/portal";
 import { PROFILE_MAX_AGE_MS } from "../shell/portals";
-import type { Counts, Result, Runner } from "../shell/runs";
+import {
+  nextMark, RESUME_WAIT_MS, sessionLines,
+  type Counts as CountsDoc, type Result, type Runner, type RunRequest, type SessionMark
+} from "../shell/runs";
 import type { DashboardServices } from "../shell/services";
 import type { InfoReason } from "../shell/start";
 import { Info } from "./Info";
@@ -29,10 +33,12 @@ export function ClassDashboard({ services, onExpired }: {
   const [profile, setProfile] = useState<Profile | null | undefined>(undefined);
   const [profileProblem, setProfileProblem] = useState<string | null>(null);
   const [refreshProblem, setRefreshProblem] = useState<string | null>(null);
-  const [, setRunner] = useState<Runner | null>(null);
+  const [runner, setRunner] = useState<Runner | null>(null);
+  const [mark, setMark] = useState<SessionMark | null>(null);
   // undefined until the first snapshot; null while the document does not exist.
-  const [, setCounts] = useState<Counts | null | undefined>(undefined);
-  const [, setResults] = useState<Map<string, Result>>(new Map());
+  const [counts, setCounts] = useState<CountsDoc | null | undefined>(undefined);
+  const [results, setResults] = useState<Map<string, Result>>(new Map());
+  const [requests, setRequests] = useState<Map<string, RunRequest>>(new Map());
   const [runsProblem, setRunsProblem] = useState<string | null>(null);
   const [countsProblem, setCountsProblem] = useState<string | null>(null);
   const [rows, setRows] = useState<PackageRow[] | null>(null);
@@ -44,7 +50,8 @@ export function ClassDashboard({ services, onExpired }: {
   function refused(error: unknown, show: (message: string) => void, from: Source) {
     if (error instanceof SessionExpired) return error.young ? setInfo("expired") : onExpired();
     if (error instanceof ApiError && error.status === 403 && from === "portal") return setInfo("withdrawn");
-    if (error instanceof ApiError) return show(error.message);
+    if (error instanceof ApiError && error.status === 404 && from === "portal") return setInfo("class-gone");
+    if (error instanceof ApiError && error.reason) return show(error.reason);
     show(UNREACHABLE[from]);
   }
 
@@ -56,11 +63,7 @@ export function ClassDashboard({ services, onExpired }: {
         if (loaded.kind !== "class") setInfo("unsupported-scope");
         else setScope(loaded);
       })
-      .catch((error) => {
-        if (canceled) return;
-        if (error instanceof ApiError && error.status === 404) setInfo("class-gone");
-        else refused(error, setFailure, "portal");
-      });
+      .catch((error) => { if (!canceled) refused(error, setFailure, "portal"); });
     return () => { canceled = true; };
   }, [services]);
 
@@ -72,7 +75,10 @@ export function ClassDashboard({ services, onExpired }: {
     let canceled = false;
     services.watchClass(scope, {
       profile: setProfile,
-      runner: setRunner,
+      runner: (next) => {
+        setRunner(next);
+        setMark((m) => nextMark(m, next));
+      },
       counts: setCounts,
       results: setResults,
       refused: (which) => {
@@ -108,6 +114,39 @@ export function ClassDashboard({ services, onExpired }: {
     return () => { current = false; };
   }, [urlsKey, services]);
 
+  // The results as of the latest snapshot, for a handler that resumes after an await; the
+  // `results` its render closed over is older.
+  const latestResults = useRef(results);
+  useEffect(() => { latestResults.current = results; }, [results]);
+
+  const forget = (key: string, request?: RunRequest) =>
+    setRequests((r) => {
+      if (request && r.get(key) !== request) return r;
+      const next = new Map(r);
+      next.delete(key);
+      return next;
+    });
+
+  async function run(row: PackageRow, resume: boolean) {
+    const key = packageKey(row.identity);
+    setRequests((r) => new Map(r).set(key, { pending: true }));
+    try {
+      await services.portal.runPackage(row.identity, row.current_version.version);
+      if (!resume) return forget(key);
+      const resuming: RunRequest = { resuming: true, at: latestResults.current.get(key)?.updated_at?.toMillis() ?? null };
+      setRequests((r) => new Map(r).set(key, resuming));
+      setTimeout(() => forget(key, resuming), RESUME_WAIT_MS);
+    } catch (error) {
+      // Keyed to the result as the refusal finds it: the queued write lands before a VM step fails.
+      const at = latestResults.current.get(key)?.updated_at?.toMillis() ?? null;
+      refused(error, (message) => setRequests((r) => new Map(r).set(key, { message, at })), "portal");
+    }
+  }
+
+  const listedTitles = useMemo(() => new Map(
+    rows && scope ? groupPackages(rows, scope).flatMap((g) => g.rows).map((r) => [packageKey(r.identity), titleOf(r)]) : []
+  ), [rows, scope]);
+
   if (info) return <Info reason={info} />;
   if (!scope) {
     return (
@@ -125,6 +164,9 @@ export function ClassDashboard({ services, onExpired }: {
           {scope.teachers.map((t) => t.name).join(", ")}
           {scope.cohorts.length > 0 && <> · {scope.cohorts.map((c) => c.name).join(", ")}</>}
         </p>
+        <p className="ownership">
+          Results and counts on this page are your own. Another researcher of this class sees their own runs.
+        </p>
       </header>
 
       <section aria-labelledby="assignments-heading">
@@ -138,6 +180,8 @@ export function ClassDashboard({ services, onExpired }: {
           ))}
         </ul>
       </section>
+
+      <Counts counts={counts} />
 
       <section aria-labelledby="packages-heading">
         <h2 id="packages-heading">Packages</h2>
@@ -153,9 +197,14 @@ export function ClassDashboard({ services, onExpired }: {
           {listProblem && <p className="error">{listProblem}</p>}
           {runsProblem && <p className="error">{runsProblem}</p>}
           {countsProblem && <p className="error">{countsProblem}</p>}
+          {sessionLines(runner, scope.class_hash, results, (key) => listedTitles.get(key) ?? null,
+            [...requests.values()].some((r) => "pending" in r)).map((line) => <p key={line} className="session">{line}</p>)}
           {profile && !rows && !listProblem && !profileProblem && <p>Listing the packages that apply…</p>}
         </div>
-        {profile && rows && !listProblem && !profileProblem && <PackageList rows={rows} scope={scope} />}
+        {profile && rows && !listProblem && !profileProblem && (
+          <PackageList rows={rows} scope={scope} results={results} runner={runner} mark={mark} requests={requests}
+            onRun={run} onShow={() => {}} />
+        )}
       </section>
     </main>
   );

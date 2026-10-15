@@ -49,7 +49,7 @@ export function sessionTakes(runner: Runner | null): boolean {
   return TAKING.includes(runner?.state ?? "");
 }
 
-const millis = (stamp: Stamp | null | undefined) => stamp?.toMillis() ?? null;
+export const millis = (stamp: Stamp | null | undefined) => stamp?.toMillis() ?? null;
 
 // When the page first saw the session in its current state on its current VM. A run request
 // moves the document's `updated_at` without changing either, so it keeps the mark.
@@ -131,6 +131,15 @@ export function runOffer(runnable: boolean, state: RowState): { enabled: boolean
 }
 
 export const WAITING = "Queued, waiting for a machine: run it to start one.";
+
+// A run request from one row: in flight, refused with a message, or an accepted Resume. `at` is the
+// row's result `updated_at` when the answer arrived, and the line lasts until the result changes.
+export type RunRequest =
+  | { pending: true }
+  | { message: string; at: number | null }
+  | { resuming: true; at: number | null };
+
+export const formatTime = (ms: number) => new Date(ms).toLocaleString();
 
 // The line above the list. `titleOf` names a package of this class by its key, or returns null;
 // `requesting` is whether any run request from the page is in flight.

@@ -45,6 +45,8 @@ export function Info({ reason, detail }: { reason: InfoReason; detail?: string }
           The packages that apply to the class, grouped as Official, the class's projects, your
           own, and Community.
         </li>
+        <li>Running a package for the class, and the result it wrote.</li>
+        <li>The counts from your own runs.</li>
       </ul>
 
       <h2>This build</h2>
