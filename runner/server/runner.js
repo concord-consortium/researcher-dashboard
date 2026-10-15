@@ -19,6 +19,8 @@ export const CLAIM_ATTEMPTS = 3;
 export const TOKEN_TIMEOUT_MS = 15_000;
 // The report-server revocation in /terminate, inside the hook's 60 seconds.
 export const REVOKE_TIMEOUT_MS = 10_000;
+// Stopping the package in /suspend, inside the hook's 60 seconds.
+export const FREEZE_TIMEOUT_MS = 10_000;
 // How long a package past its bound has, once killed, for its step to end.
 export const PACKAGE_END_TIMEOUT_MS = 10_000;
 // A claim's heartbeat_seconds and the interval its beats are written at, which the
@@ -752,7 +754,7 @@ export class Runner {
     if (this.#run) {
       this.#frozen = true;
       try {
-        await this.steps.freezePackageProcesses({ uid: this.env.packageUid });
+        await bounded(this.steps.freezePackageProcesses({ uid: this.env.packageUid }), FREEZE_TIMEOUT_MS, "stopping the package");
       } catch (err) {
         log.error("package.freeze_failed", { error: err.message });
       }

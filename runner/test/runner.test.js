@@ -6,7 +6,7 @@ import path from "node:path";
 import test, { afterEach, beforeEach } from "node:test";
 import { PACKAGE_MAX_DURATION_DEFAULT, disableDefaultCredentialChain, loadEnv } from "../server/config.js";
 import { makeSteps } from "../server/steps.js";
-import { HEARTBEAT_SECONDS, HookError, LOST_RUN_REASON, PACKAGE_END_TIMEOUT_MS, PACKAGE_TIMEOUT_MARGIN_MS, REVOKE_TIMEOUT_MS, Runner, TOKEN_TIMEOUT_MS } from "../server/runner.js";
+import { FREEZE_TIMEOUT_MS, HEARTBEAT_SECONDS, HookError, LOST_RUN_REASON, PACKAGE_END_TIMEOUT_MS, PACKAGE_TIMEOUT_MARGIN_MS, REVOKE_TIMEOUT_MS, Runner, TOKEN_TIMEOUT_MS } from "../server/runner.js";
 import { buildRunner } from "../server/index.js";
 import { packageDocId, packageKey } from "../server/package-fetch.js";
 import { MemoryStore, SERVER_TIME, STATUS_WRITE_TIMEOUT_MS, classPath, resultPath, runnerPath, scopePath } from "../server/status.js";
@@ -1900,6 +1900,26 @@ test("/suspend mid-run stops the package's processes before its flush, and /resu
   finish();
   await built.runner.loop;
   assert.equal(result(built.docs, SLOW).status, "done");
+});
+
+test("a freeze that never ends is given up on at its bound, and the suspend goes on", async (t) => {
+  const { built, finish } = await holding({ stepOverrides: { freezePackageProcesses: () => new Promise(() => {}) } });
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let ended = false;
+  try {
+    const lines = await captured(async () => {
+      const suspending = built.runner.suspend().then(() => { ended = true; });
+      await settle(10);
+      t.mock.timers.tick(FREEZE_TIMEOUT_MS + 1000);
+      await until(() => ended, "the hook's end");
+      await suspending;
+    });
+    assert.equal(runnerDoc(built.docs).state, "suspended");
+    assert.ok(lines.some((l) => l.event === "package.freeze_failed"));
+  } finally {
+    t.mock.timers.reset();
+    finish();
+  }
 });
 
 test("/suspend while idle stops nothing, and /resume continues nothing", async () => {
