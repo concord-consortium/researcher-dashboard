@@ -47,6 +47,7 @@ export function Info({ reason, detail }: { reason: InfoReason; detail?: string }
         </li>
         <li>Running a package for the class, and the result it wrote.</li>
         <li>The counts from your own runs.</li>
+        <li>How many of the class's students saved work in the last few minutes.</li>
       </ul>
 
       <h2>This build</h2>

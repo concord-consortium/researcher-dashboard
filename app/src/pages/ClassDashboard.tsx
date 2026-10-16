@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { ClassActivity } from "../components/ClassActivity";
 import { Counts } from "../components/Counts";
 import { PackageList } from "../components/PackageList";
 import { ResultView } from "../components/ResultView";
@@ -58,7 +59,7 @@ export function ClassDashboard({ services, onExpired }: {
   const results = useMemo(() => (runsProblem ? new Map<string, Result>() : received), [runsProblem, received]);
   const [countsProblem, setCountsProblem] = useState<string | null>(null);
   // undefined until the first snapshot, and again once the listener is refused.
-  const [, setActivity] = useState<Map<string, Activity> | undefined>(undefined);
+  const [activity, setActivity] = useState<Map<string, Activity> | undefined>(undefined);
   const [activityProblem, setActivityProblem] = useState<string | null>(null);
   const [rows, setRows] = useState<PackageRow[] | null>(null);
   const [listProblem, setListProblem] = useState<string | null>(null);
@@ -271,14 +272,11 @@ export function ClassDashboard({ services, onExpired }: {
           {scope.cohorts.length > 0 && <> · {scope.cohorts.map((c) => c.name).join(", ")}</>}
         </p>
         <p className="ownership">
-          Results and counts on this page are your own. Another researcher of this class sees their own runs.
+          Your results and counts on this page are your own: another researcher of this class sees their own runs. Class activity is the same for every researcher of this class.
         </p>
       </header>
 
-      <section aria-labelledby="activity-heading">
-        <h2 id="activity-heading">Class activity</h2>
-        {activityProblem && <p className="error">{activityProblem}</p>}
-      </section>
+      <ClassActivity activity={activity} problem={activityProblem} stopped={false} now={services.now} />
 
       <section aria-labelledby="assignments-heading">
         <h2 id="assignments-heading">Assignments</h2>

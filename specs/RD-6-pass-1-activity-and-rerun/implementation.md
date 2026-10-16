@@ -215,6 +215,9 @@ export function useAutoRerun<T>(behind: Map<string, { row: T; at: number | null 
 
 ```tsx
 // ClassActivity.tsx
+// setTimeout's longest delay; a longer one fires at once.
+const MAX_TIMEOUT_MS = 2 ** 31 - 1;
+
 export function ClassActivity({ activity, problem, stopped, now }: {
   activity: Map<string, Activity> | undefined; problem: string | null; stopped: boolean; now: () => number;
 }) {
@@ -224,7 +227,7 @@ export function ClassActivity({ activity, problem, stopped, now }: {
   // Re-render when the earliest counted learner leaves the window, so the count falls on its own.
   useEffect(() => {
     if (wait === null) return;
-    const timer = setTimeout(() => tick((n) => n + 1), wait + 1);
+    const timer = setTimeout(() => tick((n) => n + 1), Math.min(wait + 1, MAX_TIMEOUT_MS));
     return () => clearTimeout(timer);
   }, [wait, at]);
   const n = activity ? activeCount(activity, at) : null;
@@ -250,6 +253,8 @@ The effect depends on `wait` and `at`, both recomputed each render, so each tick
 **Tests** (`class-activity.test.tsx`, fake timers, `now` from `Date.now`):
 - the text with two learners, "1 student" with one, and the heading; the label equals `windowLabel(ACTIVE_WINDOW_MINUTES)`.
 - 2, then 1, then 0 as each learner's five minutes pass, with no new `activity` prop (fails without the timer).
+- a save 30 days ahead of the laptop's clock renders once over a second, not in a loop (fails without the cap).
+- `class-activity-window.test.tsx`: with `ACTIVE_WINDOW_MINUTES` mocked to 7, the label reads "in the last 7 minutes" (fails on a hardcoded 5).
 - the refusal line with no count; nothing but the heading before the first snapshot (the status element is empty); with `stopped`, the stopped line inside `getByRole("status")` and no re-run line.
 - `app.test.tsx`: the info page's list names the class's recent activity.
 - `class-dashboard.test.tsx`: the existing header test asserts R13's new ownership line.

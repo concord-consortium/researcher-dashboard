@@ -363,8 +363,10 @@ describe("ClassDashboard", () => {
     const s = services();
     await mounted(s);
     await s.activity(new Map([["301", { lastActivityAt: stamp(NOW) }]]));
+    expect(document.querySelector(".active-count")?.textContent).toMatch(/^1 student active/);
     await s.refuseActivity();
     expect(screen.getByText("Class activity could not be read.")).toBeDefined();
+    expect(document.querySelector(".active-count")).toBeNull();
     expect(screen.queryByText("Your runs could not be read.")).toBeNull();
     await s.snapshot(CURRENT);
     await s.counts({ data: { answers: 12 } });
@@ -612,7 +614,7 @@ describe("what the page says of the researcher's own runs", () => {
 
   it("says the results and counts are the researcher's own", async () => {
     await mounted(services());
-    expect(screen.getByText("Results and counts on this page are your own. Another researcher of this class sees their own runs.")).toBeDefined();
+    expect(screen.getByText("Your results and counts on this page are your own: another researcher of this class sees their own runs. Class activity is the same for every researcher of this class.")).toBeDefined();
   });
 });
 
