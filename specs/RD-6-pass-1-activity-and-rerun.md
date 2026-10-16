@@ -189,10 +189,10 @@ This is the dashboard half of "a number that moves on the page" and the loop REP
 ### An accepted Run is held until its queued result arrives
 **Context**: Found in review. Between the function's 202 and the queued snapshot the row is still `done` and nothing is in flight, so it re-announced its old summary and flashed the out-of-date line.
 **Options considered**:
-- A) Keep `{ requested: true, at }` in `requests`, tied to the result's `updated_at`, and treat it as in flight.
+- A) Keep `{ requested: true, at }` in `requests`, tied to the result's `updated_at` when the request was sent, and treat it as in flight.
 - B) Count only automatic rows as in flight through `behind`.
 
-**Decision**: A, which covers a pressed Run too and needs no new rule in `held`, which already holds a non-pending entry while `at` matches. It is the one change to `runs.ts` this pass makes.
+**Decision**: A, which covers a pressed Run too and needs no new rule in `held`, which already holds a non-pending entry while `at` matches. It is the one change to `runs.ts` this pass makes. `at` is taken before the request, not from the answer: a re-run that finishes before its request is answered would otherwise tie the entry to its own finished result, hold the row through later saves and keep its outcome from being announced.
 
 ---
 

@@ -955,6 +955,21 @@ describe("the automatic re-run", () => {
     expect(within(wildfireRow()).getByText("Earlier").closest("[aria-live]")).not.toBeNull();
   });
 
+  it("still re-runs and announces the outcome when the re-run finishes before its request is answered", async () => {
+    const answer = deferred<unknown>();
+    const s = services({ run: () => answer.promise });
+    await listed(s);
+    await s.results(new Map([[KEY, doneAt(1000)]]));
+    await s.activity(learner(2000));
+    await vi.waitFor(() => expect(s.runPackage).toHaveBeenCalledTimes(1));
+    await s.results(new Map([[KEY, wildfire({ status: "running", started_at: stamp(30_000), updated_at: stamp(30_000) })]]));
+    await s.results(new Map([[KEY, doneAt(30_000, { summary: "Newer" })]]));
+    await act(async () => answer.resolve({ queue: [], appended: [], vm: "launched" }));
+    expect(within(wildfireRow()).getByText("Newer").closest("[aria-live]")).not.toBeNull();
+    await s.activity(learner(40_000));
+    await vi.waitFor(() => expect(s.runPackage).toHaveBeenCalledTimes(2));
+  });
+
   it("shows a refusal and retries only once the result changes", async () => {
     const s = services({ run: async () => { throw new ApiError("projects/20/wildfire-responses@1.0.0 cannot be run", 409); } });
     await listed(s);

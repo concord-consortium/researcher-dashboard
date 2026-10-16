@@ -134,7 +134,8 @@ export const WAITING = "Queued, waiting for a machine: run it to start one.";
 
 // A run request from one row: in flight, refused with a message, an accepted Resume, or an
 // accepted Run whose queued result has not arrived yet. `at` is the row's result `updated_at` when
-// the answer arrived; each entry but pending applies only while the result's `updated_at` is still `at`.
+// the request was sent, for an accepted Run, or when the answer arrived, for the others; each entry
+// but pending applies only while the result's `updated_at` is still `at`.
 export type RunRequest =
   | { pending: true }
   | { message: string; at: number | null }

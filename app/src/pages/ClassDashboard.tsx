@@ -180,10 +180,13 @@ export function ClassDashboard({ services, onExpired }: {
   async function run(row: PackageRow, resume: boolean, auto = false) {
     const key = packageKey(row.identity);
     setRequests((r) => new Map(r).set(key, { pending: true }));
+    // An accepted Run is tied to the result it was sent against: a result that changes before the
+    // answer arrives is the run's own progress, or its outcome.
+    const sentAt = millis(latestResults.current.get(key)?.updated_at);
     try {
       await services.portal.runPackage(row.identity, row.current_version.version);
+      if (!resume) return setRequests((r) => new Map(r).set(key, { requested: true, at: sentAt }));
       const at = millis(latestResults.current.get(key)?.updated_at);
-      if (!resume) return setRequests((r) => new Map(r).set(key, { requested: true, at }));
       const timers = resumeTimers.current;
       if (!timers) return;
       const resuming: RunRequest = { resuming: true, at };
