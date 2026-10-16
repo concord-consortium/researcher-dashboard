@@ -19,7 +19,7 @@ This is the dashboard half of "a number that moves on the page" and the loop REP
 
 ## Background
 
-**The design.** `final-design.md` 14: per-learner activity documents written by Firestore triggers; the dashboard listens, the VM stays a worker; re-run on input difference; the activity count is a read over the same documents, labeled "active in the last N minutes", with N a constant chosen once real write cadence exists. Jira RD-6 is the scope; Doug split it on 2026-10-09: pass 1 is "the app's activity listeners, the active-in-the-last-N-minutes count and the re-run loop, plus the runner writing `inputs` on the result", needing only REPORT-153.
+**The design.** `final-design.md` 14: per-learner activity documents written by Firestore triggers; the dashboard listens, the VM stays a worker; re-run on input difference; the activity count is a read over the same documents, labeled "active in the last N minutes", with N a constant chosen once real write cadence exists. Jira RD-6 is the scope; pass 1 needs only REPORT-153.
 
 **What REPORT-153 provides** (spec `8db07ea`, implemented 2026-10-16): in report-service's Firestore, `researcher_dashboard/{portal}/activity/{class_hash}/users/{platform_user_id}`, one document per learner who has made a qualifying answer write in the class, with exactly `lastActivityAt` (server timestamp of the last recorded write), `writeCount` (a change signal only) and `changed` (offering id to server timestamp). A qualifying write is a non-anonymous answer whose content changed; deletes, `move_student_work` moves, collaborators' copies and identical re-saves do not count. A researcher token for the class may `get` and `list` (R7); a listener on an empty collection receives an empty snapshot (R9). Its Technical Notes ask RD-6 to listen to the whole collection and compute the window on a timer, and to say how it handles the laptop's clock against server time.
 
@@ -29,7 +29,7 @@ This is the dashboard half of "a number that moves on the page" and the loop REP
 
 **The previous result stays visible through a re-run** (Doug, 2026-10-11, channel #202). The function's queued write replaces the result whole and the runner's claim clears `summary` and `display`, so REPORT-143's queued write copies the last `done` run into a `previous` field, `{package, image_version, summary, display, started_at, finished_at}`, carrying an existing `previous` forward when the result being re-queued is `failed` (its R8a; merged, deployed and Done). RD-4 pass 2's claim, stage, finish and failure writes are named-field merges and leave it alone. RD-3 pass 2 renders the latest finished result (`latestFinished`: the result itself when `done`, otherwise `previous`) on the row and in an open view, which stays open and updates in place when the re-run finishes (its R9, R15). This pass depends on both and changes neither.
 
-**The `inputs` field, checked against what the listeners report.** `final-design.md` 9 and 14 and the Jira text have the runner write `inputs: {clue_documents, answers, logs, log_freshness_at}` on the result, as "what a re-run compares against". That cannot be the comparison: the activity listeners report per-learner server times (`lastActivityAt`), not answer, log or CLUE document counts, so there is nothing on the page to compare those four numbers with. What the activity documents support is a time comparison: some learner's `lastActivityAt` later than the moment the run began reading the class. That moment is already on the result as `started_at`, on the same server clock. The re-run comparison in R7 therefore uses `started_at`, and the runner writes no `inputs` field (Doug, 2026-10-11; see Open Questions).
+**The comparison is a time, not counts.** The activity documents report per-learner server times (`lastActivityAt`), not answer, log or CLUE document counts, so the comparison they support is some learner's `lastActivityAt` later than the moment the run began reading the class. That moment is already on the result as `started_at`, on the same server clock, so R7 uses it and the runner writes nothing new (Doug, 2026-10-11; see Open Questions).
 
 **Why `started_at` is a sound comparison.** The package pulls answers live from report-service's Firestore through report-server (checked at stage 4: report-service's bulk read, `functions/src/api/bulk-read.ts` `readAnswersEndpoint`, queries `answers` in Firestore by `remote_endpoint` on every page, so cc-data's `get answers` sees writes up to the moment it reads; nothing goes through the S3 copy). REPORT-153 stamps `lastActivityAt` with the server time of the trigger's write, which is after the answer write it records. So a learner whose `lastActivityAt` is at or before `started_at` saved that work before the claim, and so before the pull, which then read it; a learner whose `lastActivityAt` is later saved after the claim, or saved just before it with the trigger landing after it, and either way the next re-run covers it. The second case costs at most one extra re-run, never a missed change.
 
@@ -63,26 +63,28 @@ This is the dashboard half of "a number that moves on the page" and the loop REP
   A `queued`, `running`, stuck or `failed` result is never behind, and neither is a row with no result: the first run of a package is always the researcher's, and a failed result does not re-run on its own (Doug, 2026-10-11), so a package that fails every time cannot loop through a lesson.
 - **R8. Coalescing, with no delay and no floor** (Doug, 2026-10-11). The page requests a re-run as soon as a package is behind. It sends one automatic request per finished result: it remembers the `updated_at` of the result it last requested for, and sends nothing more for that result, so the snapshots that arrive before the queued result does cannot repeat the request. While the re-run is queued or running the package is outstanding, so a request would append nothing (REPORT-143 R5, R8), and the page sends none; activity in that time is picked up when the re-run finishes, by comparing with the re-run's own `started_at`. So saves during a run give exactly one more run after it. There is no minimum interval: a per-package one is an optional REPORT-172 manifest value, and a package that declares none has none.
 - **R9. The request is the Run request.** An automatic re-run sends exactly RD-3 pass 2's R5 request for that one row, at the row's `current_version.version`, so it may run a newer version than the result it replaces, as Run would. A refusal is shown on the row as R6 shows one, and R7 then keeps the row from being retried until its result changes.
-- **R10. It never navigates.** An automatic request that meets a token near expiry or a 401 does not re-authorize (which would navigate the page away under a researcher who pressed nothing). Automatic re-runs stop for the page's life, and the Class activity section says "Automatic re-runs have stopped because your sign-in has expired. Run any package to sign in again." Run itself keeps RD-3 pass 2's behavior. A young-token refusal is treated the same way.
+- **R10. It never navigates.** An automatic request that meets a token near expiry or a 401 does not re-authorize (which would navigate the page away under a researcher who pressed nothing). Automatic re-runs stop for the page's life, and the Class activity section says "Automatic re-runs have stopped because your sign-in has expired. Run any package to sign in again." as a status message, so a screen reader announces it. Run itself keeps RD-3 pass 2's behavior. A young-token refusal is treated the same way.
 - **R11. One more run per burst, never a loop.** A re-run's own result gets a new `started_at` at its claim, after every save the page had seen when it requested, so the finished re-run is behind only if a learner saved after it began. On load, a result already behind is requested at once, which covers the researcher returning to a class that worked while the page was closed.
 - **R12. What the page says about it.**
   - Under the Class activity count, when the activity listener is answering and automatic re-runs have not stopped: "Your finished packages re-run on their own as soon as students save new work."
-  - On a row whose latest finished result has a `started_at` earlier than some learner's `lastActivityAt`, while the row is neither queued nor running nor about to be requested (its result failed, automatic re-runs stopped, a refusal is showing, or Run is disabled): "Students have saved work since this result."
-  - The opened result shows "Read the class's data from <started_at>" for the finished run it shows (RD-3 pass 2's `latestFinished`), as a local date and time, which is what the comparison used. A `previous` copied from a result without `started_at` may lack it (REPORT-143 R8a leaves absent fields out), and then the line is omitted.
+  - On a row whose latest finished result has a `started_at` earlier than some learner's `lastActivityAt`, while the row is neither queued nor running nor being or about to be requested (its result failed, automatic re-runs stopped, a refusal is showing, or Run is disabled): "Students have saved work since this result."
+  - The opened result shows "Includes every save before <started_at>, when this run began reading the class's data." for the finished run it shows (RD-3 pass 2's `latestFinished`), as a local date and time, which is what the comparison used (Doug, 2026-10-16). It does not say later saves are left out: the package reads after the claim, so a later save may be in the result too. A `previous` copied from a result without `started_at` may lack it (REPORT-143 R8a leaves absent fields out), and then the line is omitted.
+  - **A re-run announces only its outcome** (Doug, 2026-10-16). On a row that has a finished result, the request, queued and running lines show but are outside the row's live region, so a screen reader hears only the new summary, a refusal or a failure. The same holds for the lines above the list that name the running package. A first run, with no finished result, announces each step as before. The rule is the row's state, so it holds after a reload and in another tab, and it applies to a Run press on a finished row too.
   - An open result is re-run like any other: RD-3 pass 2's view keeps showing the finished run through the re-run and shows the new one in place, so nothing here holds it back. Its view closes only when no finished result is left, which happens only to a result queued before REPORT-143 wrote `previous`.
 
 ### Prose and tests
 
-- **R13.** `app/README.md`'s "What it reads" table gains the activity collection, and the README says what the count counts and when a package re-runs on its own. The info page's "What it can show" gains the class's recent activity.
+- **R13.** `app/README.md`'s "What it reads" table gains the activity collection, its portal row says the run request is also sent on its own for a finished package that is behind (R7), and the README says what the count counts and when a package re-runs on its own. The info page's "What it can show" gains the class's recent activity. The class header's ownership line becomes "Your results and counts on this page are your own: another researcher of this class sees their own runs. Class activity is the same for every researcher of this class." (Doug, 2026-10-16), since the activity count is the one thing on the page that is shared.
 - **R14.** The app's suite (vitest, jsdom), each test named so that deleting the line it guards fails it:
   - R1's path from the scope's class hash and the staging portal, and `watchClass`'s returned function stopping five listeners, with one token call and one sign-in.
-  - R3: the refused line, no count, and no request scheduled after activity arrives on a refused listener.
+  - R3: after a snapshot, a refusal removes the count and shows the line; a refusal before any snapshot shows the line and requests nothing.
   - R5 with two documents inside the window and one outside (so counting every document fails), one in the future, and one without `lastActivityAt`; R4 as `windowLabel(10)` reading "in the last 10 minutes", and the page's label equal to `windowLabel(ACTIVE_WINDOW_MINUTES)`, so a hardcoded "5" in either fails.
   - R6's count falling from 2 to 1 to 0 on fake timers with no new snapshot.
   - R7's eligibility: each exclusion on its own (not listed, Run disabled, `queued`, `running`, `failed`, no result, `started_at` absent, activity at exactly `started_at`, a pending request, a refusal showing) and the one case that is behind.
   - R8: one request as soon as a learner's write later than `started_at` arrives, with no timer; one request, not two, across two activity snapshots that both arrive before the queued result; after the re-run goes queued, running and `done` with a `started_at` earlier than a save made during it, exactly one more request at once.
-  - R10: an automatic request meeting `SessionExpired` calls no `onExpired`, shows the stopped line and requests nothing more.
+  - R10: an automatic request meeting `SessionExpired` calls no `onExpired`, shows the stopped line in a status message and requests nothing more.
   - R11: the re-run's result, `done` with a `started_at` later than every activity time, requests nothing.
+  - R12's announcements: on a row with a finished result, "Requesting…" and a running line are outside any live region and the new summary is inside it; on a row with none, the running line is inside it.
   - R12's texts: the Class activity line; "Students have saved work since this result." on a `failed` result over a `previous` older than the newest save, and not on a `done` row that is being requested; the opened result's line from the shown run's `started_at`.
 
 ## Technical Notes
@@ -110,21 +112,20 @@ The page requests a re-run as soon as it sees that write, at the package's curre
 
 ### The staging check
 
-On class 590 as `dougresearcher`, from the branch build, after the prerequisites: the Class activity section reads "0 students active in the last 5 minutes" (or the class's real count) with its note; run `projects/20/wildfire-responses` by hand and let it finish; as a staging student of class 590, save a changed answer; within seconds the count rises by one, and the row reads "Requesting…", then queued, running and done, once, with the previous summary showing throughout and an open result staying open; the opened result's "Read the class's data from" time is after the student's save; no second re-run follows with no further saves; a save made while the re-run is running gives exactly one more after it; five minutes after the save the count falls back without a reload. Nothing in the check terminates the VM: an API terminate of an awake VM arrives as `/suspend` then termination (RD-4 pass 2 R23), so the row reads paused, then stuck, then failed once the watchdog's lease fails it, and a failed result is not re-run on its own (R7).
+On class 590 as `dougresearcher`, from the branch build, after the prerequisites: the Class activity section reads "0 students active in the last 5 minutes" (or the class's real count) with its note; run `projects/20/wildfire-responses` by hand and let it finish; as a staging student of class 590, save a changed answer; within seconds the count rises by one, and the row reads "Requesting…", then queued, running and done, once, with the previous summary showing throughout and an open result staying open; the opened result's "Includes every save before" time is after the student's save; no second re-run follows with no further saves; a save made while the re-run is running gives exactly one more after it; five minutes after the save the count falls back without a reload. Nothing in the check terminates the VM: an API terminate of an awake VM arrives as `/suspend` then termination (RD-4 pass 2 R23), so the row reads paused, then stuck, then failed once the watchdog's lease fails it, and a failed result is not re-run on its own (R7).
 
 ### Clauses covered
 
 | Jira clause (pass 1's part) | Requirement |
 |---|---|
-| The app listens to the per-learner activity documents | R1 to R3 |
-| Re-runs when what the listeners report differs from what its last result recorded | R7, R11 |
-| Debounced and with a minimum interval, or an active class becomes a continuous run loop | R8, R11: coalesced instead, with no delay or floor (Doug, 2026-10-11); a minimum interval is REPORT-172's optional manifest value |
+| The app listens to the per-learner activity documents through the page's one Firestore watcher | R1 to R3 |
+| Behind when some learner's `lastActivityAt` is later than the result's `started_at`; the runner records nothing extra | R7 |
+| Re-runs with the ordinary Run request, only while the dashboard is open, only for a done result | R7, R9 |
+| Coalesced, no delay and no minimum gap; one automatic request per finished result | R8, R11 |
 | On load the difference arrives at once; the returning researcher is the same case | R11 |
-| The activity count, a read over the same documents, in a window that is one constant | R4, R5 |
-| "Active in the last N minutes", and beside it that it counts students who wrote something | R6 |
-| A student's edit causes exactly one re-run rather than a loop | R8, R11, R14 |
-| The result records what it compared against | R12's opened-result line, from `started_at` |
-| The runner writes `inputs` onto the result | dropped (Doug, 2026-10-11): `started_at` is the comparison; see Open Questions |
+| The opened result says which moment the class's data was read from | R12 |
+| The count, in a window that is one constant, labeled "active in the last N minutes" with what it counts | R4 to R6 |
+| A student's save causes exactly one automatic re-run per finished result rather than a loop | R8, R11, R14 |
 
 ## Out of Scope
 
@@ -139,18 +140,16 @@ On class 590 as `dougresearcher`, from the branch build, after the prerequisites
 ## Open Questions
 
 ### RESOLVED: Does the runner still write `inputs` on the result, and if so in which pass?
-**Context**: Doug scoped "the runner writing `inputs` on the result" into this pass, after `final-design.md` 14. The designed `inputs: {clue_documents, answers, logs, log_freshness_at}` cannot be what a re-run compares against: the listeners report learners' `lastActivityAt` times, not counts. The comparison the documents support is a server time at or before the pull, which the result already carries as `started_at` (Background). The runner code is RD-4 pass 2's, implemented and unmerged at `9397abd`.
+**Context**: `final-design.md` 14 designed `inputs: {clue_documents, answers, logs, log_freshness_at}` as what a re-run compares against, but the listeners report times, not counts (Background).
 **Options considered**:
 - A) No runner change. The page compares with `started_at` (R7), and the opened result states it (R12).
-- B) The runner records an activity watermark, `inputs: {activity_at}`, read at the claim with its class store and written with the finish (about 60 lines in RD-4 pass 2's `firestore.js`, `status.js` and `runner.js`), as an amendment before RD-4 pass 2's 2026-10-14 release or in this pass with a second release. It selects the same saves as A.
+- B) The runner records an activity watermark, `inputs: {activity_at}`, at the claim. It selects the same saves as A.
 - C) The designed counts, from `counts.json` and the runner's CLUE count: comparable with nothing the listeners report.
 
 **Decision**: A (Doug, 2026-10-11, stage 8), after checking it against the CLUE and future-package work:
 - **CLUE.** `started_at` precedes every read a run makes, including a package's own CLUE reads through cc-data (RD-4 pass 2 deleted the runner's CLUE pre-pull), so it serves CLUE-693's documents as it serves REPORT-153's. CLUE's `lastActivityAt` is CLUE's project's server time; a few milliseconds of disagreement with report-service's clock can cost an extra re-run, not hide a save, since the claim precedes the read by seconds.
 - **RD-6 pass 2.** No later pass needs `inputs` either: pass 2 is the CLUE listener only, with no runner change and no incremental pull (Doug, 2026-10-14), and a CLUE save makes a result behind by the same `started_at` comparison.
 - **Future packages.** What a re-run should be triggered by, and whether a costly package (a model call, a long run) should re-run on its own at all, is the package author's to declare in the manifest, since the runner cannot observe what a package reads through cc-data. That is REPORT-172 (Out of Scope), which also carries an optional per-package minimum interval.
-
-`final-design.md` 9 and 14 and RD-6's Jira text drop `inputs`, for marvin-scratch-t.
 
 ### RESOLVED: Judgment call: what counts as "behind"
 **Options considered**:
@@ -160,15 +159,14 @@ On class 590 as `dougresearcher`, from the branch build, after the prerequisites
 **Decision**: A. B misses the returning researcher (the page has nothing earlier to compare with), and REPORT-153 R5 says `writeCount` can double-count and is a change signal only. A compares two server times and needs no memory across loads.
 
 ### RESOLVED: Re-run timing, and what the page shows during a re-run
-**Context**: The first version of this spec delayed a re-run 30 seconds and held it to at least 5 minutes after the last one (or the declared duration, if longer), recorded as a judgment call; #188 then credited that floor to Doug, wrongly. A floor was needed only because a re-run hid the last result until it finished.
+**Context**: A delay and a floor are needed only if a re-run hides the last result until it finishes.
 **Options considered**:
 - A) The fixed delay and floor.
 - B) Coalescing: re-run as soon as a finished result is behind, and once more after a run if students saved during it; keep the last finished result visible throughout.
 
-**Decision**: B (Doug, 2026-10-11, channel #202), with a per-package minimum interval as an optional REPORT-172 value. Then, in this session:
+**Decision**: B (Doug, 2026-10-11), with a per-package minimum interval as an optional REPORT-172 value. With it:
 - **Where the last result lives** (Doug, with the recommendation): the function's queued write copies the last `done` run into `previous` (REPORT-143), and RD-3 pass 2 renders it. The page alone remembering it fails on a reload or a second tab, which with back-to-back re-runs would be common; keeping `summary` and `display` on the document through the re-run would show one version's output under another's `package`; splitting the document into a finished part and a `run` part reads more naturally but moves `status`, which the watchdog's queries and index, the rules, `/work` and every runner write key on.
 - **Failed results** (Doug, with the recommendation): never re-run on their own (R7). With no floor, a package that fails every time would otherwise run on every save; the row shows the last good result, the failure and R12's out-of-date line, with Run beside it.
-- **R12a is retired:** an open result no longer closes when it is re-run, so nothing holds it back.
 
 ### RESOLVED: Judgment call: an automatic request never re-authorizes
 **Options considered**:
@@ -185,38 +183,24 @@ On class 590 as `dougresearcher`, from the branch build, after the prerequisites
 
 **Decision**: A (stage 2, no decision needed from Doug). The value lives in one constant and every label is built from it (R4), so changing it is a one-line change with no test or prose to chase; holding the count back would leave RIGSE-360's live count with nothing to show the PI. Five minutes is about one Activity Player page of work, and the staging check reads the count against a real save.
 
-## Self-Review
-
-Stage 3, unattended. Roles: the researcher using the page, Senior Engineer (consistency with RD-3 pass 2, RD-4 pass 2, REPORT-143 and REPORT-153 as spec'd and built), QA Engineer, Security Engineer, and a WCAG accessibility reviewer. Each finding was checked against the code or the specs it cites before it was written; findings that did not survive were dropped.
-
-### The researcher using the page
-
-#### RESOLVED: An automatic re-run would close the result the researcher is reading
-RD-3 pass 2 R15 closed the open view when its result changed, and the function's queued write replaces the result whole (`run-package.ts:176`), so an automatic request would shut the document under a researcher reading it. First fixed by holding an open result back from re-running; since #202 the last finished result stays visible through a re-run (REPORT-143's `previous`, rendered by RD-3 pass 2), which removes the cause.
-
-### QA Engineer
-
-#### RESOLVED: R14's test of R4 could not be written
-"Changing the constant in a test build" is not something a vitest case can do with an exported `const`. Fixed in R14: the label is a function of the minutes, tested with another value, and the page's text is asserted equal to that function of the constant.
-
 ## Self-Review, 2026-10-16
 
 Roles: Product Manager (against RD-6's current Jira description), Education Researcher, QA Engineer. Each finding was checked against `main` at `fc658fa`, REPORT-143 on report-service `master` and RD-4 pass 2's runner, and the R14 case was run against implementation.md's code in a throwaway copy of `app/` (deleted afterward). Findings that need code are in implementation.md's Self-Review, 2026-10-16.
 
 ### Product Manager
 
-#### OPEN: The page header and the README say things this pass makes untrue
-The class header says "Results and counts on this page are your own. Another researcher of this class sees their own runs." (`ClassDashboard.tsx:257`), and R6 adds a count that is the same for every researcher of the class; the note under the count says so, directly below a header that says the opposite. `app/README.md:83`'s portal row says the app sends "a run request for one package when Run or Resume is pressed", which automatic re-runs make false. R13 lists only additions to the README ("What it reads" gains the activity collection) and to the info page. Suggested resolution: add to R13 (and the Class activity step's files): the header's ownership line says the results and your counts are your own, or names the class activity as shared; and the README's portal row says the run request is also sent on its own for a finished package that is behind (R7).
+#### RESOLVED: The page header and the README say things this pass makes untrue
+Doug, 2026-10-16: the header names Class activity as shared (R13); the README's portal row also names the automatic request.
 
-#### OPEN: The spec still records the RD-6 text and drafts it has replaced
-RD-6's current Jira description already has `started_at` as the comparison, the runner recording nothing, coalescing with no delay or floor, and pass 2 as the CLUE listener only, yet the spec carries the earlier text as live material: Background's "Doug split it on 2026-10-09: pass 1 is ... plus the runner writing `inputs` on the result" (line 22); the Clauses covered table's left column quotes clauses the description no longer has ("Debounced and with a minimum interval", line 121; "The runner writes `inputs` onto the result", line 127); line 153's "RD-6's Jira text drop `inputs`, for marvin-scratch-t" is a to-do that is done; the re-run timing question's context narrates earlier drafts ("#188 then credited that floor to Doug, wrongly", line 163; "R12a is retired", line 171); and the Self-Review's RESOLVED entries describe fixes to drafts that no longer exist. implementation.md has the same kind of history at line 339 ("An earlier timer-based version of this hook ... retired by #202") and in its stage 7 Self-Review. This is the archive the user's review rule asks to keep out of specs. Suggested resolution: rewrite the Clauses covered table against the current Jira description; cut Background's design and `inputs` paragraphs to the rationale for `started_at`; compress each RESOLVED question to its decision and one line of reason; delete line 153, the draft narrative, and the RESOLVED self-review entries whose fixes are now in the body.
+#### RESOLVED: The spec still records the RD-6 text and drafts it has replaced
+Fixed: the clauses table is rewritten against the current Jira description, Background's `inputs` paragraph and the Open Questions are compressed, the done to-do and the draft narrative are deleted, and both files' earlier Self-Review sections are removed.
 
 ### Education Researcher
 
-#### OPEN: "Read the class's data from <time>" can read as a cutoff it is not
-`started_at` is the claim's server time, written before `prepare_package` and `run_package` (RD-4 pass 2's `ClassDocuments.claim`, `runner/server/status.js:120`), and the package's pulls come seconds or more later, so the result includes saves made after the time shown. A researcher who checks a student's save at 10:01:05 against "Read the class's data from 10:01:00" would conclude the save is missing when it may be in the result. Background ("Why `started_at` is a sound comparison") already says the true read is later; only the wording overstates it. Suggested resolution: word R12's line as "Began reading the class's data at <time>", which is exactly what `started_at` records and still answers the Jira clause, and update the staging check's sentence that quotes it.
+#### RESOLVED: "Read the class's data from <time>" can read as a cutoff it is not
+Doug, 2026-10-16: "Includes every save before <time>, when this run began reading the class's data." (R12), which states what is guaranteed and claims nothing about later saves.
 
 ### QA Engineer
 
-#### OPEN: R14's R3 case, as worded, fails against the planned code and tests something Firestore never does
-R14 asks for "no request scheduled after activity arrives on a refused listener". The page's `activity` handler sets state whenever it is called, so a snapshot pushed after `refused("activity")` makes `newest` non-null again and the behind row is requested. Evidence: in the scratch copy, a test pushing a refusal, then an activity snapshot over a behind `done` result, got one `runPackage` call (expected none). A real Firestore listener delivers nothing after its error callback, so the case does not occur in production. The test that does guard R3's code is a snapshot followed by a refusal, where the count must disappear: it fails if the refusal branch's `setActivity(undefined)` is deleted, while "a behind result never calls `runPackage`" with no snapshot at all is true by construction. Suggested resolution: reword R14's R3 case to "after a snapshot, a refusal removes the count and shows the line; a refusal before any snapshot shows the line and requests nothing", and match implementation.md's page test list.
+#### RESOLVED: R14's R3 case, as worded, fails against the planned code and tests something Firestore never does
+Verified from the code (the activity handler sets state whenever called; Firestore delivers nothing after an error). Fixed: R14's R3 case and the page test are reworded to a snapshot, then a refusal.

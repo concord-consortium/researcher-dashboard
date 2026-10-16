@@ -105,7 +105,7 @@ export function nextChangeIn(docs: Map<string, Activity>, now: number, windowMs 
   for (const doc of docs.values()) {
     const at = millis(doc.lastActivityAt);
     if (at === null || at < now - windowMs) continue;
-    const leaves = Math.max(at, now) + windowMs - now;
+    const leaves = at + windowMs - now;
     soonest = soonest === null ? leaves : Math.min(soonest, leaves);
   }
   return soonest;
@@ -153,10 +153,11 @@ function held(request: RunRequest | undefined, result: Result | undefined): bool
 }
 
 // R12: the latest finished result is older than some learner's save, and nothing is about to
-// replace it. `behind` is behindRows' answer while automatic re-runs are on, else empty.
+// replace it. `behind` is behindRows' answer while automatic re-runs are on, else empty; `pending`
+// is whether a request from the row is in flight.
 export function outOfDate(key: string, result: Result | undefined, newest: number | null,
-  behind: Map<string, unknown>): boolean {
-  if (!result || result.status === "queued" || result.status === "running" || behind.has(key)) return false;
+  behind: Map<string, unknown>, pending: boolean): boolean {
+  if (!result || pending || result.status === "queued" || result.status === "running" || behind.has(key)) return false;
   const started = millis(latestFinished(result)?.started_at);
   return started !== null && newest !== null && newest > started;
 }
@@ -188,11 +189,11 @@ export function useAutoRerun<T>(behind: Map<string, { row: T; at: number | null 
 **Tests** (`activity.test.ts`, with a `stamp(ms)` helper):
 - `windowLabel(10)` is "in the last 10 minutes".
 - `activeCount`: two inside, one outside, one in the future, one without `lastActivityAt` gives 3; one exactly at the window's edge counts.
-- `nextChangeIn`: the earliest counted learner's exit; a future time measured from now; null when none is counted.
+- `nextChangeIn`: a learner who saved 4 minutes ago leaves in 1 minute (fails if every counted learner is given a full window); the earliest of two counted learners; a future time leaves a window after that time; null when none is counted.
 - `newestActivity`: the maximum, not the last in the map (a fixture whose last entry is not the newest), and null for an empty map.
 - `isBehind`: true for `done` with activity after `started_at`; false for activity equal to it, for `started_at` absent, for each other status, for no activity.
-- `behindRows`: the one behind row; each exclusion alone (a pending request, a refusal whose `at` equals the result's `updated_at`, `runnable: false`, a stuck row given a `mark` and a runner on another VM, a row not in `listed`); and a refusal whose `at` is an older `updated_at` does not exclude the row (fails if `held` is reduced to `requests.has`); `at` is the result's `updated_at`.
-- `outOfDate`: true for a `failed` result whose `previous.started_at` is older than the newest save; false for a `queued` or `running` result, for a key in `behind`, for no activity after `started_at`, and for no finished run at all.
+- `behindRows`: the one behind row; each exclusion alone (a pending request, a refusal whose `at` equals the result's `updated_at`, `runnable: false`, a row not in `listed`); and a refusal whose `at` is an older `updated_at` does not exclude the row (fails if `held` is reduced to `requests.has`); `at` is the result's `updated_at`.
+- `outOfDate`: true for a `failed` result whose `previous.started_at` is older than the newest save; false for a `queued` or `running` result, for a key in `behind`, for a `done` result while `pending`, for no activity after `started_at`, and for no finished run at all.
 
 **Tests** (`rerun.test.tsx`, a probe component, no timers): one request for a behind item on the first render; none for a re-render with a new map holding the same `at` (fails without the `asked` check); one more when the item comes back with a new `at`; none while `stopped`. These were run in a throwaway copy of the app (Open Questions).
 
@@ -204,9 +205,9 @@ export function useAutoRerun<T>(behind: Map<string, { row: T; at: number | null 
 
 **Files affected**:
 - `app/src/components/ClassActivity.tsx` (new)
-- `app/src/pages/ClassDashboard.tsx`: the section directly after the class header, before Assignments
+- `app/src/pages/ClassDashboard.tsx`: the section directly after the class header, before Assignments; the header's ownership line (R13)
 - `app/src/pages/Info.tsx`: "What it can show" gains the class's recent activity
-- `app/README.md`: the activity collection in "What it reads"; what the count counts; when a package re-runs on its own
+- `app/README.md`: the activity collection in "What it reads"; the portal row's run request also sent on its own for a behind package; what the count counts; when a package re-runs on its own
 - `app/src/styles.css`
 - `app/tests/class-activity.test.tsx` (new), `app/tests/app.test.tsx`
 
@@ -234,36 +235,40 @@ export function ClassActivity({ activity, problem, stopped, now }: {
       {n !== null && <>
         <p className="active-count">{n} {n === 1 ? "student" : "students"} active {windowLabel(ACTIVE_WINDOW_MINUTES)}</p>
         <p className="note">Counts students who saved an answer in this class's Activity Player assignments in that time. A student reading or thinking saves nothing, so this is not a count of who is logged in. It is the same for every researcher of this class.</p>
-        {stopped
-          ? <p className="error">Automatic re-runs have stopped because your sign-in has expired. Run any package to sign in again.</p>
-          : <p>Your finished packages re-run on their own as soon as students save new work.</p>}
+        {!stopped && <p>Your finished packages re-run on their own as soon as students save new work.</p>}
       </>}
+      <p role="status" className="error">
+        {stopped && "Automatic re-runs have stopped because your sign-in has expired. Run any package to sign in again."}
+      </p>
     </section>
   );
 }
 ```
 
-The effect depends on `wait` and `at`, both recomputed each render, so each tick re-arms it for the next learner's exit; nothing in it reads state it does not list. The section is not a live region (R6).
+The effect depends on `wait` and `at`, both recomputed each render, so each tick re-arms it for the next learner's exit; nothing in it reads state it does not list. The section is not a live region (R6). The stopped line is a status message (R10): its `role="status"` element is always rendered and gains its text when `stopped` is set, which screen readers announce more reliably than an element inserted with its text already in it; `stopped` never clears, so it announces once.
 
 **Tests** (`class-activity.test.tsx`, fake timers, `now` from `Date.now`):
 - the text with two learners, "1 student" with one, and the heading; the label equals `windowLabel(ACTIVE_WINDOW_MINUTES)`.
 - 2, then 1, then 0 as each learner's five minutes pass, with no new `activity` prop (fails without the timer).
-- the refusal line with no count; nothing but the heading before the first snapshot; the stopped line in place of the re-run line.
+- the refusal line with no count; nothing but the heading before the first snapshot (the status element is empty); with `stopped`, the stopped line inside `getByRole("status")` and no re-run line.
 - `app.test.tsx`: the info page's list names the class's recent activity.
+- `class-dashboard.test.tsx`: the existing header test asserts R13's new ownership line.
 
 ---
 
 ### The automatic re-run on the page
 
-**Summary**: Wire `behindRows` and `useAutoRerun` into `ClassDashboard`, send the Run request for each behind row at once, stop on an expired session, and show the out-of-date line and the opened result's line. Covers R7 to R12 and R14's page cases.
+**Summary**: Wire `behindRows` and `useAutoRerun` into `ClassDashboard`, send the Run request for each behind row at once, stop on an expired session, and show the out-of-date line and the opened result's line, and keep a re-run's intermediate lines out of the live regions. Covers R7 to R12 and R14's page cases.
 
 **Files affected**:
 - `app/src/pages/ClassDashboard.tsx`: `stopped` state, the `behind` memo, the hook, `run`'s `auto` flag
-- `app/src/components/PackageList.tsx`: R12's out-of-date line
-- `app/src/components/ResultView.tsx`: "Read the class's data from" for the run it shows
+- `app/src/components/PackageList.tsx`: R12's out-of-date line; `StateRegion`'s `quiet`
+- `app/src/components/Unlisted.tsx`: passes `quiet`
+- `app/src/components/ResultView.tsx`: "Includes every save before" for the run it shows
+- `app/src/components/ResultMarkdown.tsx`: `React.memo`
 - `app/tests/class-dashboard.test.tsx`, `app/tests/package-list.test.tsx`, `app/tests/result-view.test.tsx`
 
-**Estimated diff size**: ~170 lines, about half tests
+**Estimated diff size**: ~210 lines, about half tests
 
 ```ts
 // ClassDashboard
@@ -298,7 +303,35 @@ async function run(row: PackageRow, resume: boolean, auto = false) {
 
 The automatic branch comes before `refused`, which would otherwise show the young-token info page or call `onExpired`, and it applies to a young token too (R10). `Api.request` throws `SessionExpired` before sending when the token is within its margin, and after a 401; either way nothing ran. `stopped` is never cleared within the page's life; Run re-authorizes, which reloads the page. The hook's effect re-runs on every render, since `behind` follows each snapshot and the request callback is a new function each time; the `asked` map is what makes that harmless, so neither needs memoizing for it.
 
-`PackageList` receives `newest` and `behind` in `ListProps`, which `Rows` and `GroupSection` pass on to `Row` through their rest props. `Row` adds `<p className="notice">Students have saved work since this result.</p>` after its `FinishedBlock` when `outOfDate(key, result, newest, behind)` holds (R12). It is not a `FinishedBlock` child, since those render inside its "Finished" line, and not in the row's live region, so a save does not announce on every row. Rows under "Packages no longer listed" (`Unlisted`) are never re-run and get no line: they have no Run to press. `ResultView` appends " · Read the class's data from <formatTime(started_at)>" to its `.when` line ("Version … · Finished …"), from the `Finished` it is given (`ClassDashboard` passes `latestFinished(received.get(open.key))`), and appends nothing when that run has no `started_at`.
+`PackageList` receives `newest` and `behind` in `ListProps`, which `Rows` and `GroupSection` pass on to `Row` through their rest props. `Row` adds `<p className="notice">Students have saved work since this result.</p>` after its `FinishedBlock` when `outOfDate(key, result, newest, behind, pending)` holds (R12), with the `pending` `Row` already computes. It is not a `FinishedBlock` child, since those render inside its "Finished" line, and not in the row's live region, so a save does not announce on every row. Rows under "Packages no longer listed" (`Unlisted`) are never re-run and get no line: they have no Run to press. `ResultView` adds `<p className="when">Includes every save before {formatTime(started_at)}, when this run began reading the class's data.</p>` after its "Version … · Finished …" line, its own line since the sentence is long, from the `Finished` it is given (`ClassDashboard` passes `latestFinished(received.get(open.key))`), and adds nothing when that run has no `started_at`.
+
+A re-run announces only its outcome (R12). `StateRegion` gains `quiet`; while it is set the line renders outside the polite region, and the region keeps only what is an outcome. A polite region announces additions, not removals, so going quiet says nothing, and the outcome line entering the region when the re-run finishes is announced:
+
+```tsx
+// PackageList.tsx
+// A re-run of a row that has a finished result announces only its outcome (R12).
+export const quietUpdate = (state: RowState, hasFinished: boolean, inFlight: boolean) =>
+  hasFinished && (inFlight || state.kind === "queued" || state.kind === "running");
+
+export function StateRegion({ state, line, quiet = false, children }: {
+  state: RowState; line: string; quiet?: boolean; children?: ReactNode;
+}) {
+  return (
+    <div className="state">
+      {quiet && <p>{line}</p>}
+      <div aria-live="polite">
+        {!quiet && <p>{line}</p>}
+        {state.kind === "failed" && state.finishedAt !== null && <p className="when">{formatTime(state.finishedAt)}</p>}
+        {children}
+      </div>
+    </div>
+  );
+}
+```
+
+`Row` passes `quiet={quietUpdate(state, finished !== null, pending || resuming)}` and renders "Requesting…" before the `StateRegion` when quiet, inside it otherwise; a refusal stays inside, since it is an outcome. `Unlisted` passes `quietUpdate(state, finished !== null, false)`. A stuck row is not quiet: "Paused partway through" asks for a press. Above the list, `ClassDashboard` renders `sessionLines`' "Running <title>." and "Your machine is starting its next package." outside the `.status` region when `latestFinished(results.get(runner.current_package.package_key))` is set, by splitting the lines on that test; the machine's own lines (starting, ready, paused, stopped, failed) stay inside. `ResultView`'s "Updated <time>" status is the open result's outcome and is unchanged.
+
+Every learner's save is now a snapshot that re-renders the page, and with it an open `ResultView`, whose `ResultMarkdown` parses the whole result through react-markdown, remark-gfm and rehype-sanitize on each render. `ResultMarkdown` is exported as `memo(function ResultMarkdown(...))`: its props are a string and a boolean, unchanged by an activity snapshot, so a save no longer re-parses the open result.
 
 **Tests** (`class-dashboard.test.tsx`, the fake services' `runPackage` a spy):
 - A done Mine row with `started_at` at 1,000 and an activity snapshot with a learner at 2,000: `runPackage` is called once, at once, with the row's identity and current version.
@@ -311,8 +344,12 @@ The automatic branch comes before `refused`, which would otherwise show the youn
 - `runPackage` rejecting with `SessionExpired` on the automatic call: `onExpired` not called, the stopped line shows, the out-of-date line shows on that row, and a later learner write calls nothing.
 - A manual Run on the behind row before the automatic call resolves: one request in flight, not two (the pending entry holds the row).
 - A 409 on the automatic call: the message on the row and no further call while the result is unchanged; then a results snapshot with a new `updated_at`, still `done` and still behind, gets one call.
-- The activity listener refused: a behind result never calls `runPackage`.
-- `result-view.test.tsx`: "Read the class's data from" with the formatted `started_at` of a `done` result, and of `previous` under a `running` one; no such line for a `previous` without `started_at`.
+- An activity snapshot, then `on.refused("activity")`: the count goes and the refusal line shows (fails if the branch's `setActivity(undefined)` is deleted). A refusal before any snapshot shows the line and calls nothing.
+- A done, behind row whose automatic `runPackage` has not resolved: "Requesting…" shows and the out-of-date line does not.
+- `package-list.test.tsx`: `quietUpdate` for each state with and without a finished result and in flight; a row whose `running` result has a `previous` renders its running line outside `[aria-live]` and, once `done`, its summary inside (fails if `quiet` is ignored); a first run's running line inside; "Requesting…" outside on a finished row, inside on a new one. The existing "puts each row's state in a polite live region" test reads `.state [aria-live]` instead of `.state`.
+- `class-dashboard.test.tsx`: with the running package's result over a `previous`, "Running <title>." is outside `[aria-live]`; for a first run it is inside, as the existing test has it.
+- `result-markdown.test.tsx`: with react-markdown mocked to count its renders, re-rendering a parent with the same `markdown` renders it once (fails without the `memo`).
+- `result-view.test.tsx`: "Includes every save before" with the formatted `started_at` of a `done` result, and of `previous` under a `running` one; no such line for a `previous` without `started_at`.
 
 ## Open Questions
 
@@ -328,7 +365,7 @@ The automatic branch comes before `refused`, which would otherwise show the youn
 - A) Call `runOffer(row.runnable, rowState(...))`, so whatever disables Run also stops an automatic run.
 - B) List the excluded statuses again in `behindRows`.
 
-**Decision**: A, one source of truth: a future change to when Run is offered (RD-3 pass 2 R7) changes the automatic path with it. `isBehind`'s own `status === "done"` is what makes queued, running and failed rows not behind; `runOffer` adds `runnable` and the stuck case.
+**Decision**: A, one source of truth: a future change to when Run is offered (RD-3 pass 2 R7) changes the automatic path with it. `isBehind`'s own `status === "done"` is what makes queued, running, stuck and failed rows not behind; for a done row `runOffer` adds only `runnable` today, and is kept so a later change to when Run is offered carries over.
 
 ### RESOLVED: Low confidence: the hook requests once per result under re-renders
 **Context**: The page re-renders on every snapshot, and `behind` and `auto` are new values each time, so `useAutoRerun`'s effect runs on every render.
@@ -336,37 +373,7 @@ The automatic branch comes before `refused`, which would otherwise show the youn
 - A) Run the hook as written before writing the step.
 - B) Trust the reasoning.
 
-**Decision**: A, run 2026-10-11 in a throwaway copy of the app at `d5fc47a` (Node 22, its own `npm ci`, deleted); results below in the Self-Review's coalescing entry. An earlier timer-based version of this hook (the 30-second delay and 5-minute floor, retired by #202) was also checked that way, at `4b2eb2f`.
-
-## Self-Review
-
-Stage 7, unattended. Roles: commit reviewer, test writer, Senior Engineer (against RD-3 pass 2's plan at `4b2eb2f`), the researcher using the page. Each finding was checked against RD-3 pass 2's plan or the scratch build before it was written; findings that did not survive were dropped.
-
-### Senior Engineer
-
-#### RESOLVED: A refused automatic request would stop that package re-running for the page's life
-RD-3 pass 2 keeps a refusal in `requests` as `{message, at}` and shows it only while the result's `updated_at` equals `at` (its "The Run control and each row's state", `PackageList`'s row); nothing deletes the entry when the result changes. `behindRows` tested `requests.has(key)`, so after one 409 the package was excluded even once its result had moved on, contradicting R9's "until its result changes". Fixed: `held` applies RD-3 pass 2's own showing rule, and `behindRows` and the page test cover a stale refusal.
-
-### Commit reviewer
-
-#### RESOLVED: The stopped path called a helper that does not exist
-`run`'s automatic branch called `clear(key)`, which neither this plan nor RD-3 pass 2's defines. Replaced with the delete RD-3 pass 2's 202 branch already does.
-
-### Test writer
-
-#### RESOLVED: The count's tests' clock would not move with fake timers
-`ClassActivity` reads `services.now`; RD-3 pass 2's fake services may fix `now` to a constant (pass 1's tests pass a fixed value for the profile age), and then the count would never fall under `vi.advanceTimersByTime`. Its tests pass `Date.now` read at call time.
-
-
-### Coalescing review (2026-10-11, after #202)
-
-Roles: Senior Engineer (against REPORT-143 at `d0f913b`, RD-4 pass 2 and RD-3 pass 2 at `d5fc47a`), the researcher using the page, the test writer.
-
-#### RESOLVED: Coalescing needs no timer and no runner change
-REPORT-143 R5 and R8 skip a package while its result is `queued` or `running`, so a request during a re-run appends nothing, and the runner never queues a package twice; the page compares only `done` results, so a save during a run is caught when it finishes, against that run's `started_at`. What remains is not repeating a request in the gap before the queued snapshot, which `useAutoRerun`'s per-result memory covers. Run in a throwaway copy at `d5fc47a` (Node 22, deleted): a probe under `StrictMode` requested once for a result, not again across re-renders with new maps, the item leaving and returning with the same `updated_at`, and once more for a newer `updated_at`; nothing while stopped. With the `asked` check removed, the test failed.
-
-#### RESOLVED: The previous result must survive every write between two finished runs
-The function's queued write replaced the result whole and the runner's claim cleared `summary` and `display`. With REPORT-143 writing `previous` at queue time, the claim, stage, finish and failure writes (`ClassDocuments` in RD-4 pass 2's `status.js`, all named-field merges) leave it alone, so RD-4 pass 2 needs no change. The watchdog's failure write has to keep it too, which REPORT-143 confirms (requirements, Background).
+**Decision**: A, run 2026-10-11 in a throwaway copy of the app at `d5fc47a` (Node 22, its own `npm ci`, deleted); under `StrictMode` the probe requested once for a result, not again across re-renders with new maps or the item leaving and returning with the same `updated_at`, once more for a newer `updated_at`, and nothing while stopped; with the `asked` check removed the test failed.
 
 ## Self-Review, 2026-10-16
 
@@ -374,26 +381,26 @@ Roles: Senior Engineer, QA Engineer, Performance Engineer, WCAG Accessibility Ex
 
 ### Senior Engineer
 
-#### OPEN: `nextChangeIn` arms the timer for a full window from now, not for the earliest learner's exit
-In "The count, the behind rule and the request hook", `const leaves = Math.max(at, now) + windowMs - now;` gives exactly `windowMs` for every learner whose `lastActivityAt` is at or before `now`, so a learner who saved 4 minutes ago is treated as leaving in 5 minutes, not 1. The count is then up to a full window late in falling, and every snapshot pushes the timer out again, so in a class that is going quiet the count can stay high for up to 5 minutes past the moment it should drop. Evidence: in the scratch copy, `nextChangeIn` for one learner at `now - 4 min` returned 300000, not 60000; `ClassActivity` with learners at `now - 4 min` and `now - 1 min` still read "2 students" after advancing fake timers 1 minute (expected 1). A fixture with learners at or after `now` fails too (still "1 student" one window after the later learner). With `const leaves = at + windowMs - now;` both cases and the plan's other count cases pass (7 of 7). Suggested resolution: use `at + windowMs - now` for every counted learner (a future time already gives more than a window), and name the case in the `nextChangeIn` test as "a learner who saved 4 minutes ago leaves in 1 minute", which fails against the current line.
+#### RESOLVED: `nextChangeIn` arms the timer for a full window from now, not for the earliest learner's exit
+Verified (returned 300000 for a save 4 minutes old, expected 60000). Fixed: `at + windowMs - now`, and the 4-minute case is in the tests.
 
-#### OPEN: The out-of-date line shows on a row while its automatic request is in flight
-`held` treats a pending request as held, so `behindRows` leaves the row out of `behind`, and `outOfDate` then returns true for it: the row reads "Requesting…" and "Students have saved work since this result." together, on every automatic re-run, until the queued snapshot arrives. R12 says the line is not shown while the row is "about to be requested", and R14 says it is not shown "on a done row that is being requested". Evidence: page test in the scratch copy with `runPackage` held unresolved: both texts present; after it resolves the line goes. With REPORT-143's `queuePackages` committing the queued write before `ensureVm` (`run-package.ts` on report-service `master`, the transaction then `deps.ensureVm`), the queued snapshot usually lands before the 202, so the flash lasts from the request until that snapshot, on each re-run. Suggested resolution: have `outOfDate` also return false while the row's request is pending (pass `requests.get(key)` to it, or have `behindRows` return the pending rows as well and let `useAutoRerun` skip them), and add the pending case to the `outOfDate` and page tests.
+#### RESOLVED: The out-of-date line shows on a row while its automatic request is in flight
+Verified (`behindRows` drops a pending row, then `outOfDate` is true). Fixed: `outOfDate` takes `pending` and returns false for it; unit and page tests added.
 
 ### QA Engineer
 
-#### OPEN: The stuck-row exclusion in `behindRows`' tests cannot fail, and `runOffer` adds only `runnable` there
-For a `done` result `rowState` is always `{ kind: "done" }`, which `runOffer` disables only when `!runnable`; every other way `runOffer` disables Run (running, stuck, queued and not waiting) needs a status `isBehind` has already rejected. So the planned case "a stuck row given a `mark` and a runner on another VM" is excluded by `isBehind` alone. Evidence: in the scratch copy, replacing the `runOffer(...)` line with `if (!row.runnable) continue;` left a stuck-row test and a `runnable: false` test both green (2 of 2). The Open Question "`behindRows` reuses `runOffer`" says "`runOffer` adds `runnable` and the stuck case", which is not so. Suggested resolution: drop the stuck case from `behindRows`' test list (keep `runnable: false`, which does fail when the line is deleted), and correct the Open Question's last sentence to say `runOffer` adds `runnable` today and is kept so a future change to when Run is offered for a done row carries over.
+#### RESOLVED: The stuck-row exclusion in `behindRows`' tests cannot fail, and `runOffer` adds only `runnable` there
+Verified (the stuck case passes with `runOffer` replaced by `row.runnable`). Fixed: the stuck case is dropped from `behindRows`' tests and the Open Question's sentence corrected.
 
 ### Performance Engineer
 
-#### OPEN: Every activity snapshot re-renders and re-parses an open result's markdown
-Today the page re-renders on profile, runner, counts and results snapshots, which are rare. The activity listener adds a snapshot for every learner's save, and `ClassDashboard` re-renders `ResultView` each time (`ClassDashboard.tsx:302`), whose `ResultMarkdown` (`ResultMarkdown.tsx:244`) runs react-markdown, remark-gfm and rehype-sanitize over `display` on every render, with no memo. Evidence: in the scratch copy, a parent re-render with a 300-row table result open took 70 ms per render under jsdom (slower than a browser, but the work is the same: a full parse per snapshot). In a 30-learner class saving every few seconds that is a full parse on the main thread every second or two while a result is open. Suggested resolution: wrap `ResultMarkdown` (or `ResultView`) in `React.memo`, whose props are already stable across an activity snapshot (`markdown` is a string; `ResultView`'s `onClose` would need `useCallback`, or memo `ResultMarkdown` alone), and note it in "The automatic re-run on the page".
+#### RESOLVED: Every activity snapshot re-renders and re-parses an open result's markdown
+Verified: with `memo` the parse runs once across a parent re-render, without it twice. Fixed: `ResultMarkdown` is memoized, with a test.
 
 ### WCAG Accessibility Expert
 
-#### OPEN: Each automatic re-run announces every step in the row's polite live region
-R6 keeps the count out of a live region so a busy class does not produce a stream of announcements, but an automatic re-run drives the row's `StateRegion` (`PackageList.tsx:360`, `aria-live="polite"`) through "Requesting…", "Updating: queued…", "Updating: running … starting", "preparing the package", "running the package" and the new summary. With re-runs back to back in an active class (requirements Technical Notes, "Who pays, with no floor"), a screen reader user hears that sequence for each listed package for the whole lesson, unprompted. Evidence: in the scratch copy, the "Requesting…" of an automatic request renders inside the row's `[aria-live="polite"]` region. Suggested resolution: announce only what the researcher asked for: for a request the page made on its own, render the intermediate lines outside the live region (or with the region's content unchanged until the result is `done`), and announce the finished re-run once; record the choice in R12 and test that an automatic request adds nothing to the row's live region before `done`.
+#### RESOLVED: Each automatic re-run announces every step in the row's polite live region
+Doug, 2026-10-16: a re-run announces only its outcome, decided by the row's state (R12); the session lines naming the running package follow the same rule.
 
-#### OPEN: The stopped line appears silently
-When an automatic request meets an expired session, "Automatic re-runs have stopped because your sign-in has expired. Run any package to sign in again." replaces the re-run line in the Class activity section, which is deliberately not a live region. A screen reader user is not told that the page has stopped doing something it said it would do, a status message under WCAG 2.2 SC 4.1.3. Suggested resolution: render the stopped line in its own `role="status"` element (polite), which announces once since `stopped` never clears, and keep the count itself outside it; add the role to the `class-activity.test.tsx` stopped case.
+#### RESOLVED: The stopped line appears silently
+Fixed: the stopped line is in an always-rendered `role="status"` element (R10), with its test.
