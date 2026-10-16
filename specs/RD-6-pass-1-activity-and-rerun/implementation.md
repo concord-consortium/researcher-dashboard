@@ -127,7 +127,7 @@ export function isBehind(result: Result | undefined, newest: number | null): boo
   return result?.status === "done" && started !== null && newest !== null && newest > started;
 }
 
-// The listed rows the page would re-run now, by package key (R7), with the result's updated_at,
+// The listed rows the page would re-run now, by package key, with the result's updated_at,
 // which is what the hook requests once per.
 export function behindRows({ listed, results, runner, mark, classHash, newest, requests }: {
   listed: PackageRow[]; results: Map<string, Result>; runner: Runner | null; mark: SessionMark | null;
@@ -152,7 +152,7 @@ function held(request: RunRequest | undefined, result: Result | undefined): bool
   return request.at === millis(result?.updated_at);
 }
 
-// R12: the latest finished result is older than some learner's save, and nothing is about to
+// The latest finished result is older than some learner's save, and nothing is about to
 // replace it. `behind` is behindRows' answer while automatic re-runs are on, else empty; `pending`
 // is whether a request from the row is in flight.
 export function outOfDate(key: string, result: Result | undefined, newest: number | null,
@@ -169,7 +169,7 @@ export function outOfDate(key: string, result: Result | undefined, newest: numbe
 // rerun.ts
 import { useEffect, useRef } from "react";
 
-// Requests each behind item once per result (R8): `at` is the result's updated_at, so the snapshots
+// Requests each behind item once per result: `at` is the result's updated_at, so the snapshots
 // that arrive before the queued result cannot repeat the request, and the next finished result,
 // with its own updated_at, can be requested again.
 export function useAutoRerun<T>(behind: Map<string, { row: T; at: number | null }>, stopped: boolean,
@@ -309,7 +309,7 @@ A re-run announces only its outcome (R12). `StateRegion` gains `quiet`; while it
 
 ```tsx
 // PackageList.tsx
-// A re-run of a row that has a finished result announces only its outcome (R12).
+// A re-run of a row that has a finished result announces only its outcome.
 export const quietUpdate = (state: RowState, hasFinished: boolean, inFlight: boolean) =>
   hasFinished && (inFlight || state.kind === "queued" || state.kind === "running");
 
