@@ -178,7 +178,9 @@ export function ClassDashboard({ services, onExpired }: {
       return next;
     });
 
-  async function run(row: PackageRow, resume: boolean, auto = false) {
+  // Resolves false only for an automatic request the sign-in refused, which may be asked again once
+  // automatic re-runs are back on.
+  async function run(row: PackageRow, resume: boolean, auto = false): Promise<boolean> {
     const key = packageKey(row.identity);
     setRequests((r) => new Map(r).set(key, { pending: true }));
     // An accepted Run is tied to the result it was sent against: a result that changes before the
@@ -188,7 +190,7 @@ export function ClassDashboard({ services, onExpired }: {
       await services.portal.runPackage(row.identity, row.current_version.version);
       if (!auto) setStopped(null);
       const timers = acceptedTimers.current;
-      if (!timers) return;
+      if (!timers) return true;
       const accepted: RunRequest = resume
         ? { resuming: true, at: millis(latestResults.current.get(key)?.updated_at) }
         : { requested: true, at: sentAt };
@@ -199,16 +201,18 @@ export function ClassDashboard({ services, onExpired }: {
         setRequests((r) => (r.get(key) === accepted ? new Map(r).set(key, { ...accepted, lapsed: true }) : r));
       }, ACCEPTED_WAIT_MS);
       timers.add(timer);
+      return true;
     } catch (error) {
       // An automatic request never signs in again: that leaves the page under a researcher who pressed nothing.
       if (auto && error instanceof SessionExpired) {
         forget(key);
         setStopped(error.young ? "not-renewed" : "expired");
-        return;
+        return false;
       }
       // Keyed to the result as the refusal finds it: the queued write lands before a VM step fails.
       const at = millis(latestResults.current.get(key)?.updated_at);
       refused(error, (message) => setRequests((r) => new Map(r).set(key, { message, at })), "portal");
+      return true;
     }
   }
 
@@ -223,7 +227,7 @@ export function ClassDashboard({ services, onExpired }: {
       : new Map<string, { row: PackageRow; at: number | null }>(),
     [listShown, stopped, grouped, results, runner, mark, scope, newest, requests]
   );
-  useAutoRerun(behind, stopped !== null, (_key, row) => { void run(row, false, true); });
+  useAutoRerun(behind, stopped !== null, (_key, row) => run(row, false, true));
 
   // While the list is loading or failed, every result would look unlisted, so none is placed.
   const unlisted = useMemo(

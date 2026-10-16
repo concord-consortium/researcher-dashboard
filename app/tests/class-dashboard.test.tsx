@@ -1023,6 +1023,31 @@ describe("the automatic re-run", () => {
     await vi.waitFor(() => expect(s.runPackage).toHaveBeenCalledTimes(3));
   });
 
+  it("asks again for a package whose automatic request met the expired sign-in once a pressed Run succeeds", async () => {
+    const other = row({ title: "Other package", official: true, identity: "projects/20/other" });
+    const otherPackage = { identity: other.identity, version: "1.0.0", checksum: "c" };
+    let refusals = 2;
+    const s = services({
+      list: async () => [WILDFIRE, other],
+      run: async () => {
+        if (refusals > 0) { refusals -= 1; throw new SessionExpired(false); }
+        return { queue: [], appended: [], vm: "launched" };
+      }
+    });
+    await listed(s);
+    await s.results(new Map([
+      [KEY, doneAt(1000)],
+      ["projects__20__other", { ...doneAt(1000), package: otherPackage }]
+    ]));
+    await s.activity(learner(2000));
+    expect(await screen.findByText(/Automatic re-runs have stopped/)).toBeDefined();
+    expect(s.runPackage).toHaveBeenCalledTimes(2);
+    const otherRow = screen.getByText("Other package", { selector: ".title" }).closest("li")!;
+    fireEvent.click(within(otherRow).getByRole("button", { name: "Run Other package" }));
+    await vi.waitFor(() => expect(s.runPackage).toHaveBeenCalledTimes(4));
+    expect(s.runPackage.mock.calls.slice(2).map((c) => c[0]).sort()).toEqual([other.identity, WILDFIRE.identity].sort());
+  });
+
   it("shows a refusal and retries only once the result changes", async () => {
     const s = services({ run: async () => { throw new ApiError("projects/20/wildfire-responses@1.0.0 cannot be run", 409); } });
     await listed(s);
