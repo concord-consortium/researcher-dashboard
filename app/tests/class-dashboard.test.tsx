@@ -804,6 +804,18 @@ describe("the Results section", () => {
     expect(within(section).queryByRole("button", { name: /^(Run|Resume) / })).toBeNull();
   });
 
+  it("does not announce an unlisted package's re-run until it finishes", async () => {
+    const s = services();
+    await listed(s);
+    const pkg = { identity: "users/7/hidden", version: "1.0.0", checksum: "c" };
+    await s.results(new Map([["users__7__hidden", wildfire({
+      package: pkg, status: "running", previous: { package: pkg, summary: "Hidden summary", finished_at: stamp(500) }
+    })]]));
+    expect(within(unlistedRow("users/7/hidden")).getByText(/^Updating: running/).closest("[aria-live]")).toBeNull();
+    await s.results(new Map([["users__7__hidden", done("users/7/hidden", "Newer hidden summary", 2000)]]));
+    expect(within(unlistedRow("users/7/hidden")).getByText("Newer hidden summary").closest("[aria-live]")).not.toBeNull();
+  });
+
   it("places no result there while the list is pending or after it failed", async () => {
     const pending = services({ list: () => new Promise<PackageRow[]>(() => {}) });
     await mounted(pending);
