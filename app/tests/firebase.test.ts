@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classPath, emulatorsFromEnv, portalSegment, resultsPath, runnerPath, scopeDocPath } from "../src/shell/firebase";
+import { activityPath, classPath, emulatorsFromEnv, portalSegment, resultsPath, runnerPath, scopeDocPath } from "../src/shell/firebase";
 
 describe("portalSegment", () => {
   // The convention CLUE and report-service already use for portal-keyed collections.
@@ -18,6 +18,13 @@ describe("classPath", () => {
   it("puts the class document under the portal's own segment", () => {
     expect(classPath("https://learn.portal.staging.concord.org", "abc"))
       .toBe("researcher_dashboard/learn_portal_staging_concord_org/classes/abc");
+  });
+});
+
+describe("activityPath", () => {
+  it("puts the class's learner activity under the portal's own segment", () => {
+    expect(activityPath("https://learn.portal.staging.concord.org", "abc"))
+      .toBe("researcher_dashboard/learn_portal_staging_concord_org/activity/abc/users");
   });
 });
 

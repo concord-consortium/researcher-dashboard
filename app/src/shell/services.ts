@@ -1,4 +1,5 @@
-import { classPath, emulatorsFromEnv, resultsPath, runnerPath, scopeDocPath, signIn, watchCollection, watchDoc } from "./firebase";
+import type { Activity } from "./activity";
+import { activityPath, classPath, emulatorsFromEnv, resultsPath, runnerPath, scopeDocPath, signIn, watchCollection, watchDoc } from "./firebase";
 import type { Token } from "./oauth";
 import type { Profile } from "./packages";
 import { Api, Portal, ReportServer, type Scope } from "./portal";
@@ -10,8 +11,9 @@ export interface ClassListeners {
   runner: (runner: Runner | null) => void;
   counts: (counts: Counts | null) => void;
   results: (results: Map<string, Result>) => void;
+  activity: (docs: Map<string, Activity>) => void;
   // Which listener failed, normally refused by the rules, so the page can say what it could not read.
-  refused: (which: "profile" | "runner" | "counts" | "results") => void;
+  refused: (which: "profile" | "runner" | "counts" | "results" | "activity") => void;
 }
 
 // Everything the dashboard page calls out to, gathered so a test can hand it fakes. The page is
@@ -19,8 +21,8 @@ export interface ClassListeners {
 export interface DashboardServices {
   portal: Portal;
   reportServer: ReportServer;
-  // One Firebase token and one sign-in for the scope's class, then the four documents the page
-  // reads. Resolves to a function that stops all four; a listener that cannot start stops the
+  // One Firebase token and one sign-in for the scope's class, then the five listeners the page
+  // reads through. Resolves to a function that stops all five; a listener that cannot start stops the
   // ones already started before the promise rejects.
   watchClass: (scope: Scope, on: ClassListeners) => Promise<() => void>;
   now: () => number;
@@ -43,6 +45,7 @@ export function makeServices(config: PortalConfig, token: Token): DashboardServi
         stops.push(watchDoc<Runner>(db, runnerPath(config.origin, uid), on.runner, () => on.refused("runner")));
         stops.push(watchDoc<Counts>(db, scopeDocPath(config.origin, scope.class_hash, uid), on.counts, () => on.refused("counts")));
         stops.push(watchCollection<Result>(db, resultsPath(config.origin, scope.class_hash, uid), on.results, () => on.refused("results")));
+        stops.push(watchCollection<Activity>(db, activityPath(config.origin, scope.class_hash), on.activity, () => on.refused("activity")));
       } catch (error) {
         stopAll();
         throw error;

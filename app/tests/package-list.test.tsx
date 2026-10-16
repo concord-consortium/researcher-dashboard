@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { PackageList, stateText } from "../src/components/PackageList";
+import { PackageList, quietUpdate, stateText } from "../src/components/PackageList";
 import { packageKey } from "../src/shell/packages";
 import type { PackageRow } from "../src/shell/portal";
 import { formatTime, type Result, type Runner, type RunRequest } from "../src/shell/runs";
@@ -19,11 +19,12 @@ function result(r: PackageRow, over: Partial<Result> = {}): Result {
 
 function list(rows: PackageRow[], over: {
   results?: Map<string, Result>; runner?: Runner | null; requests?: Map<string, RunRequest>;
+  newest?: number | null; behind?: Map<string, unknown>;
   onRun?: (r: PackageRow, resume: boolean) => void; onShow?: (key: string) => void;
 } = {}) {
   render(
     <PackageList rows={rows} scope={SCOPE} results={over.results ?? new Map()} runner={over.runner ?? null} mark={null}
-      requests={over.requests ?? new Map()} onRun={over.onRun ?? vi.fn()} onShow={over.onShow ?? vi.fn()} showRef={vi.fn()} />
+      requests={over.requests ?? new Map()} newest={over.newest ?? null} behind={over.behind ?? new Map()} onRun={over.onRun ?? vi.fn()} onShow={over.onShow ?? vi.fn()} showRef={vi.fn()} />
   );
 }
 
@@ -210,6 +211,56 @@ describe("PackageList", () => {
   it("puts each row's state in a polite live region", () => {
     const r = row({ title: "Live", official: true });
     list([r]);
-    expect(item("Live").querySelector(".state")!.getAttribute("aria-live")).toBe("polite");
+    expect(item("Live").querySelector(".state [aria-live]")!.getAttribute("aria-live")).toBe("polite");
+  });
+});
+
+describe("a re-run on the row", () => {
+  const r = row({ title: "Rerun", official: true });
+  const key = packageKey(r.identity);
+  const pkg = { identity: r.identity, version: "1.0.0", checksum: "c" };
+  const previous = { package: pkg, summary: "Earlier", started_at: stamp(100), finished_at: stamp(200) };
+  const live = (el: Element) => el.closest("[aria-live]");
+
+  it.each([
+    ["queued with a finished result", { kind: "queued", position: 1, waiting: false }, true, false, true],
+    ["running with a finished result", { kind: "running", stage: "starting" }, true, false, true],
+    ["done with a request in flight", { kind: "done", summary: null, finishedAt: 1 }, true, true, true],
+    ["done with nothing in flight", { kind: "done", summary: null, finishedAt: 1 }, true, false, false],
+    ["paused partway, which asks for a press", { kind: "stuck", resumable: true }, true, false, false],
+    ["a first run", { kind: "running", stage: "starting" }, false, true, false]
+  ] as const)("is quiet or not for %s", (_name, state, hasFinished, inFlight, quiet) => {
+    expect(quietUpdate(state, hasFinished, inFlight)).toBe(quiet);
+  });
+
+  it("shows a re-run's running line outside the live region, and its new summary inside", () => {
+    list([r], { results: new Map([[key, { status: "running", stage: "run_package", package: pkg, previous }]]) });
+    expect(live(within(item("Rerun")).getByText(/running the package/))).toBeNull();
+    cleanup();
+    list([r], { results: new Map([[key, { status: "done", package: pkg, summary: "Newer" }]]) });
+    expect(live(within(item("Rerun")).getByText("Newer"))).not.toBeNull();
+  });
+
+  it("announces a first run's running line", () => {
+    list([r], { results: new Map([[key, { status: "running", stage: "run_package", package: pkg }]]) });
+    expect(live(within(item("Rerun")).getByText(/running the package/))).not.toBeNull();
+  });
+
+  it("shows Requesting outside the live region on a finished row, and inside on a new one", () => {
+    const requests = new Map([[key, { pending: true as const }]]);
+    list([r], { results: new Map([[key, { status: "done", package: pkg, summary: "Earlier" }]]), requests });
+    expect(live(within(item("Rerun")).getByText("Requesting…"))).toBeNull();
+    cleanup();
+    list([r], { requests });
+    expect(live(within(item("Rerun")).getByText("Requesting…"))).not.toBeNull();
+  });
+
+  it("says a result is out of date when a learner saved since it and it is not about to re-run", () => {
+    const result = { status: "done" as const, package: pkg, summary: "Earlier", started_at: stamp(100) };
+    list([r], { results: new Map([[key, result]]), newest: 500 });
+    expect(within(item("Rerun")).getByText("Students have saved work since this result.")).toBeDefined();
+    cleanup();
+    list([r], { results: new Map([[key, result]]), newest: 500, behind: new Map([[key, {}]]) });
+    expect(within(item("Rerun")).queryByText("Students have saved work since this result.")).toBeNull();
   });
 });

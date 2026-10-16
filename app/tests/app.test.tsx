@@ -21,6 +21,7 @@ describe("App", () => {
     const list = screen.getByRole("heading", { name: "What it can show" }).nextElementSibling!;
     expect(list.textContent).toMatch(/Running a package for the class, and the result it wrote\./);
     expect(list.textContent).toMatch(/The counts from your own runs\./);
+    expect(list.textContent).toMatch(/How many of the class's students saved work in the last few minutes\./);
   });
 
   it("says why it is not showing a class, with the portal's error where it sent one", () => {

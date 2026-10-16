@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { ClassActivity, type Stopped } from "../components/ClassActivity";
 import { Counts } from "../components/Counts";
 import { PackageList } from "../components/PackageList";
 import { ResultView } from "../components/ResultView";
@@ -7,9 +8,11 @@ import { groupPackages, needsRefresh, packageKey, scopeUrls, titleOf, type Profi
 import { ApiError, SessionExpired, type PackageRow, type Scope } from "../shell/portal";
 import { PROFILE_MAX_AGE_MS } from "../shell/portals";
 import {
-  latestFinished, millis, nextMark, RESUME_WAIT_MS, sessionLines,
+  ACCEPTED_WAIT_MS, latestFinished, millis, nextMark, sessionLines,
   type Counts as CountsDoc, type Result, type Runner, type RunRequest, type SessionMark
 } from "../shell/runs";
+import { behindRows, newestActivity, type Activity } from "../shell/activity";
+import { useAutoRerun } from "../shell/rerun";
 import type { DashboardServices } from "../shell/services";
 import type { InfoReason } from "../shell/start";
 import { Info } from "./Info";
@@ -24,6 +27,7 @@ const UNREACHABLE: Record<Source, string> = {
 };
 
 const PROFILE_REFUSED = "This class's profile could not be read.";
+const ACTIVITY_REFUSED = "Class activity could not be read.";
 
 // The dashboard for the class the token is bound to, never the one the launch link asked for.
 export function ClassDashboard({ services, onExpired }: {
@@ -55,18 +59,24 @@ export function ClassDashboard({ services, onExpired }: {
   // While the session or the results listener is refused, a row's state cannot be told, so none is shown.
   const results = useMemo(() => (runsProblem ? new Map<string, Result>() : received), [runsProblem, received]);
   const [countsProblem, setCountsProblem] = useState<string | null>(null);
+  // undefined until the first snapshot, and again once the listener is refused.
+  const [activity, setActivity] = useState<Map<string, Activity> | undefined>(undefined);
+  const [activityProblem, setActivityProblem] = useState<string | null>(null);
+  // Set when an automatic request finds the sign-in expired or not renewable. A Run that succeeds
+  // ends it; one that has to sign in again leaves the page, and the new page starts with it unset.
+  const [stopped, setStopped] = useState<Stopped | null>(null);
   const [rows, setRows] = useState<PackageRow[] | null>(null);
   const [listProblem, setListProblem] = useState<string | null>(null);
   const refreshed = useRef(false);
-  // An accepted Resume's timeouts while the page is mounted, cleared when it goes; null once it has
-  // gone, so a Resume answered after that starts none.
-  const resumeTimers = useRef<Set<ReturnType<typeof setTimeout>> | null>(null);
+  // An accepted request's timeouts while the page is mounted, cleared when it goes; null once it has
+  // gone, so a request answered after that starts none.
+  const acceptedTimers = useRef<Set<ReturnType<typeof setTimeout>> | null>(null);
   useEffect(() => {
     const timers = new Set<ReturnType<typeof setTimeout>>();
-    resumeTimers.current = timers;
+    acceptedTimers.current = timers;
     return () => {
       timers.forEach(clearTimeout);
-      resumeTimers.current = null;
+      acceptedTimers.current = null;
     };
   }, []);
 
@@ -107,8 +117,13 @@ export function ClassDashboard({ services, onExpired }: {
       },
       counts: setCounts,
       results: setReceived,
+      activity: setActivity,
       refused: (which) => {
         if (which === "profile") return setProfileProblem(PROFILE_REFUSED);
+        if (which === "activity") {
+          setActivity(undefined);
+          return setActivityProblem(ACTIVITY_REFUSED);
+        }
         if (which === "counts") {
           setCounts(undefined);
           return setCountsProblem("Your counts could not be read.");
@@ -118,7 +133,13 @@ export function ClassDashboard({ services, onExpired }: {
       }
     })
       .then((unsubscribe) => { if (canceled) unsubscribe(); else stop = unsubscribe; })
-      .catch((error) => { if (!canceled) refused(error, setProfileProblem, "firebase"); });
+      .catch((error) => {
+        if (canceled) return;
+        refused(error, (message) => {
+          setProfileProblem(message);
+          setActivityProblem(ACTIVITY_REFUSED);
+        }, "firebase");
+      });
     return () => { canceled = true; stop?.(); };
   }, [scope, services, info]);
 
@@ -157,31 +178,57 @@ export function ClassDashboard({ services, onExpired }: {
       return next;
     });
 
-  async function run(row: PackageRow, resume: boolean) {
+  // Resolves false only for an automatic request the sign-in refused, which may be asked again once
+  // automatic re-runs are back on.
+  async function run(row: PackageRow, resume: boolean, auto = false): Promise<boolean> {
     const key = packageKey(row.identity);
     setRequests((r) => new Map(r).set(key, { pending: true }));
+    // An accepted Run is tied to the result it was sent against: a result that changes before the
+    // answer arrives is the run's own progress, or its outcome.
+    const sentAt = millis(latestResults.current.get(key)?.updated_at);
     try {
       await services.portal.runPackage(row.identity, row.current_version.version);
-      if (!resume) return forget(key);
-      const timers = resumeTimers.current;
-      if (!timers) return;
-      const resuming: RunRequest = { resuming: true, at: millis(latestResults.current.get(key)?.updated_at) };
-      setRequests((r) => new Map(r).set(key, resuming));
+      if (!auto) setStopped(null);
+      const timers = acceptedTimers.current;
+      if (!timers) return true;
+      const accepted: RunRequest = resume
+        ? { resuming: true, at: millis(latestResults.current.get(key)?.updated_at) }
+        : { requested: true, at: sentAt };
+      setRequests((r) => new Map(r).set(key, accepted));
       const timer = setTimeout(() => {
         timers.delete(timer);
-        forget(key, resuming);
-      }, RESUME_WAIT_MS);
+        if ("resuming" in accepted) return forget(key, accepted);
+        setRequests((r) => (r.get(key) === accepted ? new Map(r).set(key, { ...accepted, lapsed: true }) : r));
+      }, ACCEPTED_WAIT_MS);
       timers.add(timer);
+      return true;
     } catch (error) {
+      // An automatic request never signs in again: that leaves the page under a researcher who pressed nothing.
+      if (auto && error instanceof SessionExpired) {
+        forget(key);
+        setStopped(error.young ? "not-renewed" : "expired");
+        return false;
+      }
       // Keyed to the result as the refusal finds it: the queued write lands before a VM step fails.
       const at = millis(latestResults.current.get(key)?.updated_at);
       refused(error, (message) => setRequests((r) => new Map(r).set(key, { message, at })), "portal");
+      return true;
     }
   }
 
   const listShown = Boolean(profile && rows && !listProblem && !profileProblem);
   const grouped = useMemo(() => (rows && scope ? groupPackages(rows, scope).flatMap((g) => g.rows) : []), [rows, scope]);
   const listedTitles = useMemo(() => new Map(grouped.map((r) => [packageKey(r.identity), titleOf(r)])), [grouped]);
+
+  const newest = activity ? newestActivity(activity) : null;
+  // An info page re-runs nothing: its listeners have stopped, but a list answered late still lands.
+  const behind = useMemo(
+    () => listShown && scope && !stopped && !info
+      ? behindRows({ listed: grouped, results, runner, mark, classHash: scope.class_hash, newest, requests })
+      : new Map<string, { row: PackageRow; at: number | null }>(),
+    [listShown, stopped, info, grouped, results, runner, mark, scope, newest, requests]
+  );
+  useAutoRerun(behind, stopped !== null, (_key, row) => run(row, false, true));
 
   // While the list is loading or failed, every result would look unlisted, so none is placed.
   const unlisted = useMemo(
@@ -237,6 +284,14 @@ export function ClassDashboard({ services, onExpired }: {
   const opened = open ? latestFinished(received.get(open.key)) : null;
   const openedAt = millis(opened?.finished_at);
 
+  const session = scope ? sessionLines(runner, scope.class_hash, results, (key) => listedTitles.get(key) ?? null,
+    [...requests.values()].some((r) => "pending" in r)).map((line) => <p key={line} className="session">{line}</p>) : null;
+  // While the machine runs a package that already has a finished result, the session lines stay out
+  // of the live region; the package's row announces the outcome.
+  const current = runner?.state === "running" ? runner.current_package : null;
+  const rerunning = Boolean(current && scope && current.class_hash === scope.class_hash
+    && latestFinished(results.get(current.package_key)));
+
   if (info) return <Info reason={info} />;
   if (!scope) {
     return (
@@ -255,9 +310,11 @@ export function ClassDashboard({ services, onExpired }: {
           {scope.cohorts.length > 0 && <> · {scope.cohorts.map((c) => c.name).join(", ")}</>}
         </p>
         <p className="ownership">
-          Results and counts on this page are your own. Another researcher of this class sees their own runs.
+          Your results and counts on this page are your own: another researcher of this class sees their own runs. Class activity is the same for every researcher of this class.
         </p>
       </header>
+
+      <ClassActivity activity={activity} problem={activityProblem} stopped={stopped} now={services.now} />
 
       <section aria-labelledby="assignments-heading">
         <h2 id="assignments-heading">Assignments</h2>
@@ -287,13 +344,13 @@ export function ClassDashboard({ services, onExpired }: {
           {listProblem && <p className="error">{listProblem}</p>}
           {runsProblem && <p className="error">{runsProblem}</p>}
           {countsProblem && <p className="error">{countsProblem}</p>}
-          {sessionLines(runner, scope.class_hash, results, (key) => listedTitles.get(key) ?? null,
-            [...requests.values()].some((r) => "pending" in r)).map((line) => <p key={line} className="session">{line}</p>)}
+          {!rerunning && session}
           {profile && !rows && !listProblem && !profileProblem && <p>Listing the packages that apply…</p>}
         </div>
+        {rerunning && session}
         {listShown && rows && (
           <PackageList rows={rows} scope={scope} results={results} runner={runner} mark={mark} requests={requests}
-            onRun={run} onShow={show} showRef={showRef} />
+            newest={newest} behind={behind} onRun={run} onShow={show} showRef={showRef} />
         )}
       </section>
 
