@@ -970,6 +970,59 @@ describe("the automatic re-run", () => {
     await vi.waitFor(() => expect(s.runPackage).toHaveBeenCalledTimes(2));
   });
 
+  it("ends an accepted Run's hold after three minutes with no new result, and does not request again", async () => {
+    const s = services();
+    await listed(s);
+    await s.results(new Map([[KEY, doneAt(1000)]]));
+    vi.useFakeTimers();
+    try {
+      await s.activity(learner(2000));
+      await act(async () => { await Promise.resolve(); });
+      expect(s.runPackage).toHaveBeenCalledTimes(1);
+      await act(async () => { vi.advanceTimersByTime(3 * 60_000 - 1); });
+      expect(within(wildfireRow()).queryByText(OUT_OF_DATE)).toBeNull();
+      await act(async () => { vi.advanceTimersByTime(1); });
+      expect(within(wildfireRow()).getByText(OUT_OF_DATE)).toBeDefined();
+      expect(within(wildfireRow()).getByText("Earlier").closest("[aria-live]")).not.toBeNull();
+      await s.activity(learner(3000));
+      expect(s.runPackage).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("says a sign-in that could not be renewed needs a new launch, and a Run then shows the expired page", async () => {
+    let calls = 0;
+    const s = services({ run: async () => { calls += 1; throw new SessionExpired(true); } });
+    const onExpired = await listed(s);
+    await s.results(new Map([[KEY, doneAt(1000)]]));
+    await s.activity(learner(2000));
+    expect(await screen.findByText(/sign-in could not be renewed\. Launch the dashboard again from the portal\./)).toBeDefined();
+    expect(screen.queryByText(/Run any package to sign in again/)).toBeNull();
+    fireEvent.click(runButton());
+    expect(await screen.findByText(/Launch the dashboard again from the portal/, { selector: "main p" })).toBeDefined();
+    expect(calls).toBe(2);
+    expect(onExpired).not.toHaveBeenCalled();
+  });
+
+  it("starts automatic re-runs again when a pressed Run succeeds after they stopped", async () => {
+    let refuse = true;
+    const s = services({ run: async () => {
+      if (refuse) { refuse = false; throw new SessionExpired(false); }
+      return { queue: [], appended: [], vm: "launched" };
+    } });
+    await listed(s);
+    await s.results(new Map([[KEY, doneAt(1000)]]));
+    await s.activity(learner(2000));
+    expect(await screen.findByText(/Automatic re-runs have stopped/)).toBeDefined();
+    fireEvent.click(runButton());
+    await vi.waitFor(() => expect(screen.queryByText(/Automatic re-runs have stopped/)).toBeNull());
+    expect(screen.getByText("Your finished packages re-run on their own as soon as students save new work.")).toBeDefined();
+    await s.results(new Map([[KEY, doneAt(4000)]]));
+    await s.activity(learner(5000));
+    await vi.waitFor(() => expect(s.runPackage).toHaveBeenCalledTimes(3));
+  });
+
   it("shows a refusal and retries only once the result changes", async () => {
     const s = services({ run: async () => { throw new ApiError("projects/20/wildfire-responses@1.0.0 cannot be run", 409); } });
     await listed(s);
@@ -992,7 +1045,7 @@ describe("the automatic re-run", () => {
     expect(s.runPackage).not.toHaveBeenCalled();
   });
 
-  it("does not announce the machine running a re-run, and does for a first run", async () => {
+  it("does not announce the line naming the package a re-run is running, and does for a first run", async () => {
     const s = services();
     await listed(s);
     const runner: Runner = { state: "running", current_package: { class_hash: SCOPE.class_hash, package_key: KEY } };

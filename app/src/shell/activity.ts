@@ -53,7 +53,7 @@ export function isBehind(result: Result | undefined, newest: number | null): boo
 }
 
 // The listed rows the page would re-run now, by package key, with the result's updated_at,
-// which is what the hook requests once per.
+// which is what the hook requests once per result.
 export function behindRows({ listed, results, runner, mark, classHash, newest, requests }: {
   listed: PackageRow[]; results: Map<string, Result>; runner: Runner | null; mark: SessionMark | null;
   classHash: string; newest: number | null; requests: Map<string, RunRequest>;
@@ -77,9 +77,10 @@ function held(request: RunRequest | undefined, result: Result | undefined): bool
   return request.at === millis(result?.updated_at);
 }
 
-// The latest finished result is older than some learner's save, and nothing is about to
-// replace it. `behind` is behindRows' answer while automatic re-runs are on, else empty; `requesting`
-// is whether a request from the row is in flight or accepted with its queued result still to come.
+// The latest finished result's run began reading the class before some learner's last save, and
+// nothing is about to replace it. `behind` is behindRows' answer while automatic re-runs are on,
+// else empty; `requesting` is whether a request from the row is in flight or accepted with its
+// queued result still to come.
 export function outOfDate(key: string, result: Result | undefined, newest: number | null,
   behind: Map<string, unknown>, requesting: boolean): boolean {
   if (!result || requesting || result.status === "queued" || result.status === "running" || behind.has(key)) return false;

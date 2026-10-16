@@ -118,8 +118,9 @@ const STAGES: Record<string, string> = {
 
 export const stageWords = (stage: string) => STAGES[stage] ?? stage;
 
-// How long an accepted Resume reads as resuming without a write to its result.
-export const RESUME_WAIT_MS = 3 * 60_000;
+// How long an accepted Run or Resume holds its row without a write to its result. The function can
+// accept a package it already counts as queued and write nothing, so the hold has to end on its own.
+export const ACCEPTED_WAIT_MS = 3 * 60_000;
 
 // Whether the row offers Run, and the reason when it does not and the state alone does not say why.
 export function runOffer(runnable: boolean, state: RowState): { enabled: boolean; reason?: string } {
@@ -135,12 +136,14 @@ export const WAITING = "Queued, waiting for a machine: run it to start one.";
 // A run request from one row: in flight, refused with a message, an accepted Resume, or an
 // accepted Run whose queued result has not arrived yet. `at` is the row's result `updated_at` when
 // the request was sent, for an accepted Run, or when the answer arrived, for the others; each entry
-// but pending applies only while the result's `updated_at` is still `at`.
+// but pending applies only while the result's `updated_at` is still `at`. An accepted Run that
+// waited ACCEPTED_WAIT_MS with no new result is `lapsed`: the row no longer reads as requested, and
+// is still not requested again on its own.
 export type RunRequest =
   | { pending: true }
   | { message: string; at: number | null }
   | { resuming: true; at: number | null }
-  | { requested: true; at: number | null };
+  | { requested: true; at: number | null; lapsed?: true };
 
 export const formatTime = (ms: number) => new Date(ms).toLocaleString();
 

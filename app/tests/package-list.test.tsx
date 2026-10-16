@@ -222,17 +222,15 @@ describe("a re-run on the row", () => {
   const previous = { package: pkg, summary: "Earlier", started_at: stamp(100), finished_at: stamp(200) };
   const live = (el: Element) => el.closest("[aria-live]");
 
-  it("is quiet only for a row with a finished result that is in flight, queued or running", () => {
-    const queued = { kind: "queued", position: 1, waiting: false } as const;
-    const running = { kind: "running", stage: "starting" } as const;
-    const doneState = { kind: "done", summary: null, finishedAt: 1 } as const;
-    const stuck = { kind: "stuck", resumable: true } as const;
-    expect(quietUpdate(queued, true, false)).toBe(true);
-    expect(quietUpdate(running, true, false)).toBe(true);
-    expect(quietUpdate(doneState, true, true)).toBe(true);
-    expect(quietUpdate(doneState, true, false)).toBe(false);
-    expect(quietUpdate(stuck, true, false)).toBe(false);
-    expect(quietUpdate(running, false, true)).toBe(false);
+  it.each([
+    ["queued with a finished result", { kind: "queued", position: 1, waiting: false }, true, false, true],
+    ["running with a finished result", { kind: "running", stage: "starting" }, true, false, true],
+    ["done with a request in flight", { kind: "done", summary: null, finishedAt: 1 }, true, true, true],
+    ["done with nothing in flight", { kind: "done", summary: null, finishedAt: 1 }, true, false, false],
+    ["paused partway, which asks for a press", { kind: "stuck", resumable: true }, true, false, false],
+    ["a first run", { kind: "running", stage: "starting" }, false, true, false]
+  ] as const)("is quiet or not for %s", (_name, state, hasFinished, inFlight, quiet) => {
+    expect(quietUpdate(state, hasFinished, inFlight)).toBe(quiet);
   });
 
   it("shows a re-run's running line outside the live region, and its new summary inside", () => {

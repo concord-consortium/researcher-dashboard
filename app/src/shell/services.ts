@@ -21,8 +21,8 @@ export interface ClassListeners {
 export interface DashboardServices {
   portal: Portal;
   reportServer: ReportServer;
-  // One Firebase token and one sign-in for the scope's class, then the five documents the page
-  // reads. Resolves to a function that stops all five; a listener that cannot start stops the
+  // One Firebase token and one sign-in for the scope's class, then the five listeners the page
+  // reads through. Resolves to a function that stops all five; a listener that cannot start stops the
   // ones already started before the promise rejects.
   watchClass: (scope: Scope, on: ClassListeners) => Promise<() => void>;
   now: () => number;

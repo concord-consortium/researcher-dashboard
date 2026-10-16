@@ -75,31 +75,18 @@ describe("makeServices", () => {
     }
   });
 
-  it("stops the listeners it started when a later one cannot start, and rejects", async () => {
+  it.each([
+    ["the counts listener", 2, [PATHS.profile, PATHS.runner]],
+    ["the activity listener", 4, [PATHS.profile, PATHS.runner, PATHS.counts, PATHS.results]]
+  ])("stops the listeners started before %s when it cannot start, and rejects", async (_name, before, expected) => {
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 201, json: async () => ({ token: "custom" }) })));
     stops.clear();
-    watch.mockImplementationOnce(started).mockImplementationOnce(started)
-      .mockImplementationOnce(() => { throw new Error("invalid path"); });
-    try {
-      const { makeServices } = await import("../src/shell/services");
-      const on = listenersOn();
-      await expect(makeServices(CONFIG, TOKEN).watchClass(SCOPE, on)).rejects.toThrow("invalid path");
-      expect([...stops.keys()]).toEqual([PATHS.profile, PATHS.runner]);
-      for (const s of stops.values()) expect(s).toHaveBeenCalledTimes(1);
-    } finally {
-      vi.unstubAllGlobals();
-    }
-  });
-
-  it("stops the four started before it when the activity listener cannot start, and rejects", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 201, json: async () => ({ token: "custom" }) })));
-    stops.clear();
-    watch.mockImplementationOnce(started).mockImplementationOnce(started).mockImplementationOnce(started)
-      .mockImplementationOnce(started).mockImplementationOnce(() => { throw new Error("invalid path"); });
+    for (let i = 0; i < before; i++) watch.mockImplementationOnce(started);
+    watch.mockImplementationOnce(() => { throw new Error("invalid path"); });
     try {
       const { makeServices } = await import("../src/shell/services");
       await expect(makeServices(CONFIG, TOKEN).watchClass(SCOPE, listenersOn())).rejects.toThrow("invalid path");
-      expect([...stops.keys()]).toEqual([PATHS.profile, PATHS.runner, PATHS.counts, PATHS.results]);
+      expect([...stops.keys()]).toEqual(expected);
       for (const s of stops.values()) expect(s).toHaveBeenCalledTimes(1);
     } finally {
       vi.unstubAllGlobals();

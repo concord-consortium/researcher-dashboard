@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ClassActivity } from "../components/ClassActivity";
+import { ClassActivity, type Stopped } from "../components/ClassActivity";
 import { Counts } from "../components/Counts";
 import { PackageList } from "../components/PackageList";
 import { ResultView } from "../components/ResultView";
@@ -8,7 +8,7 @@ import { groupPackages, needsRefresh, packageKey, scopeUrls, titleOf, type Profi
 import { ApiError, SessionExpired, type PackageRow, type Scope } from "../shell/portal";
 import { PROFILE_MAX_AGE_MS } from "../shell/portals";
 import {
-  latestFinished, millis, nextMark, RESUME_WAIT_MS, sessionLines,
+  ACCEPTED_WAIT_MS, latestFinished, millis, nextMark, sessionLines,
   type Counts as CountsDoc, type Result, type Runner, type RunRequest, type SessionMark
 } from "../shell/runs";
 import { behindRows, newestActivity, type Activity } from "../shell/activity";
@@ -62,20 +62,21 @@ export function ClassDashboard({ services, onExpired }: {
   // undefined until the first snapshot, and again once the listener is refused.
   const [activity, setActivity] = useState<Map<string, Activity> | undefined>(undefined);
   const [activityProblem, setActivityProblem] = useState<string | null>(null);
-  // Set when an automatic request finds the sign-in expired; only Run, which signs in again, ends it.
-  const [stopped, setStopped] = useState(false);
+  // Set when an automatic request finds the sign-in expired or not renewable. A Run that succeeds
+  // ends it; one that has to sign in again leaves the page, and the new page starts with it unset.
+  const [stopped, setStopped] = useState<Stopped | null>(null);
   const [rows, setRows] = useState<PackageRow[] | null>(null);
   const [listProblem, setListProblem] = useState<string | null>(null);
   const refreshed = useRef(false);
-  // An accepted Resume's timeouts while the page is mounted, cleared when it goes; null once it has
-  // gone, so a Resume answered after that starts none.
-  const resumeTimers = useRef<Set<ReturnType<typeof setTimeout>> | null>(null);
+  // An accepted request's timeouts while the page is mounted, cleared when it goes; null once it has
+  // gone, so a request answered after that starts none.
+  const acceptedTimers = useRef<Set<ReturnType<typeof setTimeout>> | null>(null);
   useEffect(() => {
     const timers = new Set<ReturnType<typeof setTimeout>>();
-    resumeTimers.current = timers;
+    acceptedTimers.current = timers;
     return () => {
       timers.forEach(clearTimeout);
-      resumeTimers.current = null;
+      acceptedTimers.current = null;
     };
   }, []);
 
@@ -185,22 +186,24 @@ export function ClassDashboard({ services, onExpired }: {
     const sentAt = millis(latestResults.current.get(key)?.updated_at);
     try {
       await services.portal.runPackage(row.identity, row.current_version.version);
-      if (!resume) return setRequests((r) => new Map(r).set(key, { requested: true, at: sentAt }));
-      const at = millis(latestResults.current.get(key)?.updated_at);
-      const timers = resumeTimers.current;
+      if (!auto) setStopped(null);
+      const timers = acceptedTimers.current;
       if (!timers) return;
-      const resuming: RunRequest = { resuming: true, at };
-      setRequests((r) => new Map(r).set(key, resuming));
+      const accepted: RunRequest = resume
+        ? { resuming: true, at: millis(latestResults.current.get(key)?.updated_at) }
+        : { requested: true, at: sentAt };
+      setRequests((r) => new Map(r).set(key, accepted));
       const timer = setTimeout(() => {
         timers.delete(timer);
-        forget(key, resuming);
-      }, RESUME_WAIT_MS);
+        if ("resuming" in accepted) return forget(key, accepted);
+        setRequests((r) => (r.get(key) === accepted ? new Map(r).set(key, { ...accepted, lapsed: true }) : r));
+      }, ACCEPTED_WAIT_MS);
       timers.add(timer);
     } catch (error) {
-      // An automatic request never signs in again: that navigates away under a researcher who pressed nothing.
+      // An automatic request never signs in again: that leaves the page under a researcher who pressed nothing.
       if (auto && error instanceof SessionExpired) {
         forget(key);
-        setStopped(true);
+        setStopped(error.young ? "not-renewed" : "expired");
         return;
       }
       // Keyed to the result as the refusal finds it: the queued write lands before a VM step fails.
@@ -220,7 +223,7 @@ export function ClassDashboard({ services, onExpired }: {
       : new Map<string, { row: PackageRow; at: number | null }>(),
     [listShown, stopped, grouped, results, runner, mark, scope, newest, requests]
   );
-  useAutoRerun(behind, stopped, (_key, row) => { void run(row, false, true); });
+  useAutoRerun(behind, stopped !== null, (_key, row) => { void run(row, false, true); });
 
   // While the list is loading or failed, every result would look unlisted, so none is placed.
   const unlisted = useMemo(
@@ -278,7 +281,8 @@ export function ClassDashboard({ services, onExpired }: {
 
   const session = scope ? sessionLines(runner, scope.class_hash, results, (key) => listedTitles.get(key) ?? null,
     [...requests.values()].some((r) => "pending" in r)).map((line) => <p key={line} className="session">{line}</p>) : null;
-  // Lines naming a re-run of a finished package stay out of the live region; its row announces the outcome.
+  // While the machine runs a package that already has a finished result, the session lines stay out
+  // of the live region; the package's row announces the outcome.
   const current = runner?.state === "running" ? runner.current_package : null;
   const rerunning = Boolean(current && scope && current.class_hash === scope.class_hash
     && latestFinished(results.get(current.package_key)));

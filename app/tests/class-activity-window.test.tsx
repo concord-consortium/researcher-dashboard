@@ -11,7 +11,7 @@ vi.mock("../src/shell/activity", async (importOriginal) => ({
 afterEach(cleanup);
 
 it("names the window from its constant", () => {
-  render(<ClassActivity activity={new Map([["u", { lastActivityAt: stamp(Date.now()) }]])} problem={null} stopped={false}
+  render(<ClassActivity activity={new Map([["u", { lastActivityAt: stamp(Date.now()) }]])} problem={null} stopped={null}
     now={Date.now} />);
   expect(document.querySelector(".active-count")!.textContent).toBe("1 student active in the last 7 minutes");
 });

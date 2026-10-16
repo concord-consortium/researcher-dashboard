@@ -106,6 +106,12 @@ describe("behindRows", () => {
     expect(behind({ requests: new Map([[key, { message: "No.", at: 4000 }]]) }).size).toBe(1);
   });
 
+  it("leaves out a row whose accepted Run is still tied to its result, lapsed or not, and keeps one tied to an older result", () => {
+    expect(behind({ requests: new Map([[key, { requested: true, at: 5000 }]]) }).size).toBe(0);
+    expect(behind({ requests: new Map([[key, { requested: true, at: 5000, lapsed: true }]]) }).size).toBe(0);
+    expect(behind({ requests: new Map([[key, { requested: true, at: 4000 }]]) }).size).toBe(1);
+  });
+
   it("leaves out a row that cannot be run", () => {
     const unrunnable = { ...listedRow, runnable: false };
     expect(behind({ listed: [unrunnable] }).size).toBe(0);
@@ -129,14 +135,17 @@ describe("outOfDate", () => {
     expect(outOfDate(key, done(r, { status: "failed", started_at: stamp(3000), previous }), 2000, new Map(), false)).toBe(true);
   });
 
-  it("is false while the result is queued or running, behind, pending, current, or never finished", () => {
-    expect(outOfDate(key, done(r, { status: "queued", previous }), 2000, new Map(), false)).toBe(false);
-    expect(outOfDate(key, done(r, { status: "running", previous }), 2000, new Map(), false)).toBe(false);
-    expect(outOfDate(key, done(r), 2000, new Map([[key, {}]]), false)).toBe(false);
-    expect(outOfDate(key, done(r), 2000, new Map(), true)).toBe(false);
-    expect(outOfDate(key, done(r), 1000, new Map(), false)).toBe(false);
-    expect(outOfDate(key, done(r, { status: "failed" }), 2000, new Map(), false)).toBe(false);
-    expect(outOfDate(key, undefined, 2000, new Map(), false)).toBe(false);
+  it.each([
+    ["queued", (): Result | undefined => done(r, { status: "queued", previous }), 2000, false, false],
+    ["running", () => done(r, { status: "running", previous }), 2000, false, false],
+    ["about to be requested", () => done(r), 2000, true, false],
+    ["being requested", () => done(r), 2000, false, true],
+    ["read after the newest save", () => done(r), 1000, false, false],
+    ["failed with no finished run", () => done(r, { status: "failed" }), 2000, false, false],
+    ["never run", (): Result | undefined => undefined, 2000, false, false]
+  ] as const)("is false for a result %s", (_name, result, newest, inBehind, requesting) => {
+    const behind = new Map(inBehind ? [[key, {}]] : []);
+    expect(outOfDate(key, result(), newest, behind, requesting)).toBe(false);
   });
 
   it("is true for a done result that is not behind or pending", () => {

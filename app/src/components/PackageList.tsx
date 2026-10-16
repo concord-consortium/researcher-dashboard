@@ -47,8 +47,8 @@ const updating = (text: string) => `Updating: ${text[0].toLowerCase()}${text.sli
 export const quietUpdate = (state: RowState, hasFinished: boolean, inFlight: boolean) =>
   hasFinished && (inFlight || state.kind === "queued" || state.kind === "running");
 
-// A quiet line and its aside sit outside the polite region, which announces only additions, so the
-// outcome is announced when it replaces the line.
+// A quiet line and its aside sit outside the polite region, so changes to them are not announced,
+// and the outcome is announced when it is added inside.
 export function StateRegion({ state, line, quiet = false, aside, children }: {
   state: RowState; line: string; quiet?: boolean; aside?: ReactNode; children?: ReactNode;
 }) {
@@ -112,7 +112,7 @@ function Row({ row, result, runner, mark, classHash, request, newest, behind, on
   const refusal = request && "message" in request && request.at === resultAt ? request.message : null;
   const resume = state.kind === "stuck" && state.resumable;
   const resuming = resume && request !== undefined && "resuming" in request && request.at === resultAt;
-  const requested = request !== undefined && "requested" in request && request.at === resultAt;
+  const requested = request !== undefined && "requested" in request && !request.lapsed && request.at === resultAt;
   // While a request from this row is in flight, a waiting row reads as queued, not as waiting for a machine.
   const shown: RowState = pending && state.kind === "queued" && state.waiting ? { ...state, waiting: false } : state;
   const line = !resuming ? rowLine(shown, title, true, finishedAt) : finishedAt === undefined ? RESUMING : updating(RESUMING);
