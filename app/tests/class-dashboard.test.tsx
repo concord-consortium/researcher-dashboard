@@ -1048,6 +1048,21 @@ describe("the automatic re-run", () => {
     expect(s.runPackage.mock.calls.slice(2).map((c) => c[0]).sort()).toEqual([other.identity, WILDFIRE.identity].sort());
   });
 
+  it("sends nothing once access is withdrawn, even when the package list answers after", async () => {
+    const list = deferred<PackageRow[]>();
+    const s = services({
+      list: () => list.promise,
+      refresh: async () => { throw new ApiError("You do not have access to this class as a researcher", 403); }
+    });
+    await mounted(s);
+    await s.activity(learner(2000));
+    await s.results(new Map([[KEY, doneAt(1000)]]));
+    await s.snapshot({ ...CURRENT, derived_at: stamp(NOW - 2 * 24 * 3600 * 1000) });
+    expect(await screen.findByText(/access to this class has been withdrawn/)).toBeDefined();
+    await act(async () => list.resolve([WILDFIRE]));
+    expect(s.runPackage).not.toHaveBeenCalled();
+  });
+
   it("shows a refusal and retries only once the result changes", async () => {
     const s = services({ run: async () => { throw new ApiError("projects/20/wildfire-responses@1.0.0 cannot be run", 409); } });
     await listed(s);

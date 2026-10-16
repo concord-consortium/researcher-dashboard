@@ -221,11 +221,12 @@ export function ClassDashboard({ services, onExpired }: {
   const listedTitles = useMemo(() => new Map(grouped.map((r) => [packageKey(r.identity), titleOf(r)])), [grouped]);
 
   const newest = activity ? newestActivity(activity) : null;
+  // An info page re-runs nothing: its listeners have stopped, but a list answered late still lands.
   const behind = useMemo(
-    () => listShown && scope && !stopped
+    () => listShown && scope && !stopped && !info
       ? behindRows({ listed: grouped, results, runner, mark, classHash: scope.class_hash, newest, requests })
       : new Map<string, { row: PackageRow; at: number | null }>(),
-    [listShown, stopped, grouped, results, runner, mark, scope, newest, requests]
+    [listShown, stopped, info, grouped, results, runner, mark, scope, newest, requests]
   );
   useAutoRerun(behind, stopped !== null, (_key, row) => run(row, false, true));
 
