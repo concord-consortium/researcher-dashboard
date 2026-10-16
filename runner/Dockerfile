@@ -1,12 +1,12 @@
-# Runner image: tooling only. No analysis script is baked in; packages are fetched
-# from S3 at /analyze. Nothing secret is present at build time, because every VM
-# launched from this image shares one snapshot.
+# Runner image: tooling only. No package is baked in; packages are fetched from S3 when
+# the runner takes them from its queue. Nothing secret is present at build time, because
+# every VM launched from this image shares one snapshot.
 
 ARG AL2023_TAG=2023
 ARG RUNTIME_IMAGE=public.ecr.aws/lambda/microvms:al2023-minimal
 ARG GO_VERSION=1.27.1
 ARG DUCKDB_VERSION=1.5.5
-ARG CC_DATA_REF=v0.2.0
+ARG CC_DATA_REF=v0.3.0-pre.1
 
 # cc-data-cli embeds DuckDB through cgo, so it is compiled rather than downloaded:
 # there is no linux_arm64 release, and a published linux binary carries the glibc
@@ -38,11 +38,12 @@ ARG DUCKDB_VERSION
 # Node is pinned to a major line rather than taking the `nodejs` default, so a later
 # rebuild cannot change the runtime under a shared VM snapshot. 24 is the current LTS
 # line; the Firebase client SDK declares no engine ceiling and firebase-admin wants >=22.
-# util-linux supplies setpriv and iproute supplies `ip netns`, which the runner uses to
-# run an analysis package as an unprivileged uid inside a network namespace whose only
+# util-linux supplies setpriv and kill, and iproute supplies `ip netns`, which the runner uses to
+# run a package as an unprivileged uid inside a network namespace whose only
 # route out is the egress proxy. iptables is what keeps the runner's own HTTP server
 # off the one address that namespace can reach. procps-ng supplies sysctl, which is how
-# IPv6 is disabled inside the namespace; the base image does not carry it.
+# IPv6 is disabled inside the namespace, and pgrep; the base image carries neither. The
+# runner ends a package's leftover processes with kill and pgrep after every run.
 RUN dnf -y install python3.11 nodejs24 nodejs24-npm unzip tar gzip shadow-utils ca-certificates \
       util-linux \
       iproute \
@@ -58,9 +59,9 @@ RUN curl -fsSL -o /tmp/duckdb.zip \
 
 COPY --from=ccdata /out/cc-data /usr/local/bin/cc-data
 
-# The analysis user runs fetched packages: no tokens, no credential store, a
-# read-only dataset and a writable output directory are handed to it per analysis.
-RUN useradd --create-home --shell /usr/sbin/nologin analysis
+# The package user runs fetched packages. It is the image's first user, so its uid is
+# 1000, which PACKAGE_UID defaults to.
+RUN useradd --create-home --shell /usr/sbin/nologin package
 
 WORKDIR /srv
 # Dependencies before source, so editing the runner does not reinstall them. Only
@@ -69,9 +70,11 @@ WORKDIR /srv
 COPY package.json package-lock.json /srv/
 RUN npm ci --omit=dev && npm cache clean --force
 COPY server/ /srv/server/
-# /data is the researcher's synced tree, owned by the runner; /work holds an
-# analysis's output and is handed to the analysis user.
-RUN mkdir -p /work /data && chown analysis:analysis /work
+# /data is the researcher's synced tree, owned by the runner; /work holds each
+# package's cached archive, home, input and output. /work stays the runner's: the
+# runner hands the package user its own home and output directory and nothing above
+# them, so a package cannot swap a directory the runner later reads as root.
+RUN mkdir -p /work /data
 
 EXPOSE 8080
 CMD ["node", "/srv/server/index.js"]

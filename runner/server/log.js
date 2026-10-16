@@ -1,10 +1,11 @@
 // One JSON object per line on stdout, which is what CloudWatch ingests from the VM.
-// Every line carries the identifiers a run is traced by: researcher, class, analysis.
+// Every line after /run carries the researcher and microvm_id; a line from a package's
+// run also carries its scope and package.
 
 let context = {};
 
-// Set once from runHookPayload so callers never have to thread the researcher id
-// through every function that might log.
+// Fields every later line carries, so callers never have to thread the researcher or
+// the run's scope and package through every function that might log.
 export function setContext(fields) {
   context = { ...context, ...fields };
 }
@@ -31,7 +32,7 @@ export const log = {
 };
 
 // Times an async step and logs its duration whether it succeeds or throws, so a
-// failed analysis still yields the per-step timings.
+// failed package still yields the per-step timings.
 export async function timed(event, fields, fn) {
   const started = process.hrtime.bigint();
   const ms = () => Number(process.hrtime.bigint() - started) / 1e6;
@@ -50,11 +51,12 @@ export async function timed(event, fields, fn) {
   }
 }
 
-// The result document is read by every researcher of the class, and the strings that
-// reach it are whatever a step happened to throw: cc-data's stderr, a fetch error
-// carrying a presigned S3 URL, a stack trace. None of that is the researcher's to see,
-// and some of it is credential-shaped. So the document gets a redacted message and the
-// log keeps the original, which is where an engineer is looking anyway.
+// A result document and the runner document's recorded failures are read in the
+// researcher's browser, and the strings that reach them are whatever a step happened to
+// throw: cc-data's stderr, a fetch error carrying a presigned S3 URL, a stack trace. None
+// of that is the researcher's to see, and some of it is credential-shaped. So the document
+// gets a redacted message and the log keeps the original, which is where an engineer is
+// looking anyway.
 const SECRETS = [
   // Presigned URLs and anything else carrying credentials in a query string.
   [/([?&](?:X-Amz-Signature|X-Amz-Credential|X-Amz-Security-Token|token|access_token|key)=)[^&\s]+/gi, "$1[redacted]"],

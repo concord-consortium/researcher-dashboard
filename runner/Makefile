@@ -2,14 +2,18 @@ IMAGE ?= researcher-dashboard-runner
 PLATFORM ?= linux/arm64
 PORT ?= 8080
 
-VERSION ?= 0.1.0
+# package.json's version, read with sed because not every shell that runs make has Node.
+VERSION ?= $(shell sed -n 's/^  "version": "\(.*\)",$$/\1/p' package.json)
+ifeq ($(strip $(VERSION)),)
+$(error VERSION is empty: package.json has no version line, and none was given)
+endif
 ARTIFACT ?= dist/runner-$(VERSION).zip
 ARTIFACT_BUCKET ?= concord-devops
 ARTIFACT_PREFIX ?= researcher-dashboard-runner
 ARTIFACT_KEY = $(ARTIFACT_PREFIX)/$(notdir $(ARTIFACT))
 ARTIFACT_URI = s3://$(ARTIFACT_BUCKET)/$(ARTIFACT_KEY)
 
-.PHONY: build run tools shell clean test test-emulator run-hook artifact artifact-key publish-artifact
+.PHONY: build run tools shell clean test test-emulator artifact artifact-key publish-artifact smoke-build smoke-image
 
 build:
 	docker buildx build --platform $(PLATFORM) --load -t $(IMAGE) .
@@ -31,9 +35,8 @@ shell:
 test:
 	npm test
 
-# Status doc writes against real Firestore and Auth, which the default `npm test`
-# skips so it stays hermetic. Rules arrive with the report-service work; until then
-# this proves the document shapes and the custom-token sign-in.
+# The status writes against the Firestore and Auth emulators, which the default npm test
+# skips. Load report-service's rules to check the runner's writes against them.
 FIREBASE_PROJECT ?= demo-researcher-dashboard
 test-emulator:
 	firebase emulators:exec --only firestore,auth --project $(FIREBASE_PROJECT) \
@@ -41,24 +44,6 @@ test-emulator:
 	   FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9099 \
 	   GCLOUD_PROJECT=$(FIREBASE_PROJECT) \
 	   npm test'
-
-# Drives one hook against a locally running server. DIR mode keeps the status docs
-# in memory and syncs to a directory, so the whole lifecycle runs with no AWS
-# account and no Firebase project:
-#   SYNC_BACKEND=DIR SYNC_DIR=/tmp/rd DATA_ROOT=/tmp/rd-data npm start
-#   make run-hook HOOK=run
-#   make run-hook HOOK=suspend
-HOOK ?= run
-RUN_PAYLOAD ?= {"session_token":"local","platform_user_id":"439","portal":"learn_portal_staging_concord_org","firebase_project":"report-service-dev","bucket":"local","secret_name":"local"}
-run-hook:
-	@if [ "$(HOOK)" = "run" ]; then \
-	  curl -fsS -X POST "http://127.0.0.1:$(PORT)/aws/lambda-microvms/runtime/v1/run" \
-	    -H 'Content-Type: application/json' \
-	    -d '{"microvmId":"mvm-local","runHookPayload":"$(subst ",\",$(RUN_PAYLOAD))"}'; \
-	else \
-	  curl -fsS -X POST "http://127.0.0.1:$(PORT)/aws/lambda-microvms/runtime/v1/$(HOOK)"; \
-	fi
-	@echo
 
 # Lambda builds the MicroVM image itself, so the artifact it consumes is the
 # Dockerfile and its build context, not the image `build` produces locally.
@@ -85,6 +70,16 @@ publish-artifact: artifact
 	fi
 	@echo "published $(ARTIFACT_URI)"
 
+# The smoke gate (README.md): the smoke package's zip, and the package run inside the
+# image against staging's report-server, which needs no stack.
+smoke-build:
+	node smoke/smoke.mjs build
+
+smoke-image:
+	$(if $(SMOKE_CLASS_ID),,$(error SMOKE_CLASS_ID is required: the smoke class's portal id))
+	$(if $(SMOKE_CLASS_HASH),,$(error SMOKE_CLASS_HASH is required: the smoke class's hash))
+	IMAGE=$(IMAGE) PLATFORM=$(PLATFORM) node smoke/smoke.mjs image --class-id $(SMOKE_CLASS_ID) --class-hash $(SMOKE_CLASS_HASH)
+
 clean:
 	docker image rm $(IMAGE) || true
-	rm -rf dist
+	rm -rf dist smoke/dist

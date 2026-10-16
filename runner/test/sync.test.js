@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdtemp, mkdir, rm, writeFile, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import fs from "node:fs";
 import path from "node:path";
 import test, { afterEach, beforeEach } from "node:test";
 import { DirBackend, Syncer } from "../server/sync/index.js";
-import { isExcluded, pendingFiles, scanTree } from "../server/sync/scan.js";
+import { isExcluded, openForSync, pendingFiles, scanTree } from "../server/sync/scan.js";
 
 let work;
 let local;
@@ -204,4 +206,61 @@ test("pullDown restores the tree and does not re-upload what it just pulled", as
 test("pullDown on an empty prefix is the normal first session, not an error", async () => {
   const s = syncer();
   assert.deepEqual(await s.pullDown(), { files: 0 });
+});
+
+// A log-based metric counts sync.failed, so a failed tick is logged under it too.
+test("a tick whose flush fails is logged as sync.failed", async () => {
+  await write("answers.v1.jsonl", "a");
+  const s = syncer({ backend: { put: async () => { throw new Error("AccessDenied"); }, list: async () => [] }, intervalMs: 5 });
+  const lines = [];
+  const original = process.stdout.write;
+  process.stdout.write = (chunk) => { lines.push(String(chunk)); return true; };
+  try {
+    s.start();
+    for (let i = 0; i < 100 && !lines.some((l) => l.includes("sync.failed")); i++) await new Promise((r) => setTimeout(r, 5));
+  } finally {
+    s.stop();
+    process.stdout.write = original;
+  }
+  const line = lines.flatMap((l) => l.split("\n")).filter(Boolean).map((l) => JSON.parse(l)).find((l) => l.event === "sync.failed");
+  assert.deepEqual({ hook: line?.hook, error: line?.error }, { hook: "tick", error: "AccessDenied" });
+});
+
+// The syncer runs as root over a tree the package owns, so a hard link there is not followed.
+test("scanTree leaves out a file with another hard link", async () => {
+  const abs = await write("mine.txt", "a");
+  fs.linkSync(abs, path.join(work, "outside-link"));
+  await write("plain.txt", "b");
+  const files = await scanTree(local);
+  assert.ok(files.has("plain.txt"));
+  assert.ok(!files.has("mine.txt"));
+});
+
+// Root opens what it uploads from a tree the package owns, so whatever the package swapped
+// in since the scan is refused there, at once.
+test("openForSync refuses a pipe, a link, a hard link and a path through a swapped directory", async () => {
+  const real = await write("dir/plain.txt", "abc");
+  const opened = openForSync(real);
+  assert.equal(opened.size, 3);
+  fs.closeSync(opened.fd);
+  execFileSync("mkfifo", [path.join(local, "dir", "pipe")]);
+  assert.equal(openForSync(path.join(local, "dir", "pipe")), null, "a pipe does not block, and is refused");
+  fs.symlinkSync(real, path.join(local, "dir", "sym"));
+  assert.equal(openForSync(path.join(local, "dir", "sym")), null);
+  fs.linkSync(real, path.join(work, "hard"));
+  assert.equal(openForSync(real), null, "a file with another hard link");
+  fs.unlinkSync(path.join(work, "hard"));
+  fs.renameSync(path.join(local, "dir"), path.join(local, "moved"));
+  fs.symlinkSync(path.join(local, "moved"), path.join(local, "dir"));
+  assert.equal(openForSync(real), null, "a directory above it became a link");
+});
+
+// A broker outage fails every tick's upload; each must give back the file it opened.
+test("an upload that fails closes the file the syncer opened", async () => {
+  await write("a.txt", "a");
+  const failing = syncer({ backend: { put: async () => { throw new Error("storage-credentials answered 502"); }, list: async () => [] } });
+  const open = () => fs.readdirSync("/proc/self/fd").length;
+  const before = open();
+  for (let i = 0; i < 5; i++) await failing.flush().catch(() => {});
+  assert.equal(open(), before);
 });

@@ -1,9 +1,11 @@
+import { createWriteStream } from "node:fs";
 import { copyFile, mkdir, readdir, rm, stat } from "node:fs/promises";
+import { pipeline } from "node:stream/promises";
 import path from "node:path";
 
 // The DIR backend copies to a local directory instead of S3. It exists so the
 // hooks, the scheduler and the flush-and-verify contract can be driven end to end
-// with `make run-hook` and in tests, with no AWS credentials and no network.
+// in tests, with no AWS credentials and no network.
 export class DirBackend {
   constructor(root) {
     this.root = root;
@@ -13,10 +15,11 @@ export class DirBackend {
     return path.join(this.root, relPath);
   }
 
-  async put(relPath, sourcePath) {
+  // `body` reads the file the syncer opened and checked; the syncer closes it.
+  async put(relPath, { body }) {
     const dest = this.#abs(relPath);
     await mkdir(path.dirname(dest), { recursive: true });
-    await copyFile(sourcePath, dest);
+    await pipeline(body, createWriteStream(dest));
   }
 
   async get(relPath, destPath) {

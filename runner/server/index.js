@@ -1,9 +1,9 @@
 import http from "node:http";
-import { loadEnv } from "./config.js";
+import { disableDefaultCredentialChain, loadEnv } from "./config.js";
 import { FirestoreStore } from "./firestore.js";
 import { log } from "./log.js";
 import { HookError, Runner } from "./runner.js";
-import { LogStore, MemoryStore } from "./status.js";
+import { MemoryStore } from "./status.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { createEgressProxy } from "./egress-proxy.js";
@@ -11,6 +11,9 @@ import { HOST_ADDR, PROXY_PORT, setupNamespace } from "./netns.js";
 import { makeSteps } from "./steps.js";
 import { PACKAGES_PREFIX } from "./package-fetch.js";
 import { revokeOwnToken } from "./report-server.js";
+import { makeFunctionClient } from "./function-client.js";
+import { StorageCredentials } from "./storage.js";
+import { DirBackend, S3Backend, Syncer } from "./sync/index.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -20,7 +23,6 @@ const execFileAsync = promisify(execFile);
 async function unzipArchive(archive, dest) {
   await execFileAsync("unzip", ["-q", "-o", archive, "-d", dest], { timeout: 60_000 });
 }
-import { DirBackend, S3Backend, Syncer } from "./sync/index.js";
 
 // Lambda posts every lifecycle and build hook under this prefix, on the port
 // declared as Hooks.Port in the stack.
@@ -37,6 +39,8 @@ async function readJson(req) {
   }
 }
 
+// Only Lambda's hooks and a status page for a human. Nothing calls into the VM for work:
+// it asks report-service for its own.
 export function createServer({ runner, env }) {
   const routes = {
     // The image build hook. It answers before /run has happened, because at build
@@ -46,28 +50,15 @@ export function createServer({ runner, env }) {
       const body = await readJson(req);
       return { status: 200, body: await runner.run(body) };
     },
-    [`POST ${HOOK_PREFIX}/resume`]: async () => ({ status: 200, body: await runner.resume() }),
+    [`POST ${HOOK_PREFIX}/resume`]: async () => ({ status: 200, body: runner.resume() }),
     [`POST ${HOOK_PREFIX}/suspend`]: async () => ({ status: 200, body: await runner.suspend() }),
-    [`POST ${HOOK_PREFIX}/terminate`]: async () => ({
-      status: 200,
-      body: await runner.terminate()
-    }),
-    // 202, not 200: the document exists and the work has started, but the analysis
-    // is still running when this returns.
-    // The result document is keyed by package name, so the caller already knows the
-    // path it is asking to have recomputed. Named for the package rather than the page
-    // that first asked: "analyze class" is one caller of this, not what it is.
-    "POST /run-package": async (req) => ({ status: 202, body: await runner.startPackage(await readJson(req)) }),
-    "POST /refresh-token": async (req) => ({
-      status: 200,
-      body: await runner.refreshToken(await readJson(req))
-    }),
+    [`POST ${HOOK_PREFIX}/terminate`]: async () => ({ status: 200, body: await runner.terminate() }),
     "GET /": async () => ({
       status: 200,
       body: {
         state: runner.state,
         microvm_id: runner.microvmId,
-        current_package: runner.currentAnalysis?.packageName ?? null,
+        current_package: runner.currentPackage,
         expires_at: runner.expiresAt ? new Date(runner.expiresAt).toISOString() : null,
         sync_backend: env.backend
       }
@@ -93,34 +84,40 @@ export function createServer({ runner, env }) {
       // record a transition it cannot stand behind, so it is logged as the
       // meaningful event it is rather than swallowed.
       log.error("hook.failed", { route: key, status, error: err.message });
-      send(status, { error: err.message, ...(err.extra ?? {}) });
+      send(status, { error: err.message });
     }
   });
 }
 
 export function buildRunner(env) {
   const dir = env.backend === "DIR";
+  // One document tree shared by every in-memory store, as one Firestore is shared by
+  // every connection to it.
+  const memoryDocs = new Map();
   return new Runner({
     env,
     makeStore: ({ projectId }) => {
-      if (env.statusBackend === "LOG") return new LogStore();
-      if (env.statusBackend === "MEMORY" || dir) return new MemoryStore();
+      if (env.statusBackend === "MEMORY" || dir) return new MemoryStore({ docs: memoryDocs });
       return new FirestoreStore({ projectId });
     },
-    makeSyncer: ({ bucket, prefix, root }) =>
+    makeFunctionClient: ({ baseUrl }) => makeFunctionClient({ baseUrl }),
+    // The broker's credentials, for every S3 call the runner makes. DIR mode has no S3.
+    makeStorage: ({ bucket, prefix, fetchCredentials }) =>
+      dir ? null : new StorageCredentials({ bucket, prefix, fetchCredentials }),
+    makeSyncer: ({ bucket, prefix, root, storage }) =>
       new Syncer({
         root,
         intervalMs: env.syncIntervalMs,
         backend: dir
           ? new DirBackend(`${env.syncDir}/${prefix}`)
-          : new S3Backend({ bucket, prefix })
+          : new S3Backend({ bucket, prefix, client: () => storage.client() })
       }),
     // Packages are fetched from the same bucket the data syncs to, under packages/,
-    // which is where report-server publishes them.
-    makePackageBackend: ({ bucket }) =>
+    // which is where report-server publishes them, with the same broker credentials.
+    makePackageBackend: ({ bucket, storage }) =>
       dir
         ? new DirBackend(`${env.syncDir}/${PACKAGES_PREFIX}`)
-        : new S3Backend({ bucket, prefix: PACKAGES_PREFIX }),
+        : new S3Backend({ bucket, prefix: PACKAGES_PREFIX, client: () => storage.client() }),
     unzip: unzipArchive,
     // Skipped in DIR mode, which runs on a laptop with no namespaces and no need for
     // one: there is no execution role there to protect.
@@ -138,6 +135,9 @@ export function buildRunner(env) {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
+  // Before anything else: the runner makes no AWS call on the execution role, and a
+  // client that tries fails here, loudly, naming its cause.
+  disableDefaultCredentialChain();
   const env = loadEnv();
   const runner = buildRunner(env);
   createServer({ runner, env }).listen(env.port, () =>

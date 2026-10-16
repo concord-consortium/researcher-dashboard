@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import { readdir, stat } from "node:fs/promises";
 import path from "node:path";
 
@@ -32,6 +33,9 @@ export async function scanTree(root) {
       }
       if (!entry.isFile() || isExcluded(rel)) continue;
       const info = await stat(abs);
+      // A file with another hard link could be one of root's, which the syncer, running as
+      // root, would otherwise read and push to the researcher's prefix.
+      if (info.nlink !== 1) continue;
       files.set(rel, { size: info.size, mtimeMs: Math.floor(info.mtimeMs) });
     }
   }
@@ -53,4 +57,29 @@ export function pendingFiles(scanned, uploaded) {
     }
   }
   return pending.sort();
+}
+
+// Opens a scanned file for upload as root, refusing what the package could have swapped
+// in since the scan: a link (the open follows none), a named pipe (O_NONBLOCK, so it
+// cannot block), a file with another hard link, or a path that no longer resolves to
+// the one scanned because a directory above it became a link. Null means skip it.
+export function openForSync(realPath) {
+  let fd;
+  try {
+    fd = fs.openSync(realPath, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
+  } catch {
+    return null;
+  }
+  const info = fs.fstatSync(fd);
+  let opened = realPath;
+  try {
+    opened = fs.readlinkSync(`/proc/self/fd/${fd}`);
+  } catch {
+    // No /proc off Linux; the runner's VM always has it.
+  }
+  if (!info.isFile() || info.nlink !== 1 || opened !== realPath) {
+    fs.closeSync(fd);
+    return null;
+  }
+  return { fd, size: info.size };
 }

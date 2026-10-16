@@ -1,6 +1,8 @@
+import { once } from "node:events";
+import fs, { createReadStream } from "node:fs";
 import path from "node:path";
 import { log, timed } from "../log.js";
-import { pendingFiles, scanTree } from "./scan.js";
+import { openForSync, pendingFiles, scanTree } from "./scan.js";
 
 export { DirBackend } from "./backend-dir.js";
 export { S3Backend } from "./backend-s3.js";
@@ -40,9 +42,27 @@ export class Syncer {
   async #flushOnce() {
     const scanned = await scanTree(this.root);
     const pending = pendingFiles(scanned, this.#uploaded);
+    // Resolved only when there is something to send: a root not yet created scans as empty.
+    const realRoot = pending.length ? fs.realpathSync(this.root) : this.root;
     let bytes = 0;
     for (const rel of pending) {
-      await this.backend.put(rel, path.join(this.root, rel));
+      const source = openForSync(path.join(realRoot, rel));
+      if (!source) {
+        log.warn("sync.skipped", { path: rel });
+        continue;
+      }
+      // Closed whatever the put did, and before the flush resolves, so a failed upload does
+      // not leave the file open.
+      const body = createReadStream(null, { fd: source.fd, start: 0 });
+      try {
+        await this.backend.put(rel, { body, size: source.size });
+      } finally {
+        if (!body.closed) {
+          const closed = once(body, "close");
+          body.destroy();
+          await closed;
+        }
+      }
       // Recorded only after the put resolves, so a failed upload leaves the file
       // pending and the next verify refuses to call the flush complete.
       this.#uploaded.set(rel, scanned.get(rel));
@@ -96,7 +116,7 @@ export class Syncer {
   start() {
     if (this.#timer) return;
     this.#timer = setInterval(() => {
-      this.flush().catch((err) => log.warn("sync.tick_failed", { error: err.message }));
+      this.flush().catch((err) => log.error("sync.failed", { hook: "tick", error: err.message }));
     }, this.intervalMs);
     // The timer must not hold the process open: the VM's lifetime is Lambda's to
     // decide, not the scheduler's.

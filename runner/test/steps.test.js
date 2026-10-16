@@ -6,7 +6,8 @@ import path from "node:path";
 import { EventEmitter } from "node:events";
 import test from "node:test";
 import { portalHost } from "../server/config.js";
-import { CLUE_PROJECT, ccDataLogin, makeSteps } from "../server/steps.js";
+import { ccDataLogin, makeSteps } from "../server/steps.js";
+import { freezePackageProcesses, thawPackageProcesses } from "../server/sandbox.js";
 
 // Stands in for the cc-data process: records how it was invoked and what was
 // written to its stdin, then closes with the given exit code.
@@ -38,280 +39,202 @@ test("portalHost restores the host from the Firestore path segment", () => {
 
 test("the token is written to stdin, never to the argument list", async () => {
   const { spawnFn, calls } = fakeSpawn();
-  await ccDataLogin({
-    token: "secret-report-service-token",
-    portal: "learn_portal_staging_concord_org",
-    spawnFn
-  });
-
-  assert.equal(calls.length, 1);
-  assert.deepEqual(calls[0].args, [
-    "login",
-    "--portal",
-    "learn.portal.staging.concord.org",
-    "--token",
-    "-"
-  ]);
+  await ccDataLogin({ token: "secret-report-service-token", portal: "learn_portal_staging_concord_org", spawnFn });
+  assert.deepEqual(calls[0].args, ["login", "--portal", "learn.portal.staging.concord.org", "--token", "-"]);
   assert.equal(calls[0].stdin, "secret-report-service-token");
-  // The argument list is visible in /proc to every user on the VM, including the
-  // analysis user that runs fetched packages.
-  assert.ok(
-    !calls[0].args.some((a) => a.includes("secret-report-service-token")),
-    "the token must never appear in argv"
-  );
+  assert.ok(!calls[0].args.some((a) => a.includes("secret-report-service-token")), "the token must never appear in argv");
 });
 
-test("a rejected token fails /run with cc-data's reason", async () => {
+test("a rejected token fails with cc-data's reason", async () => {
   const { spawnFn } = fakeSpawn({ code: 1, stderr: "error: token rejected by report server" });
-  await assert.rejects(
-    () => ccDataLogin({ token: "bad", portal: "learn_concord_org", spawnFn }),
-    /cc-data login exited 1: error: token rejected/
-  );
+  await assert.rejects(() => ccDataLogin({ token: "bad", portal: "learn_concord_org", spawnFn }), /cc-data login exited 1: error: token rejected/);
 });
 
 test("installCredential installs the report-service token and nothing else", async () => {
   const seen = [];
   const steps = makeSteps({ login: async (args) => seen.push(args) });
   await steps.installCredential({ token: "report-token", portal: "learn_concord_org" });
-
   assert.deepEqual(seen, [{ token: "report-token", portal: "learn_concord_org" }]);
 });
 
-// Separate from the cc-data credential: the Firebase session has to be in place before
-// the first status document is written, which is several steps earlier.
-test("signIn signs Firebase in and leaves cc-data alone", async () => {
-  const seen = [];
-  const signedIn = [];
-  const steps = makeSteps({ login: async (args) => seen.push(args) });
-  await steps.signIn({ sessionToken: "session-token", store: { signIn: async (t) => signedIn.push(t) } });
+// ---- runPackage ----------------------------------------------------------------
 
-  assert.deepEqual(seen, []);
-  assert.deepEqual(signedIn, ["session-token"]);
-});
-
-// Every analysis step is implemented now; what is left of notYet is nothing, so the
-// test that asserted the stubs announced themselves is gone rather than weakened.
-
-test("runPackage runs the entrypoint as the analysis uid with only the named environment", async () => {
-  const calls = [];
+async function withPackageDir(fn) {
   const dir = await mkdtemp(path.join(tmpdir(), "rd-steps-"));
   const outputDir = path.join(dir, "out");
   fs.mkdirSync(outputDir, { recursive: true });
-  fs.writeFileSync(path.join(outputDir, "display.json"), JSON.stringify({ version: 1, summary: "ok" }));
-  fs.writeFileSync(path.join(dir, "run.py"), "");
+  try {
+    return await fn(dir, outputDir);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
 
-  const steps = makeSteps();
-  const display = await steps.runPackage({
-    manifest: { name: "class-counts", version: "1.0.0", entrypoint: "run.py", dir },
-    paths: { outputDir },
-    env: { HOME: "/work/home/class-counts", CC_DATA_LOCAL: "/data/classes/x" },
-    uid: 1000,
-    timeoutMs: 1000,
-    proxyUrl: "http://10.201.0.1:8123",
-    exec: async (command, args, options) => {
-      calls.push({ command, args, options });
-      return { stdout: "", stderr: "" };
-    }
-  });
-
-  assert.deepEqual(display, { version: 1, summary: "ok" });
-  const [call] = calls;
-  // ip netns exec into the prepared namespace, then setpriv: the sandbox, not a spawn.
-  assert.equal(call.command, "/usr/sbin/ip");
-  assert.ok(call.args.includes("netns") && call.args.includes("analysis"));
-  assert.ok(call.args.includes("--reuid=1000"));
-  assert.ok(call.args.includes("--no-new-privs"));
-  assert.ok(call.args.includes("python3.11"));
-  // Replaced, not extended: a package inherits nothing from the runner's process, which
-  // holds the report-service token in its own HOME.
-  // Exactly what package-env named, plus the proxy, which is the only route out of the
-  // namespace and is how cc-data reaches report-server.
-  assert.deepEqual(Object.keys(call.options.env).sort(),
-    ["CC_DATA_LOCAL", "HOME", "HTTPS_PROXY", "https_proxy"]);
-  assert.equal(call.options.env.HTTPS_PROXY, "http://10.201.0.1:8123");
-  assert.ok(!("AWS_REGION" in call.options.env), "nothing is inherited from the runner's process");
-  await rm(dir, { recursive: true, force: true });
-});
-
-test("runPackage fails when the package wrote no readable display.json", async () => {
-  const dir = await mkdtemp(path.join(tmpdir(), "rd-steps-"));
-  const outputDir = path.join(dir, "out");
-  fs.mkdirSync(outputDir, { recursive: true });
-
-  const steps = makeSteps();
-  await assert.rejects(
-    () => steps.runPackage({
+test("runPackage runs the entrypoint as the package uid with only the named environment", async () => {
+  await withPackageDir(async (dir, outputDir) => {
+    const calls = [];
+    const { signal } = new AbortController();
+    fs.writeFileSync(path.join(outputDir, "display.md"), "# ok");
+    fs.writeFileSync(path.join(outputDir, "summary.txt"), "ok\n");
+    const result = await makeSteps().runPackage({
       manifest: { name: "class-counts", version: "1.0.0", entrypoint: "run.py", dir },
       paths: { outputDir },
-      env: {},
+      env: { HOME: "/work/home/x", CC_DATA_LOCAL: "/data/classes/x" },
       uid: 1000,
-      exec: async () => ({ stdout: "", stderr: "" })
-    }),
-    /no readable display.json/
-  );
-  await rm(dir, { recursive: true, force: true });
+      signal,
+      proxyUrl: "http://10.201.0.1:8123",
+      exec: async (command, args, options) => { calls.push({ command, args, options }); return { stdout: "", stderr: "" }; }
+    });
+    assert.deepEqual(result, { display: "# ok", summary: "ok" });
+    const [call] = calls;
+    assert.equal(call.command, "/usr/sbin/ip");
+    assert.ok(call.args.includes("netns") && call.args.includes("package"));
+    assert.ok(call.args.includes("--reuid=1000") && call.args.includes("--no-new-privs"));
+    assert.deepEqual(Object.keys(call.options.env).sort(), ["CC_DATA_LOCAL", "HOME", "HTTPS_PROXY", "https_proxy"]);
+    assert.equal(call.options.signal, signal, "the runner's bound ends the process");
+    assert.equal(call.options.timeout, undefined, "no bound of its own, which would count time the VM was suspended");
+    assert.equal(call.options.killSignal, "SIGKILL", "a package that traps SIGTERM still ends at its bound");
+  });
 });
 
-test("pullData reads CLUE with the class token for CLUE's own project", async () => {
+test("runPackage fails when the package wrote no display.md, and ignores a display.json", async () => {
+  await withPackageDir(async (dir, outputDir) => {
+    fs.writeFileSync(path.join(outputDir, "display.json"), JSON.stringify({ version: 1 }));
+    await assert.rejects(
+      () => makeSteps().runPackage({ manifest: { name: "x", version: "1.0.0", entrypoint: "run.py", dir }, paths: { outputDir }, env: {}, uid: 1000, exec: async () => ({ stdout: "", stderr: "" }) }),
+      /wrote no display.md/
+    );
+  });
+});
+
+// Answers the package's run, then the kills and checks that follow it, from `left`: what
+// pgrep finds after each kill, an exit code 1 meaning nothing.
+function processExec({ left = [1], run = async () => ({ stdout: "", stderr: "" }), onPackage, onKill } = {}) {
   const calls = [];
-  const signedIn = [];
-  const steps = makeSteps({
-    readClueFn: async (args) => {
-      calls.push(args);
-      return { clue_documents: 22, clue_history_entries: 27135, clue_users: 7 };
+  const exec = async (command, args, options) => {
+    calls.push([command, ...args].join(" "));
+    if (command === "/usr/sbin/ip") { const out = await run(); onPackage?.(); return out; }
+    if (args.includes("/usr/bin/kill")) onKill?.();
+    if (command === "/usr/bin/pgrep") {
+      const next = left.shift();
+      if (typeof next === "number") throw Object.assign(new Error(`pgrep exited ${next}`), { code: next });
+      if (next instanceof Error) throw next;
+      return { stdout: next, stderr: "" };
     }
-  });
+    return { stdout: "", stderr: "" };
+  };
+  return { exec, calls };
+}
 
-  const counts = await steps.pullData({
-    classHash: "abc",
-    classTokens: { [CLUE_PROJECT]: "clue-token", "report-service-dev": "rs-token" },
-    manifest: { required_inputs: ["clue_documents"] },
-    portal: "learn_portal_staging_concord_org",
-    dataRoot: "/data",
-    makeStore: ({ projectId }) => ({ projectId, signIn: async (t) => signedIn.push([projectId, t]) })
+test("after a run every process of the package uid is killed before its output is read", async () => {
+  await withPackageDir(async (dir, outputDir) => {
+    // The display only exists once the kill has run, so a read before the kill finds none.
+    const { exec, calls } = processExec({ onKill: () => fs.writeFileSync(path.join(outputDir, "display.md"), "# after kill") });
+    const result = await makeSteps().runPackage({ manifest: { name: "x", version: "1.0.0", entrypoint: "run.py", dir }, paths: { outputDir }, env: {}, uid: 1000, exec });
+    assert.equal(result.display, "# after kill");
+    assert.equal(calls.length, 3);
+    assert.match(calls[1], /^\/usr\/bin\/setpriv --reuid=1000 --regid=1000 .* \/usr\/bin\/kill -KILL -1$/);
+    // A zombie of the uid runs nothing, and nothing reaps it when the runner is PID 1.
+    assert.equal(calls[2], "/usr/bin/pgrep -u 1000 --runstates R,S,D,T,t");
   });
+});
 
-  // The report-service token would sign in but read nothing: CLUE's documents are in
-  // CLUE's project, and a token signed by the wrong project cannot be exchanged there.
-  assert.deepEqual(signedIn, [[CLUE_PROJECT, "clue-token"]]);
+test("the package's processes are killed again until none is left", async () => {
+  await withPackageDir(async (dir, outputDir) => {
+    fs.writeFileSync(path.join(outputDir, "display.md"), "# ok");
+    const { exec, calls } = processExec({ left: ["4242", 1] });
+    await makeSteps().runPackage({ manifest: { name: "x", version: "1.0.0", entrypoint: "run.py", dir }, paths: { outputDir }, env: {}, uid: 1000, exec });
+    assert.equal(calls.filter((c) => c.includes("kill -KILL -1")).length, 2);
+  });
+});
+
+test("a package whose processes will not die fails, and so does one that cannot be checked", async () => {
+  await withPackageDir(async (dir, outputDir) => {
+    fs.writeFileSync(path.join(outputDir, "display.md"), "# ok");
+    const args = { manifest: { name: "x", version: "1.0.0", entrypoint: "run.py", dir }, paths: { outputDir }, env: {}, uid: 1000 };
+    await assert.rejects(makeSteps().runPackage({ ...args, exec: processExec({ left: ["4242", "4242", "4242", "4242", "4242"] }).exec }), /5 kills did not stop/);
+    await assert.rejects(makeSteps().runPackage({ ...args, exec: processExec({ left: [Object.assign(new Error("spawn ENOENT"), { code: "ENOENT" })] }).exec }), /could not check/);
+  });
+});
+
+test("a package that fails or times out still has its processes killed", async () => {
+  await withPackageDir(async (dir, outputDir) => {
+    const { exec, calls } = processExec({ run: async () => { throw Object.assign(new Error("timed out"), { killed: true, stdout: "", stderr: "" }); } });
+    await assert.rejects(makeSteps().runPackage({ manifest: { name: "x", version: "1.0.0", entrypoint: "run.py", dir }, paths: { outputDir }, env: {}, uid: 1000, exec }), /timed out/);
+    assert.ok(calls.some((c) => c.endsWith("kill -KILL -1")));
+  });
+});
+
+const noPause = async () => {};
+
+test("a freeze stops every process of the package uid, again until none is runnable", async () => {
+  const { exec, calls } = processExec({ left: ["4242", 1] });
+  await freezePackageProcesses({ uid: 1000, exec, sleep: noPause });
+  assert.match(calls[0], /^\/usr\/bin\/setpriv --reuid=1000 --regid=1000 .* \/usr\/bin\/kill -STOP -1$/);
+  // A stopped process is in state T, so it is not counted.
+  assert.equal(calls[1], "/usr/bin/pgrep -u 1000 --runstates R,S,D");
+  assert.equal(calls.filter((c) => c.endsWith("kill -STOP -1")).length, 2);
+});
+
+test("a freeze that cannot stop the package, or cannot check, fails", async () => {
+  await assert.rejects(freezePackageProcesses({ uid: 1000, sleep: noPause, exec: processExec({ left: ["4242", "4242", "4242", "4242", "4242"] }).exec }), /5 stops did not stop/);
+  await assert.rejects(freezePackageProcesses({ uid: 1000, sleep: noPause, exec: processExec({ left: [Object.assign(new Error("spawn ENOENT"), { code: "ENOENT" })] }).exec }), /could not check/);
+});
+
+test("a freeze waits between its attempts, so a process inside a write can stop", async () => {
+  const events = [];
+  const { exec } = processExec({ left: ["4242", "4242", 1] });
+  const recording = (...args) => { if (args[0] === "/usr/bin/pgrep") events.push("check"); return exec(...args); };
+  await freezePackageProcesses({ uid: 1000, exec: recording, sleep: async (ms) => { events.push(`pause:${ms}`); } });
+  assert.deepEqual(events, ["check", "pause:200", "check", "pause:200", "check"]);
+});
+
+test("a thaw continues every process of the package uid, and nothing to continue is not a failure", async () => {
+  const { exec, calls } = processExec();
+  await thawPackageProcesses({ uid: 1000, exec });
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].classHash, "abc");
-  assert.equal(calls[0].portal, "learn_portal_staging_concord_org");
-  assert.equal(calls[0].dataRoot, "/data");
-  // The class document's data block is a pinned contract, so the reader's extra
-  // counts stay in its logs rather than widening it a field at a time.
-  assert.deepEqual(counts, { clue_documents: 22 });
+  assert.match(calls[0], /^\/usr\/bin\/setpriv --reuid=1000 --regid=1000 .* \/usr\/bin\/kill -CONT -1$/);
+  await thawPackageProcesses({ uid: 1000, exec: async () => { throw Object.assign(new Error("kill exited 1"), { code: 1 }); } });
+  await assert.rejects(thawPackageProcesses({ uid: 1000, exec: async () => { throw Object.assign(new Error("spawn ENOENT"), { code: "ENOENT" }); } }), /ENOENT/);
 });
 
-test("pullData skips the CLUE read when the package does not require it", async () => {
-  let called = false;
-  const steps = makeSteps({ readClueFn: async () => { called = true; return {}; } });
+function captureLog(run) {
+  const lines = [];
+  const original = process.stdout.write;
+  process.stdout.write = (chunk) => { lines.push(String(chunk)); return true; };
+  return Promise.resolve().then(run).finally(() => { process.stdout.write = original; }).then(() => lines.map((l) => JSON.parse(l)));
+}
 
-  const counts = await steps.pullData({
-    classHash: "abc",
-    classTokens: { "report-service-dev": "rs-token" },
-    manifest: { required_inputs: ["answers"] },
-    portal: "p",
-    dataRoot: "/data",
-    makeStore: () => assert.fail("no store should be made for a skipped read")
+test("runPackage logs what the package printed, truncated from the head", async () => {
+  await withPackageDir(async (dir, outputDir) => {
+    fs.writeFileSync(path.join(outputDir, "display.md"), "# ok");
+    const lines = await captureLog(() => makeSteps().runPackage({
+      manifest: { name: "class-counts", version: "1.0.0", entrypoint: "run.py", dir }, paths: { outputDir }, env: {}, uid: 1000,
+      exec: processExec({ run: async () => ({ stdout: `${"x".repeat(9000)}THE END`, stderr: "dataset: x" }) }).exec
+    }));
+    const output = lines.find((l) => l.event === "package.output");
+    assert.ok(output.stdout.length < 9000 && output.stdout.endsWith("THE END"));
+    assert.equal(output.stderr, "dataset: x");
   });
-
-  assert.equal(called, false, "the AP fixture class has no CLUE documents to read");
-  assert.deepEqual(counts, {});
 });
 
-test("pullData fails loudly when CLUE is required but its class token is missing", async () => {
-  const steps = makeSteps({ readClueFn: async () => assert.fail("must not read without a token") });
-  await assert.rejects(
-    () => steps.pullData({
-      classHash: "abc",
-      classTokens: { "report-service-dev": "rs-token" },
-      manifest: { required_inputs: ["clue_documents"] },
-      portal: "p",
-      dataRoot: "/data",
-      makeStore: () => assert.fail("no store should be made")
-    }),
-    /requires clue_documents but no class token for collaborative-learning-staging/
-  );
+test("a package that fails has its output logged before the failure is raised", async () => {
+  await withPackageDir(async (dir, outputDir) => {
+    const failure = Object.assign(new Error("exited 1"), { stdout: "", stderr: "cc-data: NOT_AUTHENTICATED" });
+    const lines = await captureLog(async () => {
+      await assert.rejects(makeSteps().runPackage({ manifest: { name: "x", version: "1.0.0", entrypoint: "run.py", dir }, paths: { outputDir }, env: {}, uid: 1000, exec: processExec({ run: async () => { throw failure; } }).exec }), /^Error: exited 1$|^exited 1$/);
+    });
+    const output = lines.find((l) => l.event === "package.output");
+    assert.equal(output.level, "error");
+    assert.equal(output.stderr, "cc-data: NOT_AUTHENTICATED");
+  });
 });
 
 test("STATUS_BACKEND selects the store and rejects anything else", async () => {
   const { loadEnv } = await import("../server/config.js");
   assert.equal(loadEnv({}).statusBackend, "FIRESTORE");
-  assert.equal(loadEnv({ STATUS_BACKEND: "log" }).statusBackend, "LOG");
-  assert.throws(() => loadEnv({ STATUS_BACKEND: "firestor" }), /must be FIRESTORE, LOG or MEMORY/);
-});
-
-test("LogStore records the state sequence without attempting a sign-in", async () => {
-  const { LogStore } = await import("../server/status.js");
-  const store = new LogStore();
-  // A placeholder session token must not be exchanged: there is no portal to have
-  // minted it, so a sign-in could only fail and take /run down with it.
-  assert.equal(await store.signIn("placeholder"), null);
-  await store.merge("researcher_dashboard/p/researchers/439", { state: "ready" });
-});
-
-// Captures the runner's own log lines, which go straight to stdout for CloudWatch.
-function captureLog(run) {
-  const lines = [];
-  const original = process.stdout.write;
-  process.stdout.write = (chunk) => { lines.push(String(chunk)); return true; };
-  return Promise.resolve()
-    .then(run)
-    .finally(() => { process.stdout.write = original; })
-    .then(() => lines.map((line) => JSON.parse(line)));
-}
-
-// The package's own output is the only account of what it did, and the sandbox has no
-// route to CloudWatch. A package can exit zero having counted nothing, and this is the
-// only place that says so.
-test("runPackage logs what the package printed", async () => {
-  const dir = await mkdtemp(path.join(tmpdir(), "rd-steps-"));
-  const outputDir = path.join(dir, "out");
-  fs.mkdirSync(outputDir, { recursive: true });
-  fs.writeFileSync(path.join(outputDir, "display.json"), JSON.stringify({ version: 1, summary: "ok" }));
-
-  const steps = makeSteps();
-  const lines = await captureLog(() => steps.runPackage({
-    manifest: { name: "class-counts", version: "1.0.0", entrypoint: "run.py", dir },
-    paths: { outputDir },
-    env: {},
-    uid: 1000,
-    timeoutMs: 1000,
-    exec: async () => ({ stdout: '{"logs": 490}', stderr: "dataset: x" })
-  }));
-
-  const output = lines.find((line) => line.event === "package.output");
-  assert.ok(output, "the package's output must reach the log");
-  assert.equal(output.package, "class-counts");
-  assert.equal(output.stdout, '{"logs": 490}');
-  assert.equal(output.stderr, "dataset: x");
-  await rm(dir, { recursive: true, force: true });
-});
-
-test("a package that fails has its output logged before the failure is raised", async () => {
-  const dir = await mkdtemp(path.join(tmpdir(), "rd-steps-"));
-
-  const steps = makeSteps();
-  const failure = Object.assign(new Error("exited 1"), { stdout: "", stderr: "cc-data: NOT_AUTHENTICATED" });
-  const lines = await captureLog(async () => {
-    await assert.rejects(steps.runPackage({
-      manifest: { name: "class-counts", version: "1.0.0", entrypoint: "run.py", dir },
-      paths: { outputDir: path.join(dir, "out") },
-      env: {},
-      uid: 1000,
-      timeoutMs: 1000,
-      exec: async () => { throw failure; }
-    }), /exited 1/);
-  });
-
-  const output = lines.find((line) => line.event === "package.output");
-  assert.ok(output, "a failing package is exactly when its output is needed");
-  assert.equal(output.level, "error");
-  assert.equal(output.stderr, "cc-data: NOT_AUTHENTICATED");
-  await rm(dir, { recursive: true, force: true });
-});
-
-// A package that prints its corpus should cost a truncated line, not the log group.
-test("a package that prints too much is truncated rather than dropped", async () => {
-  const dir = await mkdtemp(path.join(tmpdir(), "rd-steps-"));
-  const outputDir = path.join(dir, "out");
-  fs.mkdirSync(outputDir, { recursive: true });
-  fs.writeFileSync(path.join(outputDir, "display.json"), JSON.stringify({ version: 1, summary: "ok" }));
-
-  const steps = makeSteps();
-  const lines = await captureLog(() => steps.runPackage({
-    manifest: { name: "class-counts", version: "1.0.0", entrypoint: "run.py", dir },
-    paths: { outputDir },
-    env: {},
-    uid: 1000,
-    timeoutMs: 1000,
-    exec: async () => ({ stdout: `${"x".repeat(9000)}THE END`, stderr: "" })
-  }));
-
-  const output = lines.find((line) => line.event === "package.output");
-  assert.ok(output.stdout.length < 9000, "the line is bounded");
-  // The tail, not the head: the reason a package failed is at the end of its output.
-  assert.ok(output.stdout.endsWith("THE END"));
-  await rm(dir, { recursive: true, force: true });
+  assert.equal(loadEnv({ STATUS_BACKEND: "memory" }).statusBackend, "MEMORY");
+  // A store that signs nothing in cannot pass /run's claims check, so LOG is no backend.
+  assert.throws(() => loadEnv({ STATUS_BACKEND: "log" }), /must be FIRESTORE or MEMORY/);
+  assert.throws(() => loadEnv({ STATUS_BACKEND: "firestor" }), /must be FIRESTORE or MEMORY/);
 });
