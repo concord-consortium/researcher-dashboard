@@ -262,6 +262,5 @@ test("an upload that fails closes the file the syncer opened", async () => {
   const open = () => fs.readdirSync("/proc/self/fd").length;
   const before = open();
   for (let i = 0; i < 5; i++) await failing.flush().catch(() => {});
-  await new Promise((r) => setImmediate(r));
   assert.equal(open(), before);
 });

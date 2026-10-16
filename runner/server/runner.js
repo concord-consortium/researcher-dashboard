@@ -432,8 +432,8 @@ export class Runner {
     const session = await this.#signIn(this.payload.firebase_project, answer.session_token);
     const classStores = new Map();
     const scopes = answer.scopes ?? {};
-    for (const [classHash, { class_tokens: tokens }] of Object.entries(scopes)) {
-      const token = tokens?.[this.payload.firebase_project];
+    for (const [classHash, entry] of Object.entries(scopes)) {
+      const token = entry?.class_tokens?.[this.payload.firebase_project];
       if (!token) {
         log.error("work.class_refused", { class_hash: classHash, error: `no class token for ${this.payload.firebase_project}` });
         continue;

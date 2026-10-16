@@ -50,6 +50,14 @@ function need(opts, ...names) {
   for (const name of names) if (!opts[name]) fail(`${flag(name)} is required`);
 }
 
+// Both reach a shell script inside the image, so they are checked before anything is built.
+const CLASS_HASH = /^[0-9a-f]{48}$/;
+const HOSTNAME = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/;
+
+function matching(opts, name, pattern, what) {
+  if (opts[name] !== undefined && !pattern.test(opts[name])) fail(`${flag(name)} must be ${what}`);
+}
+
 function positiveInteger(opts, name) {
   const value = Number(opts[name]);
   if (!Number.isInteger(value) || value < 1) fail(`${flag(name)} must be a positive integer`);
@@ -102,6 +110,8 @@ function build(opts) {
 // Before any stack exists: the image's toolchain, cc-data and report-server's columns.
 function image(opts) {
   need(opts, "classId", "classHash");
+  matching(opts, "classHash", CLASS_HASH, "a class hash of 48 lowercase hex digits");
+  matching(opts, "portal", HOSTNAME, "a hostname");
   const token = process.env.RD_SMOKE_REPORT_SERVER_TOKEN ?? fail("RD_SMOKE_REPORT_SERVER_TOKEN is not set");
   const portal = opts.portal ?? STAGING_PORTAL;
   // The Makefile's names, which `make smoke-image` passes, so the image run is the one just built.
@@ -137,6 +147,7 @@ async function json(url, init) {
 // On a stack: rigse queues the run, the VM takes it, and the result document says done.
 async function stack(opts) {
   need(opts, "identity", "version", "classHash");
+  matching(opts, "classHash", CLASS_HASH, "a class hash of 48 lowercase hex digits");
   const waitMinutes = opts.waitMinutes === undefined ? 10 : positiveInteger(opts, "waitMinutes");
   const access = process.env.RD_SMOKE_ACCESS_TOKEN ?? fail("RD_SMOKE_ACCESS_TOKEN is not set");
   const portalUrl = (opts.portalUrl ?? `https://${STAGING_PORTAL}`).replace(/\/+$/, "");

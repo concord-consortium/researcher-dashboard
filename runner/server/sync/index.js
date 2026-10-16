@@ -1,3 +1,4 @@
+import { once } from "node:events";
 import fs, { createReadStream } from "node:fs";
 import path from "node:path";
 import { log, timed } from "../log.js";
@@ -50,12 +51,17 @@ export class Syncer {
         log.warn("sync.skipped", { path: rel });
         continue;
       }
-      // Destroyed whatever the put did, so a failed upload does not leave the file open.
+      // Closed whatever the put did, and before the flush resolves, so a failed upload does
+      // not leave the file open.
       const body = createReadStream(null, { fd: source.fd, start: 0 });
       try {
         await this.backend.put(rel, { body, size: source.size });
       } finally {
-        body.destroy();
+        if (!body.closed) {
+          const closed = once(body, "close");
+          body.destroy();
+          await closed;
+        }
       }
       // Recorded only after the put resolves, so a failed upload leaves the file
       // pending and the next verify refuses to call the flush complete.

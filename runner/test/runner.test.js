@@ -1129,6 +1129,27 @@ test("a class token that names another class leaves that class's packages unclai
   assert.equal(result(built.docs, "users/1/counts").status, "queued");
 });
 
+test("a class with no scope entry is refused like a missing token, and no store is left open", async () => {
+  const built = build();
+  built.fn.queue({ identity: "users/1/counts" });
+  const call = built.fn.makeFunctionClient();
+  built.runner.makeFunctionClient = () => async (route, args) => {
+    const answer = await call(route, args);
+    if (route === "work") answer.scopes = { ...answer.scopes, [CLASS]: null };
+    return answer;
+  };
+  stopAfter(built, 6);
+  const lines = await captured(async () => {
+    await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+    await built.runner.loop;
+  });
+  assert.ok(lines.some((l) => l.event === "work.class_refused" && l.class_hash === CLASS));
+  assert.ok(!lines.some((l) => l.event === "work.token_refused"), "the answer is adopted, not refused whole");
+  assert.equal(result(built.docs, "users/1/counts").status, "queued");
+  assert.ok(built.record.stores.length > 2, "several answers were adopted");
+  assert.equal(built.record.stores.slice(0, -1).filter((s) => !s.closed).length, 0, "only the last answer's store is open");
+});
+
 test("a claim that cannot be written is tried three times, then left, without a tight loop", async () => {
   const docs = new Map();
   const events = [];
