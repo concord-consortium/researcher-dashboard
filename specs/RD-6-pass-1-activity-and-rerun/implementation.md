@@ -4,7 +4,7 @@
 **Requirements Spec**: [requirements.md](requirements.md)
 **Status**: **In Development**
 
-Written against RD-3 pass 2 as merged to `main` (`fc658fa`, PR #4): every name below (`watchClass`, `ClassListeners`, `runs.ts`'s `rowState`, `runOffer`, `RunRequest`, `latestFinished` and `millis`, `ClassDashboard`'s `run`, `requests`, `grouped` and `listShown`, `PackageList`'s `Row` and `FinishedBlock`, `ResultView`) is in that code. Every step is `app/` only: the runner writes no `inputs` (Doug, 2026-10-11).
+Written against RD-3 pass 2 as merged to `main` (`fc658fa`, PR #4; the base is now `595e1f7`, which changes no `app/` file): every name below (`watchClass`, `ClassListeners`, `runs.ts`'s `rowState`, `runOffer`, `RunRequest`, `latestFinished` and `millis`, `ClassDashboard`'s `run`, `requests`, `grouped` and `listShown`, `PackageList`'s `Row` and `FinishedBlock`, `ResultView`) is in that code. Every step is `app/` only: the runner writes no `inputs` (Doug, 2026-10-11).
 
 ## Implementation Plan
 
