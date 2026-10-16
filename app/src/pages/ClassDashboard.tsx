@@ -10,6 +10,7 @@ import {
   latestFinished, millis, nextMark, RESUME_WAIT_MS, sessionLines,
   type Counts as CountsDoc, type Result, type Runner, type RunRequest, type SessionMark
 } from "../shell/runs";
+import type { Activity } from "../shell/activity";
 import type { DashboardServices } from "../shell/services";
 import type { InfoReason } from "../shell/start";
 import { Info } from "./Info";
@@ -24,6 +25,7 @@ const UNREACHABLE: Record<Source, string> = {
 };
 
 const PROFILE_REFUSED = "This class's profile could not be read.";
+const ACTIVITY_REFUSED = "Class activity could not be read.";
 
 // The dashboard for the class the token is bound to, never the one the launch link asked for.
 export function ClassDashboard({ services, onExpired }: {
@@ -55,6 +57,9 @@ export function ClassDashboard({ services, onExpired }: {
   // While the session or the results listener is refused, a row's state cannot be told, so none is shown.
   const results = useMemo(() => (runsProblem ? new Map<string, Result>() : received), [runsProblem, received]);
   const [countsProblem, setCountsProblem] = useState<string | null>(null);
+  // undefined until the first snapshot, and again once the listener is refused.
+  const [, setActivity] = useState<Map<string, Activity> | undefined>(undefined);
+  const [activityProblem, setActivityProblem] = useState<string | null>(null);
   const [rows, setRows] = useState<PackageRow[] | null>(null);
   const [listProblem, setListProblem] = useState<string | null>(null);
   const refreshed = useRef(false);
@@ -107,8 +112,13 @@ export function ClassDashboard({ services, onExpired }: {
       },
       counts: setCounts,
       results: setReceived,
+      activity: setActivity,
       refused: (which) => {
         if (which === "profile") return setProfileProblem(PROFILE_REFUSED);
+        if (which === "activity") {
+          setActivity(undefined);
+          return setActivityProblem(ACTIVITY_REFUSED);
+        }
         if (which === "counts") {
           setCounts(undefined);
           return setCountsProblem("Your counts could not be read.");
@@ -118,7 +128,13 @@ export function ClassDashboard({ services, onExpired }: {
       }
     })
       .then((unsubscribe) => { if (canceled) unsubscribe(); else stop = unsubscribe; })
-      .catch((error) => { if (!canceled) refused(error, setProfileProblem, "firebase"); });
+      .catch((error) => {
+        if (canceled) return;
+        refused(error, (message) => {
+          setProfileProblem(message);
+          setActivityProblem(ACTIVITY_REFUSED);
+        }, "firebase");
+      });
     return () => { canceled = true; stop?.(); };
   }, [scope, services, info]);
 
@@ -258,6 +274,11 @@ export function ClassDashboard({ services, onExpired }: {
           Results and counts on this page are your own. Another researcher of this class sees their own runs.
         </p>
       </header>
+
+      <section aria-labelledby="activity-heading">
+        <h2 id="activity-heading">Class activity</h2>
+        {activityProblem && <p className="error">{activityProblem}</p>}
+      </section>
 
       <section aria-labelledby="assignments-heading">
         <h2 id="assignments-heading">Assignments</h2>

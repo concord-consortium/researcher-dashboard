@@ -28,16 +28,20 @@ const PATHS = {
   profile: `${ROOT}/classes/hash223`,
   runner: `${ROOT}/runners/200`,
   counts: `${ROOT}/classes/hash223/researchers/200`,
-  results: `${ROOT}/classes/hash223/researchers/200/results`
+  results: `${ROOT}/classes/hash223/researchers/200/results`,
+  activity: `${ROOT}/activity/hash223/users`
 } as const;
 
+const listenersOn = () => ({ profile: vi.fn(), runner: vi.fn(), counts: vi.fn(), results: vi.fn(), activity: vi.fn(), refused: vi.fn() });
+const started = (_kind: "doc" | "collection", ...args: Listener) => { const stop = vi.fn(); stops.set(args[1], stop); return stop; };
+
 describe("makeServices", () => {
-  it("signs in once for the scope's class and listens to its four documents", async () => {
+  it("signs in once for the scope's class and listens to its five documents", async () => {
     const fetchImpl = vi.fn(async () => ({ ok: true, status: 201, json: async () => ({ token: "custom" }) }));
     vi.stubGlobal("fetch", fetchImpl);
     try {
       const { makeServices } = await import("../src/shell/services");
-      const on = { profile: vi.fn(), runner: vi.fn(), counts: vi.fn(), results: vi.fn(), refused: vi.fn() };
+      const on = listenersOn();
       const stop = await makeServices(CONFIG, TOKEN).watchClass(SCOPE, on);
 
       expect(fetchImpl).toHaveBeenCalledTimes(1);
@@ -49,7 +53,8 @@ describe("makeServices", () => {
       expect(signIn).toHaveBeenCalledTimes(1);
       expect(signIn).toHaveBeenCalledWith("report-service-dev", "custom", null);
       expect(Object.fromEntries(kinds)).toEqual({
-        [PATHS.profile]: "doc", [PATHS.runner]: "doc", [PATHS.counts]: "doc", [PATHS.results]: "collection"
+        [PATHS.profile]: "doc", [PATHS.runner]: "doc", [PATHS.counts]: "doc", [PATHS.results]: "collection",
+        [PATHS.activity]: "collection"
       });
 
       // Each path's values and refusal reach the page under that document's own name.
@@ -63,7 +68,7 @@ describe("makeServices", () => {
       }
 
       stop();
-      expect(stops.size).toBe(4);
+      expect(stops.size).toBe(5);
       for (const s of stops.values()) expect(s).toHaveBeenCalledTimes(1);
     } finally {
       vi.unstubAllGlobals();
@@ -73,14 +78,28 @@ describe("makeServices", () => {
   it("stops the listeners it started when a later one cannot start, and rejects", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 201, json: async () => ({ token: "custom" }) })));
     stops.clear();
-    watch.mockImplementationOnce((_kind, ...args) => { const stop = vi.fn(); stops.set(args[1], stop); return stop; })
-      .mockImplementationOnce((_kind, ...args) => { const stop = vi.fn(); stops.set(args[1], stop); return stop; })
+    watch.mockImplementationOnce(started).mockImplementationOnce(started)
       .mockImplementationOnce(() => { throw new Error("invalid path"); });
     try {
       const { makeServices } = await import("../src/shell/services");
-      const on = { profile: vi.fn(), runner: vi.fn(), counts: vi.fn(), results: vi.fn(), refused: vi.fn() };
+      const on = listenersOn();
       await expect(makeServices(CONFIG, TOKEN).watchClass(SCOPE, on)).rejects.toThrow("invalid path");
       expect([...stops.keys()]).toEqual([PATHS.profile, PATHS.runner]);
+      for (const s of stops.values()) expect(s).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("stops the four started before it when the activity listener cannot start, and rejects", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 201, json: async () => ({ token: "custom" }) })));
+    stops.clear();
+    watch.mockImplementationOnce(started).mockImplementationOnce(started).mockImplementationOnce(started)
+      .mockImplementationOnce(started).mockImplementationOnce(() => { throw new Error("invalid path"); });
+    try {
+      const { makeServices } = await import("../src/shell/services");
+      await expect(makeServices(CONFIG, TOKEN).watchClass(SCOPE, listenersOn())).rejects.toThrow("invalid path");
+      expect([...stops.keys()]).toEqual([PATHS.profile, PATHS.runner, PATHS.counts, PATHS.results]);
       for (const s of stops.values()) expect(s).toHaveBeenCalledTimes(1);
     } finally {
       vi.unstubAllGlobals();

@@ -97,6 +97,11 @@ export function resultsPath(portalOrigin: string, classHash: string, platformUse
   return `${scopeDocPath(portalOrigin, classHash, platformUserId)}/results`;
 }
 
+// REPORT-153's per-learner activity documents for the class, one per learner who has saved work.
+export function activityPath(portalOrigin: string, classHash: string): string {
+  return `researcher_dashboard/${portalSegment(portalOrigin)}/activity/${classHash}/users`;
+}
+
 export function watchDoc<T>(
   db: Firestore, path: string, onValue: (value: T | null) => void, onError: (error: Error) => void
 ): () => void {

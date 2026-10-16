@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ClassDashboard } from "../src/pages/ClassDashboard";
 import type { Profile } from "../src/shell/packages";
 import { ApiError, SessionExpired, type PackageRow, type Portal, type ReportServer, type Resolved, type Scope } from "../src/shell/portal";
+import type { Activity } from "../src/shell/activity";
 import { formatTime, type Counts, type Result, type Runner } from "../src/shell/runs";
 import type { ClassListeners, DashboardServices } from "../src/shell/services";
 import { row, SCOPE, stamp } from "./fixtures";
@@ -45,7 +46,9 @@ function services(over: {
     counts: (c: Counts | null) => act(() => on!.counts(c)),
     results: (r: Map<string, Result>) => act(() => on!.results(r)),
     refuseRuns: (which: "runner" | "results" = "results") => act(() => on!.refused(which)),
-    refuseCounts: () => act(() => on!.refused("counts"))
+    refuseCounts: () => act(() => on!.refused("counts")),
+    activity: (a: Map<string, Activity>) => act(() => on!.activity(a)),
+    refuseActivity: () => act(() => on!.refused("activity"))
   };
 }
 
@@ -160,6 +163,7 @@ describe("ClassDashboard", () => {
   it("says none of the class's documents could be read when the sign-in fails", async () => {
     await mounted(services({ watch: async () => { throw new Error("auth/network-request-failed"); } }));
     expect(await screen.findByText("This class's profile, your runs and your counts could not be read.")).toBeDefined();
+    expect(screen.getByText("Class activity could not be read.")).toBeDefined();
   });
 
   // jwt/firebase answers the researcher check with a 400 and keeps 403 for a token it will not
@@ -353,6 +357,20 @@ describe("ClassDashboard", () => {
     await results.refuseRuns("results");
     expect(screen.getByText("Your runs could not be read.")).toBeDefined();
     expect(screen.queryByText("Your counts could not be read.")).toBeNull();
+  });
+
+  it("says the class activity could not be read when its listener is refused, and reads the rest", async () => {
+    const s = services();
+    await mounted(s);
+    await s.activity(new Map([["301", { lastActivityAt: stamp(NOW) }]]));
+    await s.refuseActivity();
+    expect(screen.getByText("Class activity could not be read.")).toBeDefined();
+    expect(screen.queryByText("Your runs could not be read.")).toBeNull();
+    await s.snapshot(CURRENT);
+    await s.counts({ data: { answers: 12 } });
+    await s.results(new Map([[KEY, wildfire({ status: "done", summary: "Twelve answers read." })]]));
+    expect(await screen.findByText("Twelve answers read.")).toBeDefined();
+    expect(screen.getByText("Answers 12")).toBeDefined();
   });
 });
 
