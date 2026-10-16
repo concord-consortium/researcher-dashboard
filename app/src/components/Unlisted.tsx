@@ -1,6 +1,6 @@
 import { packageKey } from "../shell/packages";
 import { latestFinished, millis, rowState, type Result, type Runner, type SessionMark } from "../shell/runs";
-import { FinishedBlock, rowLine, ShowButton, StateRegion } from "./PackageList";
+import { FinishedBlock, quietUpdate, rowLine, ShowButton, StateRegion } from "./PackageList";
 
 // Results whose package the page does not list any more. They have no Run control, so their state
 // is worded without the instruction to press one.
@@ -27,7 +27,8 @@ export function Unlisted({ results, notes, runner, mark, classHash, onShow, show
             <li key={key}>
               <code className="identity">{identity}</code> <span className="version">{result.package.version}</span>
               {note && <p className="notice">{note}</p>}
-              <StateRegion state={state} line={rowLine(state, identity, false, finished ? millis(finished.finished_at) : undefined)} />
+              <StateRegion state={state} line={rowLine(state, identity, false, finished ? millis(finished.finished_at) : undefined)}
+                quiet={quietUpdate(state, finished !== null, false)} />
               {finished && (
                 <>
                   <FinishedBlock state={state} finished={finished} />

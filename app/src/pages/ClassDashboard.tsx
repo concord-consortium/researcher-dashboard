@@ -11,7 +11,8 @@ import {
   latestFinished, millis, nextMark, RESUME_WAIT_MS, sessionLines,
   type Counts as CountsDoc, type Result, type Runner, type RunRequest, type SessionMark
 } from "../shell/runs";
-import type { Activity } from "../shell/activity";
+import { behindRows, newestActivity, type Activity } from "../shell/activity";
+import { useAutoRerun } from "../shell/rerun";
 import type { DashboardServices } from "../shell/services";
 import type { InfoReason } from "../shell/start";
 import { Info } from "./Info";
@@ -61,6 +62,8 @@ export function ClassDashboard({ services, onExpired }: {
   // undefined until the first snapshot, and again once the listener is refused.
   const [activity, setActivity] = useState<Map<string, Activity> | undefined>(undefined);
   const [activityProblem, setActivityProblem] = useState<string | null>(null);
+  // Set when an automatic request finds the sign-in expired; only Run, which signs in again, ends it.
+  const [stopped, setStopped] = useState(false);
   const [rows, setRows] = useState<PackageRow[] | null>(null);
   const [listProblem, setListProblem] = useState<string | null>(null);
   const refreshed = useRef(false);
@@ -174,15 +177,16 @@ export function ClassDashboard({ services, onExpired }: {
       return next;
     });
 
-  async function run(row: PackageRow, resume: boolean) {
+  async function run(row: PackageRow, resume: boolean, auto = false) {
     const key = packageKey(row.identity);
     setRequests((r) => new Map(r).set(key, { pending: true }));
     try {
       await services.portal.runPackage(row.identity, row.current_version.version);
-      if (!resume) return forget(key);
+      const at = millis(latestResults.current.get(key)?.updated_at);
+      if (!resume) return setRequests((r) => new Map(r).set(key, { requested: true, at }));
       const timers = resumeTimers.current;
       if (!timers) return;
-      const resuming: RunRequest = { resuming: true, at: millis(latestResults.current.get(key)?.updated_at) };
+      const resuming: RunRequest = { resuming: true, at };
       setRequests((r) => new Map(r).set(key, resuming));
       const timer = setTimeout(() => {
         timers.delete(timer);
@@ -190,6 +194,12 @@ export function ClassDashboard({ services, onExpired }: {
       }, RESUME_WAIT_MS);
       timers.add(timer);
     } catch (error) {
+      // An automatic request never signs in again: that navigates away under a researcher who pressed nothing.
+      if (auto && error instanceof SessionExpired) {
+        forget(key);
+        setStopped(true);
+        return;
+      }
       // Keyed to the result as the refusal finds it: the queued write lands before a VM step fails.
       const at = millis(latestResults.current.get(key)?.updated_at);
       refused(error, (message) => setRequests((r) => new Map(r).set(key, { message, at })), "portal");
@@ -199,6 +209,15 @@ export function ClassDashboard({ services, onExpired }: {
   const listShown = Boolean(profile && rows && !listProblem && !profileProblem);
   const grouped = useMemo(() => (rows && scope ? groupPackages(rows, scope).flatMap((g) => g.rows) : []), [rows, scope]);
   const listedTitles = useMemo(() => new Map(grouped.map((r) => [packageKey(r.identity), titleOf(r)])), [grouped]);
+
+  const newest = activity ? newestActivity(activity) : null;
+  const behind = useMemo(
+    () => listShown && scope && !stopped
+      ? behindRows({ listed: grouped, results, runner, mark, classHash: scope.class_hash, newest, requests })
+      : new Map<string, { row: PackageRow; at: number | null }>(),
+    [listShown, stopped, grouped, results, runner, mark, scope, newest, requests]
+  );
+  useAutoRerun(behind, stopped, (_key, row) => { void run(row, false, true); });
 
   // While the list is loading or failed, every result would look unlisted, so none is placed.
   const unlisted = useMemo(
@@ -254,6 +273,13 @@ export function ClassDashboard({ services, onExpired }: {
   const opened = open ? latestFinished(received.get(open.key)) : null;
   const openedAt = millis(opened?.finished_at);
 
+  const session = scope ? sessionLines(runner, scope.class_hash, results, (key) => listedTitles.get(key) ?? null,
+    [...requests.values()].some((r) => "pending" in r)).map((line) => <p key={line} className="session">{line}</p>) : null;
+  // Lines naming a re-run of a finished package stay out of the live region; its row announces the outcome.
+  const current = runner?.state === "running" ? runner.current_package : null;
+  const rerunning = Boolean(current && scope && current.class_hash === scope.class_hash
+    && latestFinished(results.get(current.package_key)));
+
   if (info) return <Info reason={info} />;
   if (!scope) {
     return (
@@ -276,7 +302,7 @@ export function ClassDashboard({ services, onExpired }: {
         </p>
       </header>
 
-      <ClassActivity activity={activity} problem={activityProblem} stopped={false} now={services.now} />
+      <ClassActivity activity={activity} problem={activityProblem} stopped={stopped} now={services.now} />
 
       <section aria-labelledby="assignments-heading">
         <h2 id="assignments-heading">Assignments</h2>
@@ -306,13 +332,13 @@ export function ClassDashboard({ services, onExpired }: {
           {listProblem && <p className="error">{listProblem}</p>}
           {runsProblem && <p className="error">{runsProblem}</p>}
           {countsProblem && <p className="error">{countsProblem}</p>}
-          {sessionLines(runner, scope.class_hash, results, (key) => listedTitles.get(key) ?? null,
-            [...requests.values()].some((r) => "pending" in r)).map((line) => <p key={line} className="session">{line}</p>)}
+          {!rerunning && session}
           {profile && !rows && !listProblem && !profileProblem && <p>Listing the packages that apply…</p>}
         </div>
+        {rerunning && session}
         {listShown && rows && (
           <PackageList rows={rows} scope={scope} results={results} runner={runner} mark={mark} requests={requests}
-            onRun={run} onShow={show} showRef={showRef} />
+            newest={newest} behind={behind} onRun={run} onShow={show} showRef={showRef} />
         )}
       </section>
 

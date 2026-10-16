@@ -383,8 +383,10 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
+const WILDFIRE_PACKAGE = { identity: WILDFIRE.identity, version: "1.0.0", checksum: "c" };
+
 function wildfire(over: Partial<Result> = {}): Result {
-  return { status: "queued", package: { identity: WILDFIRE.identity, version: "1.0.0", checksum: "c" }, updated_at: stamp(10), ...over };
+  return { status: "queued", package: WILDFIRE_PACKAGE, updated_at: stamp(10), ...over };
 }
 
 async function listed(s: ReturnType<typeof services>, onExpired = vi.fn()) {
@@ -629,6 +631,18 @@ describe("the Results section", () => {
   const showButton = (title: string) => screen.getByRole("button", { name: `Show result for ${title}` });
   const unlistedRow = (identity: string) => screen.getByText(identity, { selector: ".identity" }).closest("li")!;
 
+  it("says the opened result includes every save before the start of the run it shows, through a re-run", async () => {
+    const s = services();
+    await listed(s);
+    await s.results(new Map([[KEY, done(WILDFIRE.identity, "Earlier", 1000, { started_at: stamp(900) })]]));
+    fireEvent.click(showButton("Wildfire open responses"));
+    const line = `Includes every save before ${formatTime(900)}, when this run began reading the class's data.`;
+    expect(within(results()).getByText(line)).toBeDefined();
+    const previous = { package: WILDFIRE_PACKAGE, summary: "Earlier", started_at: stamp(900), finished_at: stamp(1000) };
+    await s.results(new Map([[KEY, wildfire({ status: "running", started_at: stamp(5000), updated_at: stamp(5000), previous })]]));
+    expect(within(results()).getByText(line)).toBeDefined();
+  });
+
   it("says how to open a result while none is open, and not once one is", async () => {
     const s = services();
     await listed(s);
@@ -804,5 +818,161 @@ describe("the Results section", () => {
     await failed.results(new Map([[KEY, done(WILDFIRE.identity, "Summary", 1000)]]));
     expect(screen.queryByText("Packages no longer listed")).toBeNull();
     expect(failed.resolve).not.toHaveBeenCalled();
+  });
+});
+
+describe("the automatic re-run", () => {
+  const learner = (at: number) => new Map([["301", { lastActivityAt: stamp(at) }]]);
+  const doneAt = (started: number, over: Partial<Result> = {}) =>
+    wildfire({ status: "done", summary: "Earlier", started_at: stamp(started), updated_at: stamp(started + 100), ...over });
+  const OUT_OF_DATE = "Students have saved work since this result.";
+
+  it("requests a behind result once, at once, with the row's identity and version", async () => {
+    const s = services();
+    await listed(s);
+    await s.results(new Map([[KEY, doneAt(1000)]]));
+    expect(s.runPackage).not.toHaveBeenCalled();
+    await s.activity(learner(2000));
+    await vi.waitFor(() => expect(s.runPackage).toHaveBeenCalledTimes(1));
+    expect(s.runPackage).toHaveBeenCalledWith(WILDFIRE.identity, WILDFIRE.current_version.version);
+    await s.activity(learner(3000));
+    expect(s.runPackage).toHaveBeenCalledTimes(1);
+  });
+
+  it("requests nothing more once the re-run's result has no save after its start", async () => {
+    const s = services();
+    await listed(s);
+    await s.results(new Map([[KEY, doneAt(1000)]]));
+    await s.activity(learner(2000));
+    await vi.waitFor(() => expect(s.runPackage).toHaveBeenCalledTimes(1));
+    await s.results(new Map([[KEY, wildfire({ updated_at: stamp(30_000) })]]));
+    await s.results(new Map([[KEY, wildfire({ status: "running", started_at: stamp(40_000), updated_at: stamp(40_000) })]]));
+    await s.results(new Map([[KEY, doneAt(40_000)]]));
+    expect(s.runPackage).toHaveBeenCalledTimes(1);
+  });
+
+  it("runs once more after a re-run during which a learner saved", async () => {
+    const s = services();
+    await listed(s);
+    await s.results(new Map([[KEY, doneAt(1000)]]));
+    await s.activity(learner(2000));
+    await vi.waitFor(() => expect(s.runPackage).toHaveBeenCalledTimes(1));
+    await s.results(new Map([[KEY, wildfire({ status: "running", started_at: stamp(40_000), updated_at: stamp(40_000) })]]));
+    await s.activity(learner(45_000));
+    expect(s.runPackage).toHaveBeenCalledTimes(1);
+    await s.results(new Map([[KEY, doneAt(40_000)]]));
+    await vi.waitFor(() => expect(s.runPackage).toHaveBeenCalledTimes(2));
+  });
+
+  it("requests nothing for activity at the result's start", async () => {
+    const s = services();
+    await listed(s);
+    await s.results(new Map([[KEY, doneAt(1000)]]));
+    await s.activity(learner(1000));
+    expect(s.runPackage).not.toHaveBeenCalled();
+  });
+
+  it("requests at once on load for a result already behind", async () => {
+    const s = services();
+    await mounted(s);
+    await s.activity(learner(2000));
+    await s.results(new Map([[KEY, doneAt(1000)]]));
+    expect(s.runPackage).not.toHaveBeenCalled();
+    await s.snapshot(CURRENT);
+    await screen.findByText("Wildfire open responses");
+    await vi.waitFor(() => expect(s.runPackage).toHaveBeenCalledTimes(1));
+  });
+
+  it("does not re-run a failed result, and says it is out of date", async () => {
+    const s = services();
+    await listed(s);
+    const previous = { package: WILDFIRE_PACKAGE, summary: "Earlier", started_at: stamp(1000), finished_at: stamp(1500) };
+    await s.results(new Map([[KEY, wildfire({ status: "failed", error: "It broke.", started_at: stamp(3000), previous })]]));
+    await s.activity(learner(2000));
+    expect(s.runPackage).not.toHaveBeenCalled();
+    expect(within(wildfireRow()).getByText(OUT_OF_DATE)).toBeDefined();
+  });
+
+  it("stops on an expired sign-in without signing in again, and says so", async () => {
+    const s = services({ run: async () => { throw new SessionExpired(false); } });
+    const onExpired = await listed(s);
+    await s.results(new Map([[KEY, doneAt(1000)]]));
+    await s.activity(learner(2000));
+    expect(await screen.findByText(/Automatic re-runs have stopped/)).toBeDefined();
+    expect(onExpired).not.toHaveBeenCalled();
+    expect(within(wildfireRow()).getByText(OUT_OF_DATE)).toBeDefined();
+    await s.results(new Map([[KEY, doneAt(1000, { updated_at: stamp(9000) })]]));
+    await s.activity(learner(5000));
+    expect(s.runPackage).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends one request when Run is pressed while the automatic one is in flight", async () => {
+    const answer = deferred<unknown>();
+    const s = services({ run: () => answer.promise });
+    await listed(s);
+    await s.results(new Map([[KEY, doneAt(1000)]]));
+    await s.activity(learner(2000));
+    await vi.waitFor(() => expect(s.runPackage).toHaveBeenCalledTimes(1));
+    fireEvent.click(runButton());
+    expect(s.runPackage).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows Requesting, outside the row's live region, and no out-of-date line while the request is in flight", async () => {
+    const answer = deferred<unknown>();
+    const s = services({ run: () => answer.promise });
+    await listed(s);
+    await s.results(new Map([[KEY, doneAt(1000)]]));
+    await s.activity(learner(2000));
+    const requesting = await within(wildfireRow()).findByText("Requesting…");
+    expect(requesting.closest("[aria-live]")).toBeNull();
+    expect(within(wildfireRow()).queryByText(OUT_OF_DATE)).toBeNull();
+  });
+
+  it("keeps the row quiet between the accepted request and the queued result", async () => {
+    const answer = deferred<unknown>();
+    const s = services({ run: () => answer.promise });
+    await listed(s);
+    await s.results(new Map([[KEY, doneAt(1000)]]));
+    await s.activity(learner(2000));
+    await within(wildfireRow()).findByText("Requesting…");
+    await act(async () => answer.resolve({ queue: [], appended: [], vm: "launched" }));
+    expect(within(wildfireRow()).queryByText("Requesting…")).toBeNull();
+    expect(within(wildfireRow()).queryByText(OUT_OF_DATE)).toBeNull();
+    expect(within(wildfireRow()).getByText("Earlier").closest("[aria-live]")).toBeNull();
+    await s.results(new Map([[KEY, doneAt(40_000)]]));
+    expect(within(wildfireRow()).getByText("Earlier").closest("[aria-live]")).not.toBeNull();
+  });
+
+  it("shows a refusal and retries only once the result changes", async () => {
+    const s = services({ run: async () => { throw new ApiError("projects/20/wildfire-responses@1.0.0 cannot be run", 409); } });
+    await listed(s);
+    await s.results(new Map([[KEY, doneAt(1000)]]));
+    await s.activity(learner(2000));
+    expect(await within(wildfireRow()).findByText(/cannot be run/)).toBeDefined();
+    await s.activity(learner(3000));
+    await s.results(new Map([[KEY, doneAt(1000)]]));
+    expect(s.runPackage).toHaveBeenCalledTimes(1);
+    await s.results(new Map([[KEY, doneAt(1000, { updated_at: stamp(7000) })]]));
+    await vi.waitFor(() => expect(s.runPackage).toHaveBeenCalledTimes(2));
+  });
+
+  it("requests nothing when the activity listener is refused before any snapshot", async () => {
+    const s = services();
+    await listed(s);
+    await s.results(new Map([[KEY, doneAt(1000)]]));
+    await s.refuseActivity();
+    expect(screen.getByText("Class activity could not be read.")).toBeDefined();
+    expect(s.runPackage).not.toHaveBeenCalled();
+  });
+
+  it("does not announce the machine running a re-run, and does for a first run", async () => {
+    const s = services();
+    await listed(s);
+    const runner: Runner = { state: "running", current_package: { class_hash: SCOPE.class_hash, package_key: KEY } };
+    await s.runner(runner);
+    await s.results(new Map([[KEY, wildfire({ status: "running", previous: { package: WILDFIRE_PACKAGE, summary: "Earlier" } })]]));
+    expect(screen.getByText("Running Wildfire open responses.").closest("[aria-live]")).toBeNull();
+    await s.results(new Map([[KEY, wildfire({ status: "running" })]]));
+    expect(screen.getByText("Running Wildfire open responses.").closest("[aria-live]")).not.toBeNull();
   });
 });

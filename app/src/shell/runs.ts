@@ -132,12 +132,14 @@ export function runOffer(runnable: boolean, state: RowState): { enabled: boolean
 
 export const WAITING = "Queued, waiting for a machine: run it to start one.";
 
-// A run request from one row: in flight, refused with a message, or an accepted Resume. `at` is the
-// row's result `updated_at` when the answer arrived, and the line lasts until the result changes.
+// A run request from one row: in flight, refused with a message, an accepted Resume, or an
+// accepted Run whose queued result has not arrived yet. `at` is the row's result `updated_at` when
+// the answer arrived; each entry but pending applies only while the result's `updated_at` is still `at`.
 export type RunRequest =
   | { pending: true }
   | { message: string; at: number | null }
-  | { resuming: true; at: number | null };
+  | { resuming: true; at: number | null }
+  | { requested: true; at: number | null };
 
 export const formatTime = (ms: number) => new Date(ms).toLocaleString();
 

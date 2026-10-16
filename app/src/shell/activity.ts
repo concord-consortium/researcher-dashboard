@@ -69,8 +69,8 @@ export function behindRows({ listed, results, runner, mark, classHash, newest, r
   return behind;
 }
 
-// A request in flight, or a refusal or Resume the row still shows: `Row` shows each only while the
-// result's updated_at is still the one it was made against.
+// A request in flight, or a refusal, Resume or accepted Run the row is still tied to: each holds
+// only while the result's updated_at is still the one it was made against.
 function held(request: RunRequest | undefined, result: Result | undefined): boolean {
   if (!request) return false;
   if ("pending" in request) return true;
@@ -78,11 +78,11 @@ function held(request: RunRequest | undefined, result: Result | undefined): bool
 }
 
 // The latest finished result is older than some learner's save, and nothing is about to
-// replace it. `behind` is behindRows' answer while automatic re-runs are on, else empty; `pending`
-// is whether a request from the row is in flight.
+// replace it. `behind` is behindRows' answer while automatic re-runs are on, else empty; `requesting`
+// is whether a request from the row is in flight or accepted with its queued result still to come.
 export function outOfDate(key: string, result: Result | undefined, newest: number | null,
-  behind: Map<string, unknown>, pending: boolean): boolean {
-  if (!result || pending || result.status === "queued" || result.status === "running" || behind.has(key)) return false;
+  behind: Map<string, unknown>, requesting: boolean): boolean {
+  if (!result || requesting || result.status === "queued" || result.status === "running" || behind.has(key)) return false;
   const started = millis(latestFinished(result)?.started_at);
   return started !== null && newest !== null && newest > started;
 }

@@ -1,3 +1,4 @@
+import { outOfDate } from "../shell/activity";
 import { groupPackages, packageKey, titleOf, type Group } from "../shell/packages";
 import type { PackageRow, Scope } from "../shell/portal";
 import type { ReactNode } from "react";
@@ -42,13 +43,24 @@ export function rowLine(state: RowState, title: string, listed: boolean, finishe
 
 const updating = (text: string) => `Updating: ${text[0].toLowerCase()}${text.slice(1)}`;
 
-// A row's state line in its polite live region, with what else the row has to announce.
-export function StateRegion({ state, line, children }: { state: RowState; line: string; children?: ReactNode }) {
+// A re-run of a row that has a finished result announces only its outcome.
+export const quietUpdate = (state: RowState, hasFinished: boolean, inFlight: boolean) =>
+  hasFinished && (inFlight || state.kind === "queued" || state.kind === "running");
+
+// A quiet line and its aside sit outside the polite region, which announces only additions, so the
+// outcome is announced when it replaces the line.
+export function StateRegion({ state, line, quiet = false, aside, children }: {
+  state: RowState; line: string; quiet?: boolean; aside?: ReactNode; children?: ReactNode;
+}) {
   return (
-    <div className="state" aria-live="polite">
-      <p>{line}</p>
-      {state.kind === "failed" && state.finishedAt !== null && <p className="when">{formatTime(state.finishedAt)}</p>}
-      {children}
+    <div className="state">
+      {quiet && <p>{line}</p>}
+      {quiet && aside}
+      <div aria-live="polite">
+        {!quiet && <p>{line}</p>}
+        {state.kind === "failed" && state.finishedAt !== null && <p className="when">{formatTime(state.finishedAt)}</p>}
+        {children}
+      </div>
     </div>
   );
 }
@@ -82,12 +94,14 @@ export interface RowProps {
   mark: SessionMark | null;
   classHash: string;
   request: RunRequest | undefined;
+  newest: number | null;
+  behind: Map<string, unknown>;
   onRun: (row: PackageRow, resume: boolean) => void;
   onShow: (key: string) => void;
   showRef: (key: string, button: HTMLButtonElement | null) => void;
 }
 
-function Row({ row, result, runner, mark, classHash, request, onRun, onShow, showRef }: RowProps) {
+function Row({ row, result, runner, mark, classHash, request, newest, behind, onRun, onShow, showRef }: RowProps) {
   const key = packageKey(row.identity);
   const title = titleOf(row);
   const state = rowState(result, runner, mark, classHash, key);
@@ -98,20 +112,22 @@ function Row({ row, result, runner, mark, classHash, request, onRun, onShow, sho
   const refusal = request && "message" in request && request.at === resultAt ? request.message : null;
   const resume = state.kind === "stuck" && state.resumable;
   const resuming = resume && request !== undefined && "resuming" in request && request.at === resultAt;
+  const requested = request !== undefined && "requested" in request && request.at === resultAt;
   // While a request from this row is in flight, a waiting row reads as queued, not as waiting for a machine.
   const shown: RowState = pending && state.kind === "queued" && state.waiting ? { ...state, waiting: false } : state;
   const line = !resuming ? rowLine(shown, title, true, finishedAt) : finishedAt === undefined ? RESUMING : updating(RESUMING);
   const offer = runOffer(row.runnable, state);
   const disabled = !offer.enabled || pending || resuming;
   const reasonId = `reason-${key}`;
+  const quiet = quietUpdate(state, finished !== null, pending || resuming || requested);
 
   return (
     <li>
       <span className="title">{title}</span> <span className="version">{row.current_version.version}</span>
       {row.current_version.description && <p className="description">{row.current_version.description}</p>}
       <code className="identity">{row.identity}</code>
-      <StateRegion state={state} line={line}>
-        {pending && <p>Requesting…</p>}
+      <StateRegion state={state} line={line} quiet={quiet} aside={pending && <p>Requesting…</p>}>
+        {!quiet && pending && <p>Requesting…</p>}
         {refusal && <p className="error">{refusal}</p>}
       </StateRegion>
       {finished && (
@@ -119,6 +135,7 @@ function Row({ row, result, runner, mark, classHash, request, onRun, onShow, sho
           {finished.package.version !== row.current_version.version && <> · from {finished.package.version}</>}
         </FinishedBlock>
       )}
+      {outOfDate(key, result, newest, behind, pending || requested) && <p className="notice">Students have saved work since this result.</p>}
       <div className="controls">
         <button
           type="button"
@@ -143,6 +160,8 @@ export interface ListProps {
   runner: Runner | null;
   mark: SessionMark | null;
   requests: Map<string, RunRequest>;
+  newest: number | null;
+  behind: Map<string, unknown>;
   onRun: (row: PackageRow, resume: boolean) => void;
   onShow: (key: string) => void;
   showRef: (key: string, button: HTMLButtonElement | null) => void;

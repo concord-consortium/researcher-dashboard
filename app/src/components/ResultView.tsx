@@ -10,6 +10,7 @@ export function ResultView({ title, finished, updated, onClose }: {
   onClose: () => void;
 }) {
   const heading = useRef<HTMLHeadingElement>(null);
+  const started = millis(finished.started_at);
   useEffect(() => { heading.current?.focus(); }, []);
 
   return (
@@ -18,6 +19,9 @@ export function ResultView({ title, finished, updated, onClose }: {
       <p className="when">
         Version {finished.package.version} · {finishedWhen(millis(finished.finished_at))}
       </p>
+      {started !== null && (
+        <p className="when">Includes every save before {formatTime(started)}, when this run began reading the class's data.</p>
+      )}
       <p role="status">{updated !== null && `Updated ${formatTime(updated)}`}</p>
       <p className="summary">{finished.summary ?? "Finished."}</p>
       <ResultMarkdown markdown={finished.display ?? ""} />

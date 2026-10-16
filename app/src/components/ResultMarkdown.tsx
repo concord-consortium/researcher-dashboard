@@ -1,7 +1,7 @@
 import Markdown, { type Components, type UrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeSanitize, { type Options as SanitizeSchema } from "rehype-sanitize";
-import type { ReactNode } from "react";
+import { memo, type ReactNode } from "react";
 import type { Processor } from "unified";
 
 // A result is markdown written by fetched code, shown on a page holding the researcher's bearer
@@ -56,7 +56,8 @@ const COMPONENTS: Components = {
   ...Object.fromEntries(HEADINGS.map((Tag, i) => [`h${i + 1}`, ({ children }: { children?: ReactNode }) => <Tag>{children}</Tag>]))
 };
 
-export function ResultMarkdown({ markdown, sanitize = true }: { markdown: string; sanitize?: boolean }) {
+// Memoized: the page re-renders on every learner's save, and a parse of a long result is not cheap.
+export const ResultMarkdown = memo(function ResultMarkdown({ markdown, sanitize = true }: { markdown: string; sanitize?: boolean }) {
   return (
     <div className="result-markdown">
       <Markdown remarkPlugins={[noHtml, remarkGfm, noFootnotes]} rehypePlugins={sanitize ? [[rehypeSanitize, SCHEMA]] : []}
@@ -65,4 +66,4 @@ export function ResultMarkdown({ markdown, sanitize = true }: { markdown: string
       </Markdown>
     </div>
   );
-}
+});
