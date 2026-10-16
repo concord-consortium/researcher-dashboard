@@ -5,7 +5,7 @@ import {
   type Result, type RunRequest, type Runner, type SessionMark, type Stamp
 } from "./runs";
 
-// REPORT-153's document; `writeCount` and `changed` are not read here.
+// A learner's activity document, written by report-service; `writeCount` and `changed` are not read here.
 export interface Activity { lastActivityAt?: Stamp }
 
 export const ACTIVE_WINDOW_MINUTES = 5;

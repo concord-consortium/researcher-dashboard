@@ -23,7 +23,7 @@ Written against RD-3 pass 2 as merged to `main` (`fc658fa`, PR #4): every name b
 
 ```ts
 // firebase.ts
-// REPORT-153's per-learner activity documents for the class, one per learner who has saved work.
+// The class's per-learner activity documents, one per learner who has saved work.
 export function activityPath(portalOrigin: string, classHash: string): string {
   return `researcher_dashboard/${portalSegment(portalOrigin)}/activity/${classHash}/users`;
 }
@@ -33,7 +33,7 @@ export function activityPath(portalOrigin: string, classHash: string): string {
 // activity.ts
 import type { Stamp } from "./runs";
 
-// REPORT-153's document; `writeCount` and `changed` are not read here.
+// A learner's activity document, written by report-service; `writeCount` and `changed` are not read here.
 export interface Activity { lastActivityAt?: Stamp }
 ```
 
