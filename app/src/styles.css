@@ -23,6 +23,8 @@
   --ok-bg: #e6f4ea;
   /* Every bordered box pads its content the same on all four sides. */
   --box-pad: 1rem;
+  /* Gray text on the header's teal, where --muted falls short of 4.5:1. */
+  --header-muted: #555555;
   font-family: lato, arial, helvetica, sans-serif;
   color: var(--ink);
 }
@@ -37,8 +39,13 @@ main > :first-child, [role="tabpanel"] > :first-child, .status > :first-child { 
 h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
 h2 { font-size: 1.15rem; margin-top: 2rem; }
 h3 { font-size: 1rem; }
-/* Headings the page moves focus to scroll clear of the sticky header. */
-h2, h3 { scroll-margin-top: 7rem; }
+/* What takes focus scrolls clear of the sticky header and package subheader. */
+html { scroll-padding-top: calc(var(--header-height, 0px) + var(--subheader-height, 0px) + 0.5rem); }
+/* Short or narrow, as when zoomed in, nothing sticks: the bars would cover most of the page. */
+@media (max-width: 40em), (max-height: 40em) {
+  .app-header, .package-subheader { position: static; }
+  html { scroll-padding-top: 0.5rem; }
+}
 /* A heading focused by the page, not by the keyboard, needs no ring. */
 [tabindex="-1"]:focus { outline: none; }
 .meta { color: var(--muted); margin-top: 0; }
@@ -117,7 +124,7 @@ a { color: var(--cc-teal-dark2); }
 .app-header .class { flex: 1; min-width: 12rem; }
 /* The class name matches the product name and the user's name beside it; the lines under all three are .meta. */
 .app-header h1 { font-size: 1rem; margin: 0; }
-.app-header .meta { margin: 0; font-size: 0.9rem; }
+.app-header .meta { margin: 0; font-size: 0.9rem; color: var(--header-muted); }
 .app-header .user { margin-left: auto; text-align: right; white-space: nowrap; }
 .app-header .user-name { margin: 0; font-weight: 700; }
 .app-header .header-row {

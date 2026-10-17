@@ -8,11 +8,10 @@ import { Brand, UserInfo } from "./Brand";
 import { ActiveCount } from "./ClassActivity";
 
 // The bar that stays at the top of the page: the class, the page's tabs, how many of the class's
-// students are active, and what the researcher's runner and runs are doing. `announce` is false
-// while a re-run is running, when the package's own row announces the outcome instead. Its height
-// is published as --header-height, for what sticks below it. `runnerFailed` marks the first runner
-// line, which then says the runner stopped with an error.
-export function Header({ scope, user, demo, tabs, activity, now, session, runnerFailed, announce }: {
+// students are active, and what the researcher's runner and runs are doing; the page announces those,
+// not the bar. Its height is published as --header-height, for what sticks below it. `runnerFailed`
+// marks the first runner line, which then says the runner stopped with an error.
+export function Header({ scope, user, demo, tabs, activity, now, session, runnerFailed }: {
   scope: Scope;
   demo: boolean;
   tabs: ReactNode;
@@ -21,7 +20,6 @@ export function Header({ scope, user, demo, tabs, activity, now, session, runner
   now: () => number;
   session: string[];
   runnerFailed: boolean;
-  announce: boolean;
 }) {
   const about = useRef<HTMLDialogElement>(null);
   const bar = useRef<HTMLElement>(null);
@@ -55,7 +53,7 @@ export function Header({ scope, user, demo, tabs, activity, now, session, runner
           {tabs}
           <div className="status-bar">
             <div className="runner">
-              {announce ? <div aria-live="polite">{lines}</div> : <><div aria-live="polite" />{lines}</>}
+              {lines}
             </div>
             <ActiveCount activity={activity} now={now} />
             <button type="button" className="badge about-button" aria-label="About this page" title="About this page"

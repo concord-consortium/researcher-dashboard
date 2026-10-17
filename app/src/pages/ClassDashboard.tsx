@@ -11,11 +11,12 @@ import {
 import { PackageView } from "../components/PackageView";
 import { panelId, tabId, Tabs } from "../components/Tabs";
 import { Unlisted, unlistedModel, unlistedTitle } from "../components/Unlisted";
-import { groupPackages, matchesSearch, needsRefresh, packageKey, scopeUrls, titleOf, type Profile } from "../shell/packages";
+import { runNews } from "../shell/announce";
+import { groupPackages, identityOfKey, matchesSearch, needsRefresh, packageKey, scopeUrls, titleOf, type Profile } from "../shell/packages";
 import { ApiError, SessionExpired, type PackageRow, type Scope } from "../shell/portal";
 import { PROFILE_MAX_AGE_MS } from "../shell/portals";
 import {
-  ACCEPTED_WAIT_MS, latestFinished, millis, nextMark, sessionLines,
+  ACCEPTED_WAIT_MS, latestFinished, millis, nextMark, sentence, sessionLines,
   type Counts as CountsDoc, type Result, type Runner, type RunRequest, type SessionMark
 } from "../shell/runs";
 import { behindRows, newestActivity, type Activity } from "../shell/activity";
@@ -63,8 +64,6 @@ export function ClassDashboard({ services, onExpired, user = null, demo = false 
   const [route, navigate] = useRoute();
   const selectedKey = route.tab === "packages" ? route.key : null;
   const search = route.tab === "packages" && route.q ? route.q : null;
-  // The open package, and the finish time of the result it opened on, which a newer one is updated from.
-  const [opening, setOpening] = useState<{ key: string; shownAt: number | null } | null>(null);
   const openLinks = useRef(new Map<string, HTMLAnchorElement>());
   // What the page says of a result whose package it no longer lists, by identity.
   const [notes, setNotes] = useState<Map<string, string | null>>(new Map());
@@ -247,6 +246,28 @@ export function ClassDashboard({ services, onExpired, user = null, demo = false 
   const community = useMemo(() => new Set(groups.find((g) => g.key === "community")?.rows.map((r) => packageKey(r.identity))), [groups]);
   const listedTitles = useMemo(() => new Map(grouped.map((r) => [packageKey(r.identity), titleOf(r)])), [grouped]);
 
+  // The page's one announcement of how runs move on: a run starting, finishing or failing, a refused
+  // Run, and the runner failing, each said once, naming its package. Rows and the header say nothing.
+  const [announcement, setAnnouncement] = useState("");
+  const heard = useRef<{ results: Map<string, Result> | null; requests: Map<string, RunRequest>; runnerState: string | null }>(
+    { results: null, requests: new Map(), runnerState: null });
+  useEffect(() => {
+    const titleAt = (key: string) => listedTitles.get(key)
+      ?? unlistedTitle(identityOfKey(key), new Map((rows ?? []).map((r) => [r.identity, titleOf(r)])));
+    const before = heard.current;
+    const news = runNews(before.results, results, titleAt);
+    for (const [key, request] of requests) {
+      if ("message" in request && before.requests.get(key) !== request) news.push(`${titleAt(key)} could not be run: ${sentence(request.message)}`);
+    }
+    const runnerState = runnerDoc?.state ?? null;
+    if (runnerState === "failed" && before.runnerState !== "failed" && before.results) {
+      news.push(`Your runner stopped with an error: ${sentence(runnerDoc?.error ?? "no reason was given")}`);
+    }
+    heard.current = { results: listShown ? results : before.results, requests, runnerState };
+    // The same words again change by a trailing space, so they are still announced.
+    if (news.length > 0) setAnnouncement((was) => (news.join(" ") === was ? `${was}\u00a0` : news.join(" ")));
+  }, [results, requests, runnerDoc, listShown, listedTitles, rows]);
+
   const newest = activity ? newestActivity(activity) : null;
   // An info page re-runs nothing: its listeners have stopped, but a list answered late still lands.
   const behind = useMemo(
@@ -283,10 +304,6 @@ export function ClassDashboard({ services, onExpired, user = null, demo = false 
     }
   }, [unlisted, rowNotes, services]);
 
-  if ((opening?.key ?? null) !== selectedKey) {
-    setOpening(selectedKey ? { key: selectedKey, shownAt: millis(latestFinished(received.get(selectedKey))?.finished_at) } : null);
-  }
-
   // Leaving a package for the list puts focus back on the package's link there.
   const left = useRef<string | null>(null);
   useEffect(() => {
@@ -303,16 +320,9 @@ export function ClassDashboard({ services, onExpired, user = null, demo = false 
   const openPackage = (key: string) => navigate({ tab: "packages", key });
   // The open view keeps the result it read even if a listener is refused later.
   const opened = selectedKey ? latestFinished(received.get(selectedKey)) : null;
-  const openedAt = millis(opened?.finished_at);
-  const updated = opening && openedAt !== null && opening.shownAt !== null && openedAt > opening.shownAt ? openedAt : null;
 
   const session = scope ? sessionLines(runnerDoc, scope.class_hash, results, (key) => listedTitles.get(key) ?? null,
     [...requests.values()].some((r) => "pending" in r)) : [];
-  // While the machine runs a package that already has a finished result, the session lines are not
-  // announced; the package's row announces the outcome.
-  const current = runner?.state === "running" ? runner.current_package : null;
-  const rerunning = Boolean(current && scope && current.class_hash === scope.class_hash
-    && latestFinished(results.get(current.package_key)));
 
   if (info) return <Info reason={info} demo={demo} user={user} />;
   if (!scope) {
@@ -365,6 +375,11 @@ export function ClassDashboard({ services, onExpired, user = null, demo = false 
   };
   const confirm = (row: PackageRow) => { setConfirming(null); void run(row, false); };
   const anyListed = grouped.length + unlisted.length > 0;
+  const emptyList = filter === "search" && searchFound === 0 ? `No packages match “${search}”.` : `No packages here have the status ${statusFilter}.`;
+  // What the list's pills and menu leave, said when a search or a filter changes it.
+  const listNews = filter === "search" && searchFound > 0
+    ? `${searchFound} ${searchFound === 1 ? "package matches" : "packages match"} “${search}”.`
+    : anyListed && shownCards.length === 0 && shownUnlisted.length === 0 && (filter === "search" || statusFilter !== "all") ? emptyList : "";
   // Any pill but Search Results ends the search.
   const selectFilter = (key: string) => { setFilter(key); if (key !== "search" && search) navigate(ALL_PACKAGES); };
   const searchFor = (q: string | null) => { setFilter(q ? "search" : "all"); navigate(q ? { tab: "packages", key: null, q } : ALL_PACKAGES); };
@@ -396,9 +411,10 @@ export function ClassDashboard({ services, onExpired, user = null, demo = false 
 
   return (
     <>
-      <Header scope={scope} user={user} demo={demo} activity={activity} now={services.now} session={session} runnerFailed={runner?.state === "failed"} announce={!rerunning}
+      <Header scope={scope} user={user} demo={demo} activity={activity} now={services.now} session={session} runnerFailed={runner?.state === "failed"}
         tabs={<Tabs label="Dashboard sections" selected={tab} tabs={[{ key: "packages", label: "Packages", icon: CubeIcon }, { key: "info", label: "Info", icon: UserGroupIcon }]}
           onSelect={(key) => navigate(key === "info" ? { tab: "info" } : ALL_PACKAGES)} />} />
+      <p role="status" className="visually-hidden">{announcement}</p>
       <main className="class-dashboard">
         <div role="tabpanel" id={panelId("packages")} aria-labelledby={tabId("packages")} hidden={tab !== "packages"}>
           {!inView && messages(true)}
@@ -406,14 +422,14 @@ export function ClassDashboard({ services, onExpired, user = null, demo = false 
             <PackageView key={selectedKey} title={selectedModel.title} description={selectedRow.current_version.description} status={selectedModel} note={null}
               run={<RunButton row={selectedRow} model={selectedModel} onRun={press} held={confirming === selectedKey} before={<StatusPill model={selectedModel} />} />}
               warning={confirming === selectedKey && <CommunityConfirm onConfirm={() => confirm(selectedRow)} onCancel={() => setConfirming(null)} />}
-              classTitle={scope.name} finished={opened} updated={updated} filter={filterCrumb} onAll={allPackages}
+              classTitle={scope.name} finished={opened} filter={filterCrumb} onAll={allPackages}
               messages={messages(false)} />
           ) : selectedUnlisted ? (
             <PackageView key={selectedKey} title={unlistedTitle(selectedUnlisted.package.identity, allTitles)} description={null}
               status={unlistedModel(selectedUnlisted, runner, mark, scope.class_hash)}
               note={allNotes.get(selectedUnlisted.package.identity) ?? null}
               run={<StatusPill model={unlistedModel(selectedUnlisted, runner, mark, scope.class_hash)} />}
-              classTitle={scope.name} finished={opened} updated={updated} filter={filterCrumb} onAll={allPackages}
+              classTitle={scope.name} finished={opened} filter={filterCrumb} onAll={allPackages}
               messages={messages(false)} />
           ) : listShown && rows && (
             <section className="all-packages" aria-labelledby="packages-heading">
@@ -427,8 +443,9 @@ export function ClassDashboard({ services, onExpired, user = null, demo = false 
               )}
               {filter !== "unlisted" && groups.length === 0 && <p>No packages apply to this class yet.</p>}
               {anyListed && shownCards.length === 0 && shownUnlisted.length === 0 && (filter === "search" || statusFilter !== "all") && (
-                <p>{filter === "search" && searchFound === 0 ? `No packages match “${search}”.` : `No packages here have the status ${statusFilter}.`}</p>
+                <p>{emptyList}</p>
               )}
+              <p role="status" className="visually-hidden">{listNews}</p>
               {shownCards.length > 0 && (
                 <PackageList cards={shownCards} search={filter === "search" ? search : null} onRun={press} onOpen={openPackage} linkRef={linkRef}
                   confirming={confirming} onConfirm={confirm} onCancel={() => setConfirming(null)} />

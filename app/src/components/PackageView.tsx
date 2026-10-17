@@ -28,8 +28,9 @@ export function olderResult(status: StatusModel, finished: Finished | null): str
 // One package, opened from the list: a subheader that stays under the page header, holding the way
 // back, the package's title, description and state, its Run and its result's Copy and Download; then
 // any failure or refusal, which scroll away with the result. Each opening mounts it afresh, at the top
-// of the page with its title focused.
-export function PackageView({ title, description, status, note, run, warning, messages, classTitle, finished, updated, filter, onAll }: {
+// of the page with its title focused. The subheader's height is published as --subheader-height, so
+// what takes focus scrolls clear of it.
+export function PackageView({ title, description, status, note, run, warning, messages, classTitle, finished, filter, onAll }: {
   title: string;
   description: string | null;
   status: StatusModel;
@@ -42,20 +43,28 @@ export function PackageView({ title, description, status, note, run, warning, me
   messages: ReactNode;
   classTitle: string;
   finished: Finished | null;
-  updated: number | null;
   // The package's group, whose link goes back to the list filtered to it.
   filter: { label: string; onSelect: () => void } | null;
   onAll: () => void;
 }) {
   const heading = useRef<HTMLHeadingElement>(null);
   const older = olderResult(status, finished);
+  const subheader = useRef<HTMLDivElement>(null);
   useEffect(() => {
     document.scrollingElement?.scrollTo?.({ top: 0 });
     heading.current?.focus({ preventScroll: true });
   }, []);
+  useEffect(() => {
+    const bar = subheader.current;
+    if (!bar || typeof ResizeObserver === "undefined") return;
+    const root = document.documentElement.style;
+    const observer = new ResizeObserver(() => root.setProperty("--subheader-height", `${bar.offsetHeight}px`));
+    observer.observe(bar);
+    return () => { observer.disconnect(); root.removeProperty("--subheader-height"); };
+  }, []);
   return (
     <div className="package-view">
-      <div className="package-subheader">
+      <div className="package-subheader" ref={subheader}>
         <div className="package-bar">
           <div className="package-main">
             <nav aria-label="Breadcrumb" className="breadcrumb">
@@ -87,7 +96,7 @@ export function PackageView({ title, description, status, note, run, warning, me
       {messages}
       {older && <Callout tone="notice">{older}</Callout>}
       {finished
-        ? <ResultView classTitle={classTitle} finished={finished} updated={updated} />
+        ? <ResultView classTitle={classTitle} finished={finished} />
         : <p className="no-result">No result yet.</p>}
     </div>
   );

@@ -14,7 +14,7 @@ const FINISHED = {
 
 describe("ResultView", () => {
   it("renders the display as markdown", () => {
-    render(<ResultView classTitle="Period 2" finished={FINISHED} updated={null} />);
+    render(<ResultView classTitle="Period 2" finished={FINISHED} />);
     expect(screen.getByRole("heading", { level: 3, name: "Heading" })).toBeDefined();
   });
 

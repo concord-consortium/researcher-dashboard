@@ -50,24 +50,12 @@ export function rowLine(state: RowState, title: string, listed: boolean, finishe
 // A re-run's line, which leaves out the title the row already shows.
 export const updating = (text: string) => `Re-run: ${text[0].toLowerCase()}${text.slice(1)}`;
 
-// A re-run of a row that has a finished result announces only its outcome.
-export const quietUpdate = (state: RowState, hasFinished: boolean, inFlight: boolean) =>
-  hasFinished && (inFlight || state.kind === "queued" || state.kind === "running");
-
-// A quiet line and its aside sit outside the polite region, so changes to them are not announced,
-// and the outcome is announced when it is added inside.
-export function StateRegion({ line, quiet = false, aside, children }: {
-  line: string; quiet?: boolean; aside?: ReactNode; children?: ReactNode;
-}) {
-  const shown = line && <p>{line}</p>;
+// A row's state line and what follows it. The page announces runs, so nothing here is a live region.
+export function StateRegion({ line, children }: { line: string; children?: ReactNode }) {
   return (
     <div className="state">
-      {quiet && shown}
-      {quiet && aside}
-      <div aria-live="polite">
-        {!quiet && shown}
-        {children}
-      </div>
+      {line && <p>{line}</p>}
+      {children}
     </div>
   );
 }
@@ -77,7 +65,6 @@ export function StateRegion({ line, quiet = false, aside, children }: {
 export interface StatusModel {
   state: RowState;
   line: string;
-  quiet: boolean;
   pending: boolean;
   refusal: string | null;
   finished: Finished | null;
@@ -114,7 +101,6 @@ export function rowModel({ row, result, runner, mark, classHash, request, newest
   const offer = runOffer(row.runnable, state);
   return {
     key, title, state, finished, line, pending, refusal, resume, offer,
-    quiet: quietUpdate(state, finished !== null, pending || resuming || requested),
     disabled: !offer.enabled || pending || resuming,
     outdated: outOfDate(key, result, newest, behind, pending || requested),
     versionNote: finished && finished.package.version !== row.current_version.version ? `from ${finished.package.version}` : null
@@ -127,13 +113,11 @@ export function rowModel({ row, result, runner, mark, classHash, request, newest
 export function RowStatus({ model, withFinished = true, withNotRun = true }: {
   model: StatusModel; withFinished?: boolean; withNotRun?: boolean;
 }) {
-  const { state, quiet, pending, finished, outdated } = model;
+  const { state, pending, finished, outdated } = model;
   const line = state.kind === "failed" || (!withNotRun && state.kind === "not-run") ? "" : model.line;
   return (
     <>
-      <StateRegion line={line} quiet={quiet} aside={pending && <p>Requesting…</p>}>
-        {!quiet && pending && <p>Requesting…</p>}
-      </StateRegion>
+      <StateRegion line={line}>{pending && <p>Requesting…</p>}</StateRegion>
       {withFinished && finished && state.kind !== "done" && <p className="summary">{finished.summary ?? "Finished."}</p>}
       {outdated && <p className="notice">Students have saved work since this result.</p>}
     </>
@@ -141,13 +125,13 @@ export function RowStatus({ model, withFinished = true, withNotRun = true }: {
 }
 
 // A failed run, with when it failed, and a refused Run, as error panels the full width of what holds
-// them, announced when they appear.
+// them.
 export function RowProblems({ model }: { model: StatusModel }) {
   const { state, line, refusal } = model;
   return (
-    <div className="row-problems" aria-live="polite">
+    <div className="row-problems">
       {state.kind === "failed" && (
-        <Callout tone="error">{line}{state.finishedAt !== null && <span className="when">Failed at {formatTime(state.finishedAt)}</span>}</Callout>
+        <Callout tone="error">{line} {state.finishedAt !== null && <span className="when">Failed at {formatTime(state.finishedAt)}</span>}</Callout>
       )}
       {refusal && <Callout tone="error">{refusal}</Callout>}
     </div>
@@ -405,14 +389,17 @@ export function Highlight({ text, search }: { text: string; search: string | nul
 }
 
 // The search above the pills. Submitting it sets the list's search, and submitting it empty clears it;
-// the field shows the search again whenever the page's search changes, as on Back.
+// the field shows the search again whenever the page's search changes, as on Back, and keeps focus.
 export function PackageSearch({ search, onSearch }: { search: string | null; onSearch: (q: string | null) => void }) {
+  const [text, setText] = useState(search ?? "");
+  const [shown, setShown] = useState(search);
+  if (search !== shown) {
+    setShown(search);
+    setText(search ?? "");
+  }
   return (
-    <form role="search" className="package-search" onSubmit={(e) => {
-      e.preventDefault();
-      onSearch(new FormData(e.currentTarget).get("q")?.toString().trim() || null);
-    }}>
-      <input key={search ?? ""} type="search" name="q" defaultValue={search ?? ""} placeholder="Search for a package..."
+    <form role="search" className="package-search" onSubmit={(e) => { e.preventDefault(); onSearch(text.trim() || null); }}>
+      <input type="search" name="q" value={text} onChange={(e) => setText(e.target.value)} placeholder="Search for a package..."
         aria-label="Search for a package" />
       <button type="submit" className="icon-button"><MagnifyingGlassIcon aria-hidden="true" />Search</button>
     </form>

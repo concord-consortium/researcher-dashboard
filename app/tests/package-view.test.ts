@@ -6,7 +6,7 @@ import { formatTime } from "../src/shell/runs";
 import { stamp } from "./fixtures";
 
 const model = (over: Partial<StatusModel>): StatusModel => ({
-  state: { kind: "not-run" }, line: "", quiet: false, pending: false, refusal: null, finished: null, outdated: false, versionNote: null, ...over
+  state: { kind: "not-run" }, line: "", pending: false, refusal: null, finished: null, outdated: false, versionNote: null, ...over
 });
 const finished = { package: { identity: "x", version: "1.0.0", checksum: "c" }, finished_at: stamp(1000) };
 const earlier = `This result is from an earlier run, finished ${formatTime(1000)}.`;

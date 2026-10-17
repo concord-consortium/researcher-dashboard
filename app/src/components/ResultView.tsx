@@ -34,10 +34,9 @@ export function ResultWhen({ finished }: { finished: Finished }) {
 
 // The finished result of the open package, under its subheader. Its tables download under the result's
 // own file name.
-export function ResultView({ classTitle, finished, updated }: { classTitle: string; finished: Finished; updated: number | null }) {
+export function ResultView({ classTitle, finished }: { classTitle: string; finished: Finished }) {
   return (
     <section className="result-view" aria-label="Result">
-      <p role="status" className="visually-hidden">{updated !== null && `Updated ${formatTime(updated)}`}</p>
       <ResultMarkdown markdown={finished.display ?? ""}
         fileBase={resultFileBase(finished.package.identity, classTitle, millis(finished.finished_at))} />
     </section>
