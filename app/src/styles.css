@@ -127,15 +127,17 @@ a { color: var(--cc-teal-dark2); }
 .app-header .meta { margin: 0; font-size: 0.9rem; color: var(--header-muted); }
 .app-header .user { margin-left: auto; text-align: right; white-space: nowrap; }
 .app-header .user-name { margin: 0; font-weight: 700; }
+/* Wrapped in reverse, so when the badges no longer fit beside the tabs they go on a line above them
+   and the tabs stay on the header's bottom edge. With wrap-reverse, flex-start is the bottom. */
 .app-header .header-row {
   flex-basis: 100%;
   display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
+  flex-wrap: wrap-reverse;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 0.5rem 1rem;
 }
-.app-header .status-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 0.5rem; margin-bottom: 0.4rem; }
+.app-header .status-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 0.5rem; margin-bottom: 0.4rem; margin-left: auto; }
 .demo-pill {
   display: inline-flex;
   align-items: center;
