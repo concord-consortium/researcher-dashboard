@@ -161,7 +161,7 @@ export function sessionLines(runner: Runner | null, classHash: string, results: 
     case "starting":
       return ["Starting a runner for your runs…"];
     case "ready":
-      return ["Your runner is ready."];
+      return ["Your runner is available."];
     case "running": {
       const current = runner.current_package;
       if (!current) return [];

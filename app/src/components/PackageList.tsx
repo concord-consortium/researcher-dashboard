@@ -4,6 +4,7 @@ import { packageKey, titleOf, type Group } from "../shell/packages";
 import type { PackageRow } from "../shell/portal";
 import { useEffect, useRef, type ReactNode } from "react";
 import { routeHash } from "../shell/route";
+import { Callout } from "./Callout";
 import {
   finishedWhen, formatTime, latestFinished, millis, rowState, runOffer, sentence, stageWords, WAITING,
   type Finished, type Result, type RowState, type Runner, type RunRequest, type SessionMark
@@ -50,17 +51,19 @@ export const quietUpdate = (state: RowState, hasFinished: boolean, inFlight: boo
   hasFinished && (inFlight || state.kind === "queued" || state.kind === "running");
 
 // A quiet line and its aside sit outside the polite region, so changes to them are not announced,
-// and the outcome is announced when it is added inside.
+// and the outcome is announced when it is added inside. A failure is an error panel, with when it failed.
 export function StateRegion({ state, line, quiet = false, aside, children }: {
   state: RowState; line: string; quiet?: boolean; aside?: ReactNode; children?: ReactNode;
 }) {
+  const shown = line && (state.kind === "failed"
+    ? <Callout tone="error">{line}{state.finishedAt !== null && <span className="when">{formatTime(state.finishedAt)}</span>}</Callout>
+    : <p>{line}</p>);
   return (
     <div className="state">
-      {quiet && line && <p>{line}</p>}
+      {quiet && shown}
       {quiet && aside}
       <div aria-live="polite">
-        {!quiet && line && <p>{line}</p>}
-        {state.kind === "failed" && state.finishedAt !== null && <p className="when">{formatTime(state.finishedAt)}</p>}
+        {!quiet && shown}
         {children}
       </div>
     </div>
@@ -128,7 +131,7 @@ export function RowStatus({ model, withFinished = true, withNotRun = true }: {
     <>
       <StateRegion state={state} line={line} quiet={quiet} aside={pending && <p>Requesting…</p>}>
         {!quiet && pending && <p>Requesting…</p>}
-        {refusal && <p className="error">{refusal}</p>}
+        {refusal && <Callout tone="error">{refusal}</Callout>}
       </StateRegion>
       {withFinished && finished && state.kind !== "done" && <p className="summary">{finished.summary ?? "Finished."}</p>}
       {outdated && <p className="notice">Students have saved work since this result.</p>}
@@ -138,19 +141,27 @@ export function RowStatus({ model, withFinished = true, withNotRun = true }: {
 
 type Tone = "idle" | "busy" | "ok" | "warn" | "error";
 
-// A package's state in a word or two, for the pill beside its Run.
-export function statusPill(model: StatusModel): { label: string; tone: Tone } {
+// Every status a pill can show, in the order the status menu offers them.
+export const STATUSES = [
+  "Not run", "Requesting", "Waiting for a runner", "Queued", "Running", "Paused", "Interrupted", "Finished", "Failed", "Re-run failed"
+] as const;
+export type Status = (typeof STATUSES)[number];
+
+// A package's state in a word or two, for the pill beside its Run. The label is the status, but for a
+// queued package's place in line.
+export function statusPill(model: StatusModel): { status: Status; label: string; tone: Tone } {
   const { state, pending, finished } = model;
-  if (pending) return { label: "Requesting", tone: "busy" };
+  const pill = (status: Status, tone: Tone, label: string = status) => ({ status, label, tone });
+  if (pending) return pill("Requesting", "busy");
   switch (state.kind) {
-    case "not-run": return { label: "Not run", tone: "idle" };
+    case "not-run": return pill("Not run", "idle");
     case "queued":
-      if (state.waiting) return { label: "Waiting for a runner", tone: "warn" };
-      return { label: state.position === null ? "Queued" : `Queued, #${state.position}`, tone: "busy" };
-    case "running": return { label: "Running", tone: "busy" };
-    case "stuck": return state.resumable ? { label: "Paused", tone: "warn" } : { label: "Interrupted", tone: "warn" };
-    case "done": return { label: "Finished", tone: "ok" };
-    case "failed": return { label: finished ? "Re-run failed" : "Failed", tone: "error" };
+      if (state.waiting) return pill("Waiting for a runner", "warn");
+      return pill("Queued", "busy", state.position === null ? "Queued" : `Queued, #${state.position}`);
+    case "running": return pill("Running", "busy");
+    case "stuck": return state.resumable ? pill("Paused", "warn") : pill("Interrupted", "warn");
+    case "done": return pill("Finished", "ok");
+    case "failed": return pill(finished ? "Re-run failed" : "Failed", "error");
   }
 }
 
@@ -248,16 +259,13 @@ export function OpenLink({ resultKey, children, onOpen, linkRef }: {
   );
 }
 
-export interface RowProps {
+export interface Card {
   row: PackageRow;
   tag: string;
-  result: Result | undefined;
-  runner: Runner | null;
-  mark: SessionMark | null;
-  classHash: string;
-  request: RunRequest | undefined;
-  newest: number | null;
-  behind: Map<string, unknown>;
+  model: RowModel;
+}
+
+export interface RowProps extends Card {
   onRun: (row: PackageRow, resume: boolean) => void;
   onOpen: (key: string) => void;
   linkRef: (key: string, link: HTMLAnchorElement | null) => void;
@@ -266,8 +274,7 @@ export interface RowProps {
   onCancel: () => void;
 }
 
-function Row({ row, tag, onRun, onOpen, linkRef, confirming, onConfirm, onCancel, ...rest }: RowProps) {
-  const model = rowModel({ row, ...rest });
+function Row({ row, tag, model, onRun, onOpen, linkRef, confirming, onConfirm, onCancel }: RowProps) {
   const asking = confirming === model.key;
   return (
     <li className="card">
@@ -287,9 +294,8 @@ function Row({ row, tag, onRun, onOpen, linkRef, confirming, onConfirm, onCancel
   );
 }
 
-export interface ListProps {
-  groups: Group[];
-  filter: string;
+// What a card's model is read from, beside its row.
+export interface ListContext {
   classHash: string;
   results: Map<string, Result>;
   runner: Runner | null;
@@ -297,6 +303,18 @@ export interface ListProps {
   requests: Map<string, RunRequest>;
   newest: number | null;
   behind: Map<string, unknown>;
+}
+
+// The cards of the groups the filter pill keeps ("all", or a group's key), each tagged with its group.
+export function listCards(groups: Group[], filter: string, { results, requests, ...rest }: ListContext): Card[] {
+  return groups.filter((g) => filter === "all" || g.key === filter).flatMap((g) => g.rows.map((row) => {
+    const key = packageKey(row.identity);
+    return { row, tag: g.heading, model: rowModel({ row, result: results.get(key), request: requests.get(key), ...rest }) };
+  }));
+}
+
+export interface ListProps {
+  cards: Card[];
   onRun: (row: PackageRow, resume: boolean) => void;
   onOpen: (key: string) => void;
   linkRef: (key: string, link: HTMLAnchorElement | null) => void;
@@ -305,20 +323,13 @@ export interface ListProps {
   onCancel: () => void;
 }
 
-// One list of the groups the filter keeps ("all", or a group's key), each card tagged with its group.
-// `confirming` is the package key whose community warning is showing.
-export function PackageList({ groups, filter, results, requests, ...rest }: ListProps) {
-  if (groups.length === 0) return <p>No packages apply to this class yet.</p>;
-  const shown = groups.filter((g) => filter === "all" || g.key === filter);
+// One list of cards, each tagged with its group. `confirming` is the package key whose community
+// warning is showing.
+export function PackageList({ cards, ...rest }: ListProps) {
   return (
-    <>
-      <ul className="package-rows">
-        {shown.flatMap((group) => group.rows.map((row) => {
-          const key = packageKey(row.identity);
-          return <Row key={row.catalog_id} row={row} tag={group.heading} result={results.get(key)} request={requests.get(key)} {...rest} />;
-        }))}
-      </ul>
-    </>
+    <ul className="package-rows">
+      {cards.map((card) => <Row key={card.row.catalog_id} {...card} {...rest} />)}
+    </ul>
   );
 }
 
@@ -338,5 +349,20 @@ export function PackageFilters({ options, selected, onSelect }: {
         </button>
       ))}
     </div>
+  );
+}
+
+// The menu beside the pills that narrows the list to one status, with how many cards the pills keep in each.
+export function StatusFilter({ counts, selected, onSelect }: {
+  counts: Map<Status, number>;
+  selected: Status | "all";
+  onSelect: (status: Status | "all") => void;
+}) {
+  return (
+    <select className="status-filter" aria-label="Filter packages by status" value={selected}
+      onChange={(e) => onSelect(e.target.value as Status | "all")}>
+      <option value="all">All statuses</option>
+      {STATUSES.map((s) => <option key={s} value={s}>{s} ({counts.get(s) ?? 0})</option>)}
+    </select>
   );
 }

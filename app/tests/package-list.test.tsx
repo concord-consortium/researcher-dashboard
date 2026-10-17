@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { PackageList, quietUpdate, stateText, statusPill, type StatusModel } from "../src/components/PackageList";
+import { listCards, PackageList, quietUpdate, stateText, statusPill, type StatusModel } from "../src/components/PackageList";
 import { unlistedTitle } from "../src/components/Unlisted";
 import { groupPackages, packageKey } from "../src/shell/packages";
 import type { PackageRow } from "../src/shell/portal";
@@ -26,14 +26,22 @@ function list(rows: PackageRow[], over: {
   onRun?: (r: PackageRow, resume: boolean) => void; onOpen?: (key: string) => void;
 } = {}) {
   render(
-    <PackageList groups={groupPackages(rows, SCOPE)} filter={over.filter ?? "all"} classHash={SCOPE.class_hash} results={over.results ?? new Map()} runner={over.runner ?? null} mark={null}
-      requests={over.requests ?? new Map()} newest={over.newest ?? null} behind={over.behind ?? new Map()} onRun={over.onRun ?? vi.fn()} onOpen={over.onOpen ?? vi.fn()} linkRef={vi.fn()}
+    <PackageList cards={listCards(groupPackages(rows, SCOPE), over.filter ?? "all", {
+      classHash: SCOPE.class_hash, results: over.results ?? new Map(), runner: over.runner ?? null, mark: null,
+      requests: over.requests ?? new Map(), newest: over.newest ?? null, behind: over.behind ?? new Map()
+    })} onRun={over.onRun ?? vi.fn()} onOpen={over.onOpen ?? vi.fn()} linkRef={vi.fn()}
       confirming={null} onConfirm={vi.fn()} onCancel={vi.fn()} />
   );
 }
 
 const item = (title: string) => screen.getByText(title, { selector: ".title" }).closest("li")!;
-const stateLine = (title: string) => item(title).querySelector(".state p")?.textContent ?? null;
+// The state line's words, leaving out the time a failure's panel adds under them.
+const stateLine = (title: string) => {
+  const line = item(title).querySelector(".state p")?.cloneNode(true) as Element | undefined;
+  line?.querySelector(".when")?.remove();
+  return line?.textContent ?? null;
+};
+const failurePanel = (title: string) => item(title).querySelector(".state .callout.error");
 const pill = (title: string) => item(title).querySelector(".status-pill .label")!.textContent;
 const pillTitle = (title: string) => item(title).querySelector(".status-pill")!.getAttribute("title");
 const runButton = (title: string) => within(item(title)).getByRole("button", { name: new RegExp(`^(Run|Resume) ${title}$`) });
@@ -89,7 +97,8 @@ describe("PackageList", () => {
     expect(item("Done").querySelector(".status-pill .visually-hidden")!.textContent).toBe(`, Finished ${formatTime(1000)}`);
     expect(pillTitle("Not")).toBeNull();
     expect(stateLine("Failed")).toBe("Failed: The machine running it stopped before the run finished; run it again.");
-    expect(within(item("Failed")).getByText(formatTime(5000))).toBeDefined();
+    expect(failurePanel("Failed")!.querySelector(".when")!.textContent).toBe(formatTime(5000));
+    expect(failurePanel("Done")).toBeNull();
     expect(stateLine("Stuck")).toBe("Interrupted: its runner stopped partway. This is being checked.");
     expect(within(item("Stuck")).getByText("It can be run again once it is marked failed.")).toBeDefined();
   });
@@ -147,7 +156,7 @@ describe("PackageList", () => {
     expect(stateLine("Refailed")).toBe(
       `The latest re-run failed: No VM took this package before its VM's life ended; run it again. Showing the result from ${formatTime(1000)}.`
     );
-    expect(within(item("Refailed").querySelector(".state") as HTMLElement).getByText(formatTime(4000))).toBeDefined();
+    expect(failurePanel("Refailed")!.querySelector(".when")!.textContent).toBe(formatTime(4000));
     for (const title of ["Requeued", "Rerunning", "Refailed"]) {
       expect(within(item(title)).getByText("Earlier summary")).toBeDefined();
       expect(pillTitle(title)).toBe(`Finished ${formatTime(1000)}`);
@@ -321,13 +330,14 @@ describe("statusPill", () => {
   const finished = { package: { identity: "x", version: "1.0.0", checksum: "c" } };
 
   it.each([
-    ["a request in flight, whatever the state", model({ pending: true, state: { kind: "done", summary: null, finishedAt: 1 } }), "Requesting", "busy"],
-    ["queued work nothing will take", model({ state: { kind: "queued", position: null, waiting: true } }), "Waiting for a runner", "warn"],
-    ["a run paused on its runner", model({ state: { kind: "stuck", resumable: true } }), "Paused", "warn"],
-    ["a failed re-run over a finished result", model({ state: { kind: "failed", error: "x", finishedAt: 1 }, finished }), "Re-run failed", "error"],
-    ["a failed first run", model({ state: { kind: "failed", error: "x", finishedAt: 1 } }), "Failed", "error"]
-  ] as const)("says %s", (_name, m, label, tone) => {
-    expect(statusPill(m)).toEqual({ label, tone });
+    ["a request in flight, whatever the state", model({ pending: true, state: { kind: "done", summary: null, finishedAt: 1 } }), "Requesting", "Requesting", "busy"],
+    ["queued work nothing will take", model({ state: { kind: "queued", position: null, waiting: true } }), "Waiting for a runner", "Waiting for a runner", "warn"],
+    ["a place in line, under the Queued status", model({ state: { kind: "queued", position: 2, waiting: false } }), "Queued", "Queued, #2", "busy"],
+    ["a run paused on its runner", model({ state: { kind: "stuck", resumable: true } }), "Paused", "Paused", "warn"],
+    ["a failed re-run over a finished result", model({ state: { kind: "failed", error: "x", finishedAt: 1 }, finished }), "Re-run failed", "Re-run failed", "error"],
+    ["a failed first run", model({ state: { kind: "failed", error: "x", finishedAt: 1 } }), "Failed", "Failed", "error"]
+  ] as const)("says %s", (_name, m, status, label, tone) => {
+    expect(statusPill(m)).toEqual({ status, label, tone });
   });
 });
 

@@ -79,11 +79,11 @@ function Demo() {
         reauthorize={() => window.alert("The page would sign in again here.")} demo />
       <aside ref={aside} aria-label="Demo controls" onPointerDown={grab} onPointerMove={move} onPointerUp={drop} onPointerCancel={drop}
         style={{ ...panel, ...(open ? {} : { width: "auto" }), ...(at ? { left: at.x, top: at.y, right: "auto", bottom: "auto" } : {}) }}>
-        <div style={head}>
+        <div style={{ ...head, ...(open ? { marginBottom: 6 } : {}) }}>
           {open && <h2 style={title}><BeakerIcon style={icon} aria-hidden="true" />Demo</h2>}
-          <button type="button" style={toggle} aria-label={open ? "Hide the demo controls" : "Show the demo controls"}
+          <button type="button" style={open ? { ...toggle, padding: 2 } : toggle} aria-label={open ? "Hide the demo controls" : "Show the demo controls"}
             title={open ? "Hide the demo controls" : "Show the demo controls"} onClick={() => setOpen((o) => !o)}>
-            {open ? <ChevronDownIcon style={icon} aria-hidden="true" /> : <BeakerIcon style={icon} aria-hidden="true" />}
+            {open ? <ChevronDownIcon style={small} aria-hidden="true" /> : <BeakerIcon style={icon} aria-hidden="true" />}
           </button>
         </div>
         {open && (
@@ -132,18 +132,19 @@ function Demo() {
 }
 
 const panel: CSSProperties = {
-  position: "fixed", right: 12, bottom: 12, zIndex: 1000, width: 300, padding: "8px 10px",
-  background: "#2b2b2b", color: "#f0f0f0", font: "13px system-ui, sans-serif", borderRadius: 6,
-  boxShadow: "0 2px 10px rgba(0,0,0,0.35)", cursor: "move", touchAction: "none", userSelect: "none"
+  position: "fixed", right: 12, bottom: 12, zIndex: 1000, width: 300, padding: 10,
+  background: "var(--warn-bg)", color: "var(--ink)", border: "1px solid var(--warn-line)", font: "13px system-ui, sans-serif", borderRadius: 6,
+  boxShadow: "0 2px 10px rgba(0,0,0,0.15)", cursor: "move", touchAction: "none", userSelect: "none"
 };
 const head: CSSProperties = { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 };
-const title: CSSProperties = { display: "flex", alignItems: "center", gap: 6, margin: 0, fontSize: 14, color: "#fff" };
+const title: CSSProperties = { display: "flex", alignItems: "center", gap: 6, margin: 0, fontSize: 14, color: "var(--warn)" };
 const toggle: CSSProperties = { display: "inline-flex", alignItems: "center", padding: 4 };
 const icon: CSSProperties = { width: 16, height: 16 };
+const small: CSSProperties = { width: 12, height: 12 };
 const select: CSSProperties = { padding: "4px 6px", borderRadius: 4, font: "inherit" };
 const plain: CSSProperties = { fontWeight: 400 };
 const field: CSSProperties = { display: "block", margin: "6px 0" };
-const about: CSSProperties = { margin: "6px 0", color: "#cfcfcf", lineHeight: 1.35 };
+const about: CSSProperties = { margin: "6px 0", color: "var(--muted)", lineHeight: 1.35 };
 const buttons: CSSProperties = { display: "flex", gap: 6, margin: "10px 0 2px" };
 
 createRoot(document.getElementById("root")!).render(

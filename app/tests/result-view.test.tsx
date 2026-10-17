@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ResultActions, ResultView, ResultWhen } from "../src/components/ResultView";
+import { COPIED_MS, ResultActions, ResultView, ResultWhen } from "../src/components/ResultView";
 import { formatTime } from "../src/shell/runs";
 import { stamp } from "./fixtures";
 
@@ -33,20 +33,34 @@ describe("ResultView", () => {
     expect(line.textContent).toBe(`Version 1.0.0 · Finished ${formatTime(1000)}`);
   });
 
-  it("copies the display markdown and says so", async () => {
+  const live = () => document.querySelector("[aria-live]")!;
+
+  it("copies the display markdown, shows it on the button for a while and says so to a screen reader", async () => {
+    vi.useFakeTimers();
     const writeText = vi.fn(async () => {});
     vi.stubGlobal("navigator", { clipboard: { writeText } });
     render(<ResultActions classTitle="Period 2" finished={FINISHED} />);
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Copy" })));
+    const button = screen.getByRole("button", { name: "Copy" });
+    await act(async () => fireEvent.click(button));
     expect(writeText).toHaveBeenCalledWith("# Heading\n\nBody");
-    expect(screen.getByText("Copied the markdown.").closest("[aria-live]")).not.toBeNull();
+    expect(button.classList.contains("copy-ok")).toBe(true);
+    expect(live().textContent).toBe("Copied the markdown.");
+    expect(live().classList.contains("visually-hidden")).toBe(true);
+    act(() => vi.advanceTimersByTime(COPIED_MS - 1));
+    expect(button.classList.contains("copy-ok")).toBe(true);
+    act(() => vi.advanceTimersByTime(1));
+    expect(button.classList.contains("copy-ok")).toBe(false);
+    expect(live().textContent).toBe("");
+    vi.useRealTimers();
   });
 
-  it("says when the markdown could not be copied, with no clipboard at all", async () => {
+  it("shows on the button, and says, when the markdown could not be copied, with no clipboard at all", async () => {
     vi.stubGlobal("navigator", {});
     render(<ResultActions classTitle="Period 2" finished={FINISHED} />);
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Copy" })));
-    expect(screen.getByText("The markdown could not be copied.")).toBeDefined();
+    const button = screen.getByRole("button", { name: "Copy" });
+    await act(async () => fireEvent.click(button));
+    expect(button.classList.contains("danger")).toBe(true);
+    expect(live().textContent).toBe("The markdown could not be copied.");
   });
 
   it("downloads the display markdown under the package, class and finish date, then releases it", async () => {

@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ClassDashboard } from "../src/pages/ClassDashboard";
-import type { Profile } from "../src/shell/packages";
+import { packageKey, type Profile } from "../src/shell/packages";
 import { ApiError, SessionExpired, type PackageRow, type Portal, type ReportServer, type Resolved, type Scope } from "../src/shell/portal";
 import type { Activity } from "../src/shell/activity";
 import { formatTime, type Counts, type Result, type Runner } from "../src/shell/runs";
@@ -258,6 +258,31 @@ describe("ClassDashboard", () => {
     fireEvent.click(pills[1]);
     expect(pills[1].getAttribute("aria-pressed")).toBe("true");
     expect([...document.querySelectorAll(".title")].map((e) => e.textContent)).toEqual(["Ours", "Theirs"]);
+  });
+
+  it("narrows the pill's cards to one status from the menu, counting each status among the pill's cards", async () => {
+    const ours = row({ title: "Ours", official: true }), theirs = row({ title: "Theirs", official: true });
+    const s = services({ list: async () => [ours, theirs, row({ title: "Stranger's", visibility: "public" })] });
+    await mounted(s);
+    await s.snapshot(CURRENT);
+    await screen.findByText("Ours");
+    const done = (identity: string): Result => ({
+      status: "done", package: { identity, version: "1.0.0", checksum: "c" }, summary: "Done.", finished_at: stamp(1000), updated_at: stamp(1000)
+    });
+    s.results(new Map([[packageKey(ours.identity), done(ours.identity)], ["projects__20__gone", done("projects/20/gone")]]));
+    const menu = screen.getByRole("combobox", { name: "Filter packages by status" }) as HTMLSelectElement;
+    const counts = () => [...menu.options].filter((o) => /\(\d+\)$/.test(o.text) && !o.text.endsWith("(0)")).map((o) => o.text);
+    const titles = () => [...document.querySelectorAll(".title")].map((e) => e.textContent);
+    expect(menu.value).toBe("all");
+    expect(counts()).toEqual(["Not run (2)", "Finished (2)"]);
+    fireEvent.change(menu, { target: { value: "Finished" } });
+    expect(titles()).toEqual(["Ours", "Gone"]);
+    fireEvent.click(within(screen.getByRole("group", { name: "Filter packages" })).getByRole("button", { name: /^Official/ }));
+    expect(titles()).toEqual(["Ours"]);
+    expect(counts()).toEqual(["Not run (1)", "Finished (1)"]);
+    fireEvent.change(menu, { target: { value: "Failed" } });
+    expect(titles()).toEqual([]);
+    expect(screen.getByText("No packages here have the status Failed.")).toBeDefined();
   });
 
   it("asks before running a community package, from its card, with Run held until Confirm or Cancel", async () => {
@@ -538,7 +563,7 @@ describe("running a package", () => {
     await s.results(new Map([[KEY, wildfire({ status: "done", summary: "Earlier", updated_at: stamp(5) })]]));
     fireEvent.click(runButton());
     const message = await within(wildfireLine() as HTMLElement).findByText("projects/20/wildfire-responses@1.0.0 cannot be run");
-    expect(message.className).toBe("error");
+    expect(message.closest(".callout")!.className).toBe("callout error");
     expect(screen.getAllByText(/cannot be run/)).toHaveLength(1);
     await s.results(new Map([[KEY, wildfire({ status: "done", summary: "Earlier", updated_at: stamp(5) })]]));
     expect(screen.getByText(/cannot be run/)).toBeDefined();

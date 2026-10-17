@@ -178,7 +178,7 @@ describe("sessionLines", () => {
 
   it("says the runner is starting, or ready", () => {
     expect(lines(runner({ state: "starting" }))).toEqual(["Starting a runner for your runs…"]);
-    expect(lines(runner({ state: "ready" }))).toEqual(["Your runner is ready."]);
+    expect(lines(runner({ state: "ready" }))).toEqual(["Your runner is available."]);
   });
 
   it("names the package it runs for this class", () => {

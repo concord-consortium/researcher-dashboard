@@ -4,7 +4,10 @@ import { Callout } from "../components/Callout";
 import { ClassActivity, type Stopped } from "../components/ClassActivity";
 import { Counts } from "../components/Counts";
 import { Header } from "../components/Header";
-import { CommunityConfirm, PackageFilters, PackageList, rowModel, RunButton, StatusPill, type FilterOption } from "../components/PackageList";
+import {
+  CommunityConfirm, listCards, PackageFilters, PackageList, rowModel, RunButton, StatusFilter, StatusPill, statusPill,
+  type FilterOption, type Status
+} from "../components/PackageList";
 import { PackageView } from "../components/PackageView";
 import { panelId, tabId, Tabs } from "../components/Tabs";
 import { Unlisted, unlistedModel, unlistedTitle } from "../components/Unlisted";
@@ -229,6 +232,7 @@ export function ClassDashboard({ services, onExpired, user = null, demo = false 
   const grouped = useMemo(() => groups.flatMap((g) => g.rows), [groups]);
   // The list's filter pill, by group key; "all" when the group it named has gone.
   const [filterKey, setFilter] = useState("all");
+  const [statusFilter, setStatus] = useState<Status | "all">("all");
   // The community package whose warning is showing, which runs only on Confirm.
   const [confirming, setConfirming] = useState<string | null>(null);
   const community = useMemo(() => new Set(groups.find((g) => g.key === "community")?.rows.map((r) => packageKey(r.identity))), [groups]);
@@ -325,6 +329,15 @@ export function ClassDashboard({ services, onExpired, user = null, demo = false 
     ...(unlisted.length > 0 ? [{ key: "unlisted", label: "No longer listed", count: unlisted.length }] : [])
   ];
   const filter = filters.some((f) => f.key === filterKey) ? filterKey : "all";
+  // The cards the filter pill keeps, which the status menu counts and then narrows to one status.
+  const cards = filter === "unlisted" ? [] : listCards(groups, filter, { classHash: scope.class_hash, results, runner, mark, requests, newest, behind });
+  const pillUnlisted = filter === "all" || filter === "unlisted" ? unlisted : [];
+  const unlistedStatus = new Map(pillUnlisted.map((r) => [r, statusPill(unlistedModel(r, runner, mark, scope.class_hash)).status]));
+  const statusCounts = new Map<Status, number>();
+  for (const s of [...cards.map((c) => statusPill(c.model).status), ...unlistedStatus.values()]) statusCounts.set(s, (statusCounts.get(s) ?? 0) + 1);
+  const keeps = (s: Status) => statusFilter === "all" || s === statusFilter;
+  const shownCards = cards.filter((c) => keeps(statusPill(c.model).status));
+  const shownUnlisted = pillUnlisted.filter((r) => keeps(unlistedStatus.get(r)!));
   // A pressed Run of a community package asks first; Resume finishes a run already confirmed.
   const press = (row: PackageRow, resume: boolean) => {
     if (!resume && community.has(packageKey(row.identity))) setConfirming(packageKey(row.identity));
@@ -381,14 +394,22 @@ export function ClassDashboard({ services, onExpired, user = null, demo = false 
           ) : listShown && rows && (
             <section className="all-packages" aria-labelledby="packages-heading">
               <h2 id="packages-heading" className="visually-hidden">All Packages</h2>
-              {filters[0].count > 0 && <PackageFilters options={filters} selected={filter} onSelect={setFilter} />}
-              {filter !== "unlisted" && (
-                <PackageList groups={groups} filter={filter} classHash={scope.class_hash} results={results} runner={runner}
-                  mark={mark} requests={requests} newest={newest} behind={behind} onRun={press} onOpen={openPackage} linkRef={linkRef}
+              {filters[0].count > 0 && (
+                <div className="list-filters">
+                  <PackageFilters options={filters} selected={filter} onSelect={setFilter} />
+                  <StatusFilter counts={statusCounts} selected={statusFilter} onSelect={setStatus} />
+                </div>
+              )}
+              {filter !== "unlisted" && groups.length === 0 && <p>No packages apply to this class yet.</p>}
+              {filters[0].count > 0 && shownCards.length === 0 && shownUnlisted.length === 0 && statusFilter !== "all" && (
+                <p>No packages here have the status {statusFilter}.</p>
+              )}
+              {shownCards.length > 0 && (
+                <PackageList cards={shownCards} onRun={press} onOpen={openPackage} linkRef={linkRef}
                   confirming={confirming} onConfirm={confirm} onCancel={() => setConfirming(null)} />
               )}
-              {unlisted.length > 0 && (filter === "all" || filter === "unlisted") && (
-                <Unlisted results={unlisted} titles={allTitles} notes={allNotes} runner={runner} mark={mark}
+              {shownUnlisted.length > 0 && (
+                <Unlisted results={shownUnlisted} titles={allTitles} notes={allNotes} runner={runner} mark={mark}
                   classHash={scope.class_hash} onOpen={openPackage} linkRef={linkRef} />
               )}
             </section>
