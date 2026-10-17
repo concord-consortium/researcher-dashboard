@@ -215,6 +215,27 @@ describe("PackageList", () => {
     expect(reason.textContent).toBe("Only official packages can be run here for now.");
   });
 
+  it("offers View result, before Run, only for a finished result with something to read, through a re-run", () => {
+    const fresh = row({ title: "Fresh", official: true }), bare = row({ title: "Bare", official: true });
+    const done = row({ title: "Read", official: true }), rerun = row({ title: "Rerunning", official: true });
+    const previous = { package: { identity: rerun.identity, version: "1.0.0", checksum: "c" }, summary: "Earlier", display: "# Earlier" };
+    const onOpen = vi.fn();
+    list([fresh, bare, done, rerun], {
+      results: new Map([
+        [packageKey(bare.identity), result(bare, { display: null })],
+        [packageKey(done.identity), result(done, { display: "# Six" })],
+        [packageKey(rerun.identity), result(rerun, { status: "running", stage: "run_package", display: null, previous })]
+      ]),
+      onOpen
+    });
+    const view = (title: string) => within(item(title)).queryByRole("button", { name: `View result for ${title}` });
+    expect([view("Fresh"), view("Bare")]).toEqual([null, null]);
+    expect(view("Read")!.nextElementSibling).toBe(runButton("Read"));
+    expect(view("Rerunning")).not.toBeNull();
+    fireEvent.click(view("Read")!);
+    expect(onOpen).toHaveBeenCalledWith(packageKey(done.identity));
+  });
+
   it("opens a package from its title, run or not, at its own address", () => {
     const fresh = row({ title: "Fresh", official: true }), done = row({ title: "Done", official: true });
     const onOpen = vi.fn();

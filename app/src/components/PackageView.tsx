@@ -12,6 +12,7 @@ export function PackageView({ title, status, note, run, warning, classTitle, fin
   title: string;
   status: StatusModel;
   note: string | null;
+  // Run, after the status pill, or the pill alone for a package that cannot be run from here.
   run: ReactNode;
   // The community warning, while it waits for an answer.
   warning?: ReactNode;
@@ -39,7 +40,7 @@ export function PackageView({ title, status, note, run, warning, classTitle, fin
               <h2 id="package-title" ref={heading} tabIndex={-1} aria-current="page">{title}</h2>
             </nav>
             {note && <p className="notice">{note}</p>}
-            <RowStatus model={status} withFinished={false} />
+            <RowStatus model={status} withFinished={false} withNotRun={false} />
           </div>
           <div className="package-side">
             {(run || finished?.display) && (

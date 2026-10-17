@@ -1,6 +1,6 @@
 import { packageKey } from "../shell/packages";
 import { latestFinished, millis, rowState, type Result, type Runner, type SessionMark } from "../shell/runs";
-import { OpenLink, quietUpdate, rowLine, RowStatus, StatusPill, type StatusModel } from "./PackageList";
+import { OpenLink, quietUpdate, rowLine, RowStatus, StatusPill, ViewResult, type StatusModel } from "./PackageList";
 
 // A result whose package the page does not list any more. It has no Run control, so its state is
 // worded without the instruction to press one.
@@ -42,7 +42,12 @@ export function Unlisted({ results, notes, runner, mark, classHash, onOpen, link
                 {note && <p className="notice">{note}</p>}
                 <RowStatus model={model} />
               </div>
-              <div className="controls"><div className="run-row"><StatusPill model={model} /></div></div>
+              <div className="controls">
+                <div className="run-row">
+                  <StatusPill model={model} />
+                  <ViewResult model={model} title={identity} onOpen={() => onOpen(key)} />
+                </div>
+              </div>
             </li>
           );
         })}

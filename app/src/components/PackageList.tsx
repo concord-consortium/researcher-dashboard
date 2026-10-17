@@ -1,4 +1,4 @@
-import { CheckIcon, CubeIcon, PlayIcon, XMarkIcon } from "@heroicons/react/16/solid";
+import { CheckIcon, CubeIcon, DocumentTextIcon, PlayIcon, XMarkIcon } from "@heroicons/react/16/solid";
 import { outOfDate } from "../shell/activity";
 import { packageKey, titleOf, type Group } from "../shell/packages";
 import type { PackageRow } from "../shell/portal";
@@ -224,6 +224,17 @@ export function CommunityConfirm({ onConfirm, onCancel }: { onConfirm: () => voi
   );
 }
 
+// Opens the package's view, on a card whose package has a finished result with something to read,
+// including one a re-run is replacing or failed to replace.
+export function ViewResult({ model, title, onOpen }: { model: StatusModel; title: string; onOpen: () => void }) {
+  if (!model.finished?.display) return null;
+  return (
+    <button type="button" className="icon-button" aria-label={`View result for ${title}`} onClick={onOpen}>
+      <DocumentTextIcon aria-hidden="true" />View result
+    </button>
+  );
+}
+
 // A package's title as the link that opens it, after the Packages tab's icon.
 export function OpenLink({ resultKey, children, onOpen, linkRef }: {
   resultKey: string;
@@ -267,7 +278,10 @@ function Row({ row, tag, onRun, onOpen, linkRef, confirming, onConfirm, onCancel
         <code className="identity">{row.identity}</code>
         <RowStatus model={model} withNotRun={false} />
       </div>
-      <div className="controls"><RunButton row={row} model={model} onRun={onRun} held={asking} before={<StatusPill model={model} />} /></div>
+      <div className="controls">
+        <RunButton row={row} model={model} onRun={onRun} held={asking}
+          before={<><StatusPill model={model} /><ViewResult model={model} title={model.title} onOpen={() => onOpen(model.key)} /></>} />
+      </div>
       {asking && <CommunityConfirm onConfirm={() => onConfirm(row)} onCancel={onCancel} />}
     </li>
   );

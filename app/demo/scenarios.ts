@@ -3,7 +3,7 @@ import { packageKey } from "../src/shell/packages";
 import type { PackageRow, Scope } from "../src/shell/portal";
 import type { Finished, Result } from "../src/shell/runs";
 import type { InfoReason } from "../src/shell/start";
-import { ISOLATION_PROBE, MODEL_USE, RUNNER_SMOKE, WILDFIRE_RESPONSES } from "./markdown";
+import { EXPLANATION_KEYWORDS, ISOLATION_PROBE, MODEL_USE, RUNNER_SMOKE, WILDFIRE_RESPONSES } from "./markdown";
 import { stamp, type WorldState } from "./world";
 
 const MIN = 60_000;
@@ -24,31 +24,36 @@ function pkg(identity: string, title: string, over: Partial<PackageRow> = {}, de
   catalog += 1;
   return {
     catalog_id: catalog, identity, name: identity.split("/").pop()!, visibility: "public", official: false, mine: false,
-    project: null, applies: true, runnable: false,
+    project: null, applies: true, runnable: true,
     current_version: { version: "1.2.0", title, description }, ...over
   };
 }
 
+// Every package runs here, whatever its group, so each kind of card can be tried; the real catalog
+// runs official packages alone.
 const ROWS: PackageRow[] = [
-  pkg("official/wildfire-responses", "Wildfire open responses", { official: true, runnable: true },
+  pkg("official/wildfire-responses", "Wildfire open responses", { official: true },
     "Every open response the class wrote in the Wildfire activities, by question."),
-  pkg("official/wildfire-model-use", "Wildfire model use", { official: true, runnable: true },
+  pkg("official/wildfire-model-use", "Wildfire model use", { official: true },
     "How students used the wildfire model: runs, settings, page progress and claims."),
-  pkg("official/runner-smoke", "Runner smoke test", { official: true, runnable: true, current_version: { version: "1.0.0", title: "Runner smoke test", description: null } }),
-  pkg("official/isolation-probe", "Isolation probe", { official: true, runnable: true, current_version: { version: "1.0.0", title: "Isolation probe", description: "Checks that a package cannot reach the network." } }),
+  pkg("official/runner-smoke", "Runner smoke test", { official: true, current_version: { version: "1.0.0", title: "Runner smoke test", description: null } }),
+  pkg("official/isolation-probe", "Isolation probe", { official: true, current_version: { version: "1.0.0", title: "Isolation probe", description: "Checks that a package cannot reach the network." } }),
   pkg("projects/20/claim-coding", "Claim coding for Wildfire", { visibility: "project", project: { id: 20, name: "Wildfire Research" } },
     "Codes each claim answer against the project's rubric."),
-  pkg("users/200/draft-summary", "My draft summary", { visibility: "private", mine: true }),
-  // Runnable here only, so the community warning can be seen: the catalog runs official packages alone.
-  pkg("users/311/word-cloud", "Response word cloud", { runnable: true }, "A word frequency table of every open response."),
+  pkg("users/200/explanation-keywords", "Explanation keywords", { visibility: "private", mine: true },
+    "A tally of the science words students use in their open responses."),
+  pkg("users/311/word-cloud", "Response word cloud", {}, "A word frequency table of every open response."),
   pkg("users/402/time-on-task", "Time on task", {})
 ];
 
 const OUTPUTS = new Map([
   ["official/wildfire-responses", { summary: "6 open responses to 2 questions from 3 learners.", display: WILDFIRE_RESPONSES }],
-  ["official/wildfire-model-use", { summary: "13 students, 13 ran the model, 8 completed a task page.", display: MODEL_USE }],
+  ["official/wildfire-model-use", { summary: "15 students, 14 ran the model, 9 completed a task page.", display: MODEL_USE }],
   ["official/runner-smoke", { summary: "Runner smoke test passed.", display: RUNNER_SMOKE }],
   ["official/isolation-probe", { summary: "No network reachable from the package sandbox.", display: ISOLATION_PROBE }],
+  ["users/200/explanation-keywords", { summary: "8 science keywords in 6 responses.", display: EXPLANATION_KEYWORDS }],
+  ["projects/20/claim-coding", { summary: "11 claims coded: 7 strong, 3 partial, 1 missing evidence.", display: "11 claims coded: 7 strong, 3 partial, 1 missing evidence.\n\n| Code | Claims |\n|---|---:|\n| Claim with evidence and reasoning | 7 |\n| Claim with evidence only | 3 |\n| Claim without evidence | 1 |\n" }],
+  ["users/402/time-on-task", { summary: "Median 14 minutes per page across 9 pages.", display: "Median 14 minutes per page across 9 pages.\n\n| Page | Median minutes |\n|---|---:|\n| Activity 2, page 3 | 18 |\n| Activity 2, page 4 | 15 |\n| Activity 3, page 2 | 12 |\n" }],
   ["users/311/word-cloud", { summary: "12 words used more than 3 times.", display: "12 words used more than 3 times.\n\n| Word | Uses |\n|---|---:|\n| fire | 14 |\n| wind | 9 |\n| grass | 6 |\n" }]
 ].map(([identity, output]) => [packageKey(identity as string), output as { summary: string; display: string }]));
 
@@ -101,7 +106,7 @@ export const SCENARIOS: Scenario[] = [
   {
     key: "ready",
     label: "Signed in, several packages",
-    about: "Four official packages (two finished, two never run), a project package, one of your own and two community ones (Response word cloud is runnable here, to show the community warning). The runner is paused; nobody has saved in the last 5 minutes. Press Run or Student saves to watch a run go through.",
+    about: "Four official packages (two finished, two never run), a project package, one of your own and two community ones (every package runs here, so each kind can be tried; the real catalog runs official packages alone). The runner is paused; nobody has saved in the last 5 minutes. Press Run or Student saves to watch a run go through.",
     world: (now) => ({
       ...base(now),
       results: new Map([done("official/wildfire-responses", 40, now), done("official/runner-smoke", 38, now)])
@@ -154,7 +159,7 @@ export const SCENARIOS: Scenario[] = [
   {
     key: "long",
     label: "A long markdown result",
-    about: "Wildfire model use has finished with a long multi-section report (about 14 KB, like class 90132's). Open it from All Packages.",
+    about: "The long result is Wildfire model use's: click its card, or its View result button, to open it. It is a multi-section report of about 14 KB in the real report's layout, with made-up numbers, and scrolling it shows the subheader staying put.",
     world: (now) => ({
       ...base(now),
       results: new Map([done("official/wildfire-model-use", 30, now), done("official/wildfire-responses", 32, now)])

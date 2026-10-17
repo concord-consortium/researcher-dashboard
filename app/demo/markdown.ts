@@ -1,5 +1,5 @@
-// Result markdown shaped like what the packages write: wildfire-responses' open-response tables
-// and wildfire-model-use's longer multi-section report.
+// Result markdown shaped like what the packages write: wildfire-responses' open-response tables,
+// wildfire-model-use's longer multi-section report, and the smaller packages' results.
 
 export const WILDFIRE_RESPONSES = `6 open responses to 2 questions from 3 learners.
 
@@ -20,55 +20,9 @@ export const WILDFIRE_RESPONSES = `6 open responses to 2 questions from 3 learne
 | Learner 3 | It spread the fire more. |
 `;
 
-function repeat<T>(n: number, f: (i: number) => T): T[] {
-  return Array.from({ length: n }, (_, i) => f(i));
-}
-
-const LEARNERS = 13;
-const TASKS = [23, 24, 27, 31, 34];
-
-export const MODEL_USE = `13 students, 13 ran the model, 8 completed a task page.
-
-Includes logs up to 2026-08-06 02:00 UTC. A student's work after that time shows in the next run once the logs have caught up.
-
-# Patterns
-
-| Task | Students who opened the model | Ran it once | Ran it 2 to 5 times | Ran it more than 5 times |
-|---|---:|---:|---:|---:|
-${TASKS.map((t, i) => `| Task ${t} | ${13 - i} | ${2 + i} | ${6 - i} | ${5 - i} |`).join("\n")}
-
-# Simulation use
-
-${repeat(LEARNERS, (i) => `- Student ${i + 1}: ${3 + (i * 7) % 11} runs, longest ${(1.5 + (i % 4) * 0.75).toFixed(2)} minutes, last on Task ${TASKS[i % TASKS.length]}`).join("\n")}
-
-# Settings
-
-| Task | Wind speed | Wind direction | Terrain | Vegetation | Drought index | Runs |
-|---|---|---|---|---|---|---:|
-${TASKS.flatMap((t) => repeat(4, (j) => `| Task ${t} | ${[0, 10, 20, 30][j]} mph | ${["north", "east", "south", "west"][j]} | ${["plains", "foothills", "mountains", "plains"][j]} | ${["grass", "shrub", "forest", "grass"][j]} | ${["low", "medium", "high", "severe"][j]} | ${4 + j * 3} |`)).join("\n")}
-
-# Page progress
-
-${TASKS.map((t, i) => `## Task ${t}
-
-| Page | Opened | Answered every question | Completed |
-|---|---:|---:|---:|
-${repeat(5, (p) => `| Activity ${1 + (i % 2)}, page ${p + 1}: ${["Introduction", "Make a prediction", "Run the model", "Compare runs", "Make a claim"][p]} | ${13 - p} | ${11 - p} | ${10 - p - (i % 2)} |`).join("\n")}`).join("\n\n")}
-
-# Claims
-
-${TASKS.map((t, i) => `## Task ${t}: "${["Which direction will the fire spread fastest?", "How does terrain change the spread?", "What happens with no wind?", "Which vegetation burns fastest?", "What is the main source of fuel in the grassland?"][i]}"
-
-| Choice | Students | Correct |
-|---|---:|:---:|
-| ${["Uphill", "Faster up slopes", "It spreads evenly", "Grass", "Grass"][i]} | ${3 + i} | yes |
-| ${["Downhill", "No change", "It stops", "Forest", "Trees"][i]} | ${2} | |
-| ${["Toward the wind", "Slower up slopes", "It spreads uphill only", "Shrub", "Shrubs"][i]} | ${1 + (i % 2)} | |`).join("\n\n")}
-
-Pages no student opened: Activity 2, page 6: Reflection; Activity 2, page 7: Extension.
-
-Claims nobody answered are not listed: 4 questions across Tasks 24 and 31.
-`;
+// wildfire-simulation-use's report in the layout and wording of a real run, with every number made
+// up, so nothing from a real class is in this repo.
+export { default as MODEL_USE } from "./model-use.md?raw";
 
 export const RUNNER_SMOKE = `Runner smoke test passed.
 
@@ -85,4 +39,18 @@ export const ISOLATION_PROBE = `No network reachable from the package sandbox.
 | \`https://example.com\` | blocked |
 | \`169.254.169.254\` | blocked |
 | DNS lookup | blocked |
+`;
+
+export const EXPLANATION_KEYWORDS = `8 science keywords in 6 responses.
+
+| Keyword | Responses | Learners |
+|---|---:|---:|
+| wind | 4 | 3 |
+| spread | 3 | 2 |
+| uphill | 2 | 2 |
+| dry | 2 | 2 |
+| fuel | 1 | 1 |
+| grass | 1 | 1 |
+| direction | 1 | 1 |
+| terrain | 1 | 1 |
 `;

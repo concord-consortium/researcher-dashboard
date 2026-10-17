@@ -800,7 +800,10 @@ describe("opening a package", () => {
     const s = services();
     await listed(s);
     fireEvent.click(link("Wildfire open responses"));
-    expect(within(view()).getByText("Not run.")).toBeDefined();
+    const controls = view().querySelector(".package-bar .controls")!;
+    expect(controls.querySelector(".status-pill")!.nextElementSibling).toBe(within(view()).getByRole("button", { name: "Run Wildfire open responses" }));
+    expect(controls.querySelector(".status-pill .label")!.textContent).toBe("Not run");
+    expect(within(view()).queryByText("Not run.")).toBeNull();
     expect(within(view()).getByText("No result yet.")).toBeDefined();
     await act(async () => { fireEvent.click(within(view()).getByRole("button", { name: "Run Wildfire open responses" })); });
     expect(s.runPackage).toHaveBeenCalledWith(WILDFIRE.identity, WILDFIRE.current_version.version);
@@ -940,6 +943,7 @@ describe("opening a package", () => {
     fireEvent.click(link("users/7/hidden"));
     expect(document.activeElement).toBe(title("users/7/hidden"));
     expect(within(view()).getByText("This package is no longer available to you.")).toBeDefined();
+    expect(view().querySelector(".package-bar .status-pill .label")!.textContent).toBe("Finished");
     expect(within(view()).queryByRole("button", { name: /^(Run|Resume) / })).toBeNull();
     allPackages();
     expect(document.activeElement).toBe(link("users/7/hidden"));

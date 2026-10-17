@@ -208,7 +208,7 @@ button[aria-disabled="true"], button:disabled { opacity: 0.55; cursor: not-allow
   position: sticky;
   top: var(--header-height, 0);
   z-index: 5;
-  margin: -1.5rem -1.5rem 1rem;
+  margin: -1.5rem -1.5rem 1.5rem;
   padding: 0.6rem 1.5rem;
   background: #fff;
   border-bottom: 1px solid var(--line);
@@ -260,9 +260,9 @@ button.danger:focus-visible { outline-color: var(--error); }
 .result-view [role="status"] { margin: 0; }
 .card .identity { display: block; }
 .card-main { flex: 1; min-width: 0; }
-.card .controls { flex-direction: column; align-items: flex-end; flex: none; max-width: 12rem; margin: 0; text-align: right; }
-.card .reason { font-size: 0.8rem; }
-.run-row { display: flex; align-items: stretch; gap: 0.5rem; }
+.card .controls { flex-direction: column; align-items: flex-end; flex: none; margin: 0; text-align: right; }
+.card .reason { max-width: 12rem; font-size: 0.8rem; }
+.run-row { display: flex; align-items: stretch; gap: 0.5rem; white-space: nowrap; }
 .status-pill {
   display: inline-flex;
   align-items: center;
@@ -303,6 +303,7 @@ button.danger:focus-visible { outline-color: var(--error); }
 .copied { margin: 0; color: var(--muted); font-size: 0.85rem; }
 .copied:empty { display: none; }
 .result-markdown { overflow-x: auto; }
+.result-markdown > :first-child { margin-top: 0; }
 .result-markdown table { border-collapse: collapse; background: #fff; }
 .result-markdown th, .result-markdown td { border: 1px solid var(--line); padding: 0.25rem 0.5rem; }
 .result-markdown img { max-width: 100%; }

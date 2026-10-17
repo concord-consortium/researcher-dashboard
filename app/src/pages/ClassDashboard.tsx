@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ClassActivity, type Stopped } from "../components/ClassActivity";
 import { Counts } from "../components/Counts";
 import { Header } from "../components/Header";
-import { CommunityConfirm, PackageFilters, PackageList, rowModel, RunButton, type FilterOption } from "../components/PackageList";
+import { CommunityConfirm, PackageFilters, PackageList, rowModel, RunButton, StatusPill, type FilterOption } from "../components/PackageList";
 import { PackageView } from "../components/PackageView";
 import { panelId, tabId, Tabs } from "../components/Tabs";
 import { Unlisted, unlistedModel } from "../components/Unlisted";
@@ -358,13 +358,14 @@ export function ClassDashboard({ services, onExpired, user = null, demo = false 
           </div>
           {selectedRow && selectedModel ? (
             <PackageView key={selectedKey} title={selectedModel.title} status={selectedModel} note={null}
-              run={<RunButton row={selectedRow} model={selectedModel} onRun={press} held={confirming === selectedKey} />}
+              run={<RunButton row={selectedRow} model={selectedModel} onRun={press} held={confirming === selectedKey} before={<StatusPill model={selectedModel} />} />}
               warning={confirming === selectedKey && <CommunityConfirm onConfirm={() => confirm(selectedRow)} onCancel={() => setConfirming(null)} />}
               classTitle={scope.name} finished={opened} updated={updated} filter={filterCrumb} onAll={allPackages} />
           ) : selectedUnlisted ? (
             <PackageView key={selectedKey} title={selectedUnlisted.package.identity}
               status={unlistedModel(selectedUnlisted, runner, mark, scope.class_hash)}
-              note={allNotes.get(selectedUnlisted.package.identity) ?? null} run={null}
+              note={allNotes.get(selectedUnlisted.package.identity) ?? null}
+              run={<StatusPill model={unlistedModel(selectedUnlisted, runner, mark, scope.class_hash)} />}
               classTitle={scope.name} finished={opened} updated={updated} filter={filterCrumb} onAll={allPackages} />
           ) : listShown && rows && (
             <section className="all-packages" aria-labelledby="packages-heading">
