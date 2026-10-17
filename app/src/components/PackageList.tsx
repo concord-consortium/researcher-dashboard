@@ -1,8 +1,11 @@
-import { CheckIcon, CubeIcon, DocumentTextIcon, PlayIcon, XMarkIcon } from "@heroicons/react/16/solid";
+import {
+  ArchiveBoxIcon, CheckBadgeIcon, CheckIcon, CubeIcon, DocumentTextIcon, FolderIcon, GlobeAltIcon, MagnifyingGlassIcon, PlayIcon,
+  Squares2X2Icon, UserIcon, XMarkIcon
+} from "@heroicons/react/16/solid";
 import { outOfDate } from "../shell/activity";
-import { packageKey, titleOf, type Group } from "../shell/packages";
+import { packageKey, searchWords, titleOf, type Group } from "../shell/packages";
 import type { PackageRow } from "../shell/portal";
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, type ComponentType, type ReactNode, type SVGProps } from "react";
 import { routeHash } from "../shell/route";
 import { Callout } from "./Callout";
 import {
@@ -259,13 +262,31 @@ export function OpenLink({ resultKey, children, onOpen, linkRef }: {
   );
 }
 
+// Each filter pill's icon, by its key, which a card's tag repeats for the group it is in.
+const GROUP_ICONS: Record<string, ComponentType<SVGProps<SVGSVGElement>>> = {
+  search: MagnifyingGlassIcon, all: Squares2X2Icon, official: CheckBadgeIcon, projects: FolderIcon, mine: UserIcon,
+  community: GlobeAltIcon, unlisted: ArchiveBoxIcon
+};
+
+const GroupIcon = ({ group }: { group: string }) => {
+  const Icon = GROUP_ICONS[group];
+  return Icon ? <Icon aria-hidden="true" /> : null;
+};
+
+// A card's group tag, after its version.
+export function GroupTag({ group, children }: { group: string; children: ReactNode }) {
+  return <span className="tag"><GroupIcon group={group} />{children}</span>;
+}
+
 export interface Card {
   row: PackageRow;
+  group: string;
   tag: string;
   model: RowModel;
 }
 
 export interface RowProps extends Card {
+  search: string | null;
   onRun: (row: PackageRow, resume: boolean) => void;
   onOpen: (key: string) => void;
   linkRef: (key: string, link: HTMLAnchorElement | null) => void;
@@ -274,15 +295,15 @@ export interface RowProps extends Card {
   onCancel: () => void;
 }
 
-function Row({ row, tag, model, onRun, onOpen, linkRef, confirming, onConfirm, onCancel }: RowProps) {
+function Row({ row, group, tag, model, search, onRun, onOpen, linkRef, confirming, onConfirm, onCancel }: RowProps) {
   const asking = confirming === model.key;
   return (
     <li className="card">
       <div className="card-main">
-        <OpenLink resultKey={model.key} onOpen={onOpen} linkRef={linkRef}>{model.title}</OpenLink>{" "}
-        <span className="version">{row.current_version.version}</span> <span className="tag">{tag}</span>
-        {row.current_version.description && <p className="description">{row.current_version.description}</p>}
-        <code className="identity">{row.identity}</code>
+        <OpenLink resultKey={model.key} onOpen={onOpen} linkRef={linkRef}><Highlight text={model.title} search={search} /></OpenLink>{" "}
+        <span className="version">{row.current_version.version}</span> <GroupTag group={group}>{tag}</GroupTag>
+        {row.current_version.description && <p className="description"><Highlight text={row.current_version.description} search={search} /></p>}
+        <code className="identity"><Highlight text={row.identity} search={search} /></code>
         <RowStatus model={model} withNotRun={false} />
       </div>
       <div className="controls">
@@ -309,12 +330,13 @@ export interface ListContext {
 export function listCards(groups: Group[], filter: string, { results, requests, ...rest }: ListContext): Card[] {
   return groups.filter((g) => filter === "all" || g.key === filter).flatMap((g) => g.rows.map((row) => {
     const key = packageKey(row.identity);
-    return { row, tag: g.heading, model: rowModel({ row, result: results.get(key), request: requests.get(key), ...rest }) };
+    return { row, group: g.key, tag: g.tag(row), model: rowModel({ row, result: results.get(key), request: requests.get(key), ...rest }) };
   }));
 }
 
 export interface ListProps {
   cards: Card[];
+  search: string | null;
   onRun: (row: PackageRow, resume: boolean) => void;
   onOpen: (key: string) => void;
   linkRef: (key: string, link: HTMLAnchorElement | null) => void;
@@ -323,8 +345,8 @@ export interface ListProps {
   onCancel: () => void;
 }
 
-// One list of cards, each tagged with its group. `confirming` is the package key whose community
-// warning is showing.
+// One list of cards, each tagged with its group, with `search`'s words marked where they appear.
+// `confirming` is the package key whose community warning is showing.
 export function PackageList({ cards, ...rest }: ListProps) {
   return (
     <ul className="package-rows">
@@ -345,10 +367,34 @@ export function PackageFilters({ options, selected, onSelect }: {
     <div role="group" aria-label="Filter packages" className="filters">
       {options.map((o) => (
         <button key={o.key} type="button" aria-pressed={o.key === selected} onClick={() => onSelect(o.key)}>
-          {o.label} <span className="count">{o.count}</span>
+          <GroupIcon group={o.key} />{o.label} <span className="count">{o.count}</span>
         </button>
       ))}
     </div>
+  );
+}
+
+// Text with each place a search's words appear in it marked, ignoring case; with no search, the text.
+export function Highlight({ text, search }: { text: string; search: string | null }) {
+  const words = search ? searchWords(search) : [];
+  if (words.length === 0) return <>{text}</>;
+  const escaped = words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).sort((a, b) => b.length - a.length);
+  const parts = text.split(new RegExp(`(${escaped.join("|")})`, "gi"));
+  return <>{parts.map((part, i) => (i % 2 === 1 ? <mark key={i} className="match">{part}</mark> : part))}</>;
+}
+
+// The search above the pills. Submitting it sets the list's search, and submitting it empty clears it;
+// the field shows the search again whenever the page's search changes, as on Back.
+export function PackageSearch({ search, onSearch }: { search: string | null; onSearch: (q: string | null) => void }) {
+  return (
+    <form role="search" className="package-search" onSubmit={(e) => {
+      e.preventDefault();
+      onSearch(new FormData(e.currentTarget).get("q")?.toString().trim() || null);
+    }}>
+      <input key={search ?? ""} type="search" name="q" defaultValue={search ?? ""} placeholder="Search for a package..."
+        aria-label="Search for a package" />
+      <button type="submit" className="icon-button"><MagnifyingGlassIcon aria-hidden="true" />Search</button>
+    </form>
   );
 }
 

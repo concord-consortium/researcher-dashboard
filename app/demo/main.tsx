@@ -39,8 +39,8 @@ function Demo() {
   const [at, setAt] = useState<{ x: number; y: number } | null>(null);
   const aside = useRef<HTMLElement>(null);
   const drag = useRef<{ dx: number; dy: number } | null>(null);
-  // Dragged from anywhere but its controls and kept on screen; a reload, a new scenario or Reset puts it
-  // back at the bottom right.
+  // Dragged from anywhere but its controls and kept on screen; a reload, a new scenario, Reset or hiding
+  // it puts it back at the bottom right.
   const grab = (e: PointerEvent<HTMLElement>) => {
     if ((e.target as HTMLElement).closest("button, select, input, label") || !aside.current) return;
     const box = aside.current.getBoundingClientRect();
@@ -82,7 +82,7 @@ function Demo() {
         <div style={{ ...head, ...(open ? { marginBottom: 6 } : {}) }}>
           {open && <h2 style={title}><BeakerIcon style={icon} aria-hidden="true" />Demo</h2>}
           <button type="button" style={open ? { ...toggle, padding: 2 } : toggle} aria-label={open ? "Hide the demo controls" : "Show the demo controls"}
-            title={open ? "Hide the demo controls" : "Show the demo controls"} onClick={() => setOpen((o) => !o)}>
+            title={open ? "Hide the demo controls" : "Show the demo controls"} onClick={() => { if (open) setAt(null); setOpen(!open); }}>
             {open ? <ChevronDownIcon style={small} aria-hidden="true" /> : <BeakerIcon style={icon} aria-hidden="true" />}
           </button>
         </div>
@@ -98,22 +98,26 @@ function Demo() {
             <p style={about}>{scenario.about}</p>
             {world && (
               <>
-                <label style={field}>
-                  <input type="checkbox" checked={world.knobs.failNext}
-                    onChange={(e) => { world.knobs.failNext = e.target.checked; rerender((n) => n + 1); }} />{" "}
-                  Next run fails
-                </label>
-                <label style={field}>
-                  <input type="checkbox" checked={world.knobs.refuseNext}
-                    onChange={(e) => { world.knobs.refuseNext = e.target.checked; rerender((n) => n + 1); }} />{" "}
-                  Next Run press is refused
-                </label>
-                <label style={field}>
-                  Runner step{" "}
-                  <select style={select} value={stepMs} onChange={(e) => setStepMs(Number(e.target.value))}>
-                    {[300, 1500, 4000, 10000].map((ms) => <option key={ms} value={ms}>{ms / 1000} s</option>)}
-                  </select>
-                </label>
+                <div style={knobs}>
+                  <div style={field}>
+                    <label style={check}>
+                      <input type="checkbox" checked={world.knobs.failNext}
+                        onChange={(e) => { world.knobs.failNext = e.target.checked; rerender((n) => n + 1); }} />{" "}
+                      Next run fails
+                    </label>
+                    <label style={{ ...check, marginTop: 2 }}>
+                      <input type="checkbox" checked={world.knobs.refuseNext}
+                        onChange={(e) => { world.knobs.refuseNext = e.target.checked; rerender((n) => n + 1); }} />{" "}
+                      Next Run press is refused
+                    </label>
+                  </div>
+                  <label style={{ ...field, flex: 1 }}>
+                    <span style={{ fontWeight: 700, whiteSpace: "nowrap" }}>Runner step</span>
+                    <select style={{ ...select, display: "block", width: "100%", marginTop: 2 }} value={stepMs} onChange={(e) => setStepMs(Number(e.target.value))}>
+                      {[300, 1500, 4000, 10000].map((ms) => <option key={ms} value={ms}>{ms / 1000} s</option>)}
+                    </select>
+                  </label>
+                </div>
                 <div style={buttons}>
                   <button type="button" className="icon-button" style={plain} onClick={() => world.save()}>
                     <PencilSquareIcon aria-hidden="true" />Student saves
@@ -132,7 +136,7 @@ function Demo() {
 }
 
 const panel: CSSProperties = {
-  position: "fixed", right: 12, bottom: 12, zIndex: 1000, width: 300, padding: 10,
+  position: "fixed", right: 12, bottom: 12, zIndex: 1000, width: 320, padding: 10,
   background: "var(--warn-bg)", color: "var(--ink)", border: "1px solid var(--warn-line)", font: "13px system-ui, sans-serif", borderRadius: 6,
   boxShadow: "0 2px 10px rgba(0,0,0,0.15)", cursor: "move", touchAction: "none", userSelect: "none"
 };
@@ -144,8 +148,10 @@ const small: CSSProperties = { width: 12, height: 12 };
 const select: CSSProperties = { padding: "4px 6px", borderRadius: 4, font: "inherit" };
 const plain: CSSProperties = { fontWeight: 400 };
 const field: CSSProperties = { display: "block", margin: "6px 0" };
+const check: CSSProperties = { display: "block", fontWeight: 700 };
+const knobs: CSSProperties = { display: "flex", alignItems: "flex-start", gap: 12 };
 const about: CSSProperties = { margin: "6px 0", color: "var(--muted)", lineHeight: 1.35 };
-const buttons: CSSProperties = { display: "flex", gap: 6, margin: "10px 0 2px" };
+const buttons: CSSProperties = { display: "flex", justifyContent: "flex-end", gap: 6, margin: "10px 0 2px" };
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

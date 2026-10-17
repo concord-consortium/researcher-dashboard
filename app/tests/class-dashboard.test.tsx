@@ -253,11 +253,17 @@ describe("ClassDashboard", () => {
     await screen.findByText("Ours");
     const pills = within(screen.getByRole("group", { name: "Filter packages" })).getAllByRole("button");
     expect(pills.map((p) => [p.textContent, p.getAttribute("aria-pressed")])).toEqual([
-      ["All 4", "true"], ["Official 2", "false"], ["Community 1", "false"], ["Wildfire Research 1", "false"]
+      ["All 4", "true"], ["Official 2", "false"], ["Projects 1", "false"], ["Community 1", "false"]
     ]);
     fireEvent.click(pills[1]);
     expect(pills[1].getAttribute("aria-pressed")).toBe("true");
     expect([...document.querySelectorAll(".title")].map((e) => e.textContent)).toEqual(["Ours", "Theirs"]);
+    fireEvent.click(pills[2]);
+    expect([...document.querySelectorAll(".package-rows > li")].map((li) => [li.querySelector(".title")!.textContent, li.querySelector(".tag")!.textContent]))
+      .toEqual([["Project's", "Project: Wildfire Research"]]);
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search for a package" }), { target: { value: "research" } });
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    expect([...document.querySelectorAll(".title")].map((e) => e.textContent)).toEqual(["Project's"]);
   });
 
   it("narrows the pill's cards to one status from the menu, counting each status among the pill's cards", async () => {
@@ -283,6 +289,40 @@ describe("ClassDashboard", () => {
     fireEvent.change(menu, { target: { value: "Failed" } });
     expect(titles()).toEqual([]);
     expect(screen.getByText("No packages here have the status Failed.")).toBeDefined();
+  });
+
+  it("searches from the field into a Search Results pill before All, at #packages?q=, and another pill or an empty search clears it", async () => {
+    const s = services({ list: async () => [row({ title: "Ours", official: true }), row({ title: "Theirs", official: true }),
+      row({ visibility: "public", current_version: { version: "1.0.0", title: "Stranger's", description: "Counts OUR words" } })] });
+    await mounted(s);
+    await s.snapshot(CURRENT);
+    await screen.findByText("Ours");
+    // The field is a new element after each search, so it is found again each time.
+    const field = () => screen.getByRole("searchbox", { name: "Search for a package" }) as HTMLInputElement;
+    expect(field().placeholder).toBe("Search for a package...");
+    const pills = () => within(screen.getByRole("group", { name: "Filter packages" })).getAllByRole("button")
+      .map((p) => [p.textContent, p.getAttribute("aria-pressed")]);
+    const titles = () => [...document.querySelectorAll(".title")].map((e) => e.textContent);
+    fireEvent.change(field(), { target: { value: " our " } });
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    expect(window.location.hash).toBe("#packages?q=our");
+    expect(pills().slice(0, 2)).toEqual([["Search Results 2", "true"], ["All 3", "false"]]);
+    expect(titles()).toEqual(["Ours", "Stranger's"]);
+    expect([...document.querySelectorAll("mark.match")].map((m) => m.textContent)).toEqual(["Our", "OUR"]);
+    fireEvent.click(within(screen.getByRole("group", { name: "Filter packages" })).getByRole("button", { name: /^All/ }));
+    expect(titles()).toEqual(["Ours", "Theirs", "Stranger's"]);
+    expect(document.querySelector("mark")).toBeNull();
+    expect(window.location.hash).toBe("#packages");
+    expect(pills()[0]).toEqual(["All 3", "true"]);
+    expect(field().value).toBe("");
+    fireEvent.change(field(), { target: { value: "nothing like it" } });
+    fireEvent.submit(field().form!);
+    expect(pills()[0]).toEqual(["Search Results 0", "true"]);
+    expect(screen.getByText("No packages match “nothing like it”.")).toBeDefined();
+    fireEvent.change(field(), { target: { value: "" } });
+    fireEvent.submit(field().form!);
+    expect(window.location.hash).toBe("#packages");
+    expect(pills()[0]).toEqual(["All 3", "true"]);
   });
 
   it("asks before running a community package, from its card, with Run held until Confirm or Cancel", async () => {
@@ -785,8 +825,11 @@ describe("opening a package", () => {
     expect(when().getAttribute("title")).toBe(line);
     expect(when().textContent).toBe(`Version 1.0.0 · Finished ${formatTime(1000)} ${line}`);
     const previous = { package: WILDFIRE_PACKAGE, summary: "Earlier", started_at: stamp(900), finished_at: stamp(1000) };
+    const older = () => view().querySelector(".callout.notice");
+    expect(older()).toBeNull();
     await s.results(new Map([[KEY, wildfire({ status: "running", started_at: stamp(5000), updated_at: stamp(5000), previous })]]));
     expect(when().getAttribute("title")).toBe(line);
+    expect(older()!.textContent).toBe(`This result is from an earlier run, finished ${formatTime(1000)}. A new run is in progress.`);
   });
 
   it("opens a package with its title focused at its own address, its result shown, and the list gone", async () => {

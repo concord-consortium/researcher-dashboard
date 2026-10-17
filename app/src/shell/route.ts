@@ -1,21 +1,25 @@
 import { useCallback, useEffect, useState } from "react";
 
 // Where the page is, kept in the URL's fragment so the browser's Back returns to All Packages.
-// `key` is a package key, the result document's id.
-export type Route = { tab: "packages"; key: string | null } | { tab: "info" };
+// `key` is a package key, the result document's id; `q` is the list's search, as `#packages?q=`.
+export type Route = { tab: "packages"; key: string | null; q?: string } | { tab: "info" };
 
 export const ALL_PACKAGES: Route = { tab: "packages", key: null };
 
 export function parseRoute(hash: string): Route {
-  const [tab, ...rest] = hash.replace(/^#/, "").split("/");
+  const fragment = hash.replace(/^#/, "");
+  const mark = fragment.indexOf("?");
+  const [tab, ...rest] = (mark < 0 ? fragment : fragment.slice(0, mark)).split("/");
   if (tab === "info") return { tab: "info" };
-  const key = rest.join("/");
-  return { tab: "packages", key: tab === "packages" && key ? decodeURIComponent(key) : null };
+  const key = tab === "packages" && rest.length > 0 && rest.join("/") ? decodeURIComponent(rest.join("/")) : null;
+  const q = mark < 0 ? "" : new URLSearchParams(fragment.slice(mark + 1)).get("q")?.trim() ?? "";
+  return !key && q ? { tab: "packages", key, q } : { tab: "packages", key };
 }
 
 export function routeHash(route: Route): string {
   if (route.tab === "info") return "#info";
-  return route.key ? `#packages/${encodeURIComponent(route.key)}` : "#packages";
+  if (route.key) return `#packages/${encodeURIComponent(route.key)}`;
+  return route.q ? `#packages?${new URLSearchParams({ q: route.q })}` : "#packages";
 }
 
 // The route, and a navigate that takes effect at once and adds a history entry; Back and Forward

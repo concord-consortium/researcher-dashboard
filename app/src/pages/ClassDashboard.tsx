@@ -5,13 +5,13 @@ import { ClassActivity, type Stopped } from "../components/ClassActivity";
 import { Counts } from "../components/Counts";
 import { Header } from "../components/Header";
 import {
-  CommunityConfirm, listCards, PackageFilters, PackageList, rowModel, RunButton, StatusFilter, StatusPill, statusPill,
+  CommunityConfirm, listCards, PackageFilters, PackageList, PackageSearch, rowModel, RunButton, StatusFilter, StatusPill, statusPill,
   type FilterOption, type Status
 } from "../components/PackageList";
 import { PackageView } from "../components/PackageView";
 import { panelId, tabId, Tabs } from "../components/Tabs";
 import { Unlisted, unlistedModel, unlistedTitle } from "../components/Unlisted";
-import { groupPackages, needsRefresh, packageKey, scopeUrls, titleOf, type Profile } from "../shell/packages";
+import { groupPackages, matchesSearch, needsRefresh, packageKey, scopeUrls, titleOf, type Profile } from "../shell/packages";
 import { ApiError, SessionExpired, type PackageRow, type Scope } from "../shell/portal";
 import { PROFILE_MAX_AGE_MS } from "../shell/portals";
 import {
@@ -60,6 +60,7 @@ export function ClassDashboard({ services, onExpired, user = null, demo = false 
   const [requests, setRequests] = useState<Map<string, RunRequest>>(new Map());
   const [route, navigate] = useRoute();
   const selectedKey = route.tab === "packages" ? route.key : null;
+  const search = route.tab === "packages" && route.q ? route.q : null;
   // The open package, and the finish time of the result it opened on, which a newer one is updated from.
   const [opening, setOpening] = useState<{ key: string; shownAt: number | null } | null>(null);
   const openLinks = useRef(new Map<string, HTMLAnchorElement>());
@@ -231,7 +232,7 @@ export function ClassDashboard({ services, onExpired, user = null, demo = false 
   const groups = useMemo(() => (rows && scope ? groupPackages(rows, scope) : []), [rows, scope]);
   const grouped = useMemo(() => groups.flatMap((g) => g.rows), [groups]);
   // The list's filter pill, by group key; "all" when the group it named has gone.
-  const [filterKey, setFilter] = useState("all");
+  const [filterKey, setFilter] = useState(() => (search ? "search" : "all"));
   const [statusFilter, setStatus] = useState<Status | "all">("all");
   // The community package whose warning is showing, which runs only on Confirm.
   const [confirming, setConfirming] = useState<string | null>(null);
@@ -323,15 +324,23 @@ export function ClassDashboard({ services, onExpired, user = null, demo = false 
   const allNotes = new Map([...notes, ...rowNotes]);
   // Every title the list returned, applicable or not, for results the page no longer lists.
   const allTitles = new Map((rows ?? []).map((r) => [r.identity, titleOf(r)]));
+  const searchGroups = search
+    ? groups.map((g) => ({ ...g, rows: g.rows.filter((r) => matchesSearch(search, [titleOf(r), r.current_version.description, r.identity, g.tag(r)])) }))
+    : [];
+  const searchUnlisted = search
+    ? unlisted.filter((r) => matchesSearch(search, [unlistedTitle(r.package.identity, allTitles), r.package.identity]))
+    : [];
   const filters: FilterOption[] = [
+    ...(search ? [{ key: "search", label: "Search Results", count: searchGroups.reduce((n, g) => n + g.rows.length, 0) + searchUnlisted.length }] : []),
     { key: "all", label: "All", count: grouped.length + unlisted.length },
     ...groups.map((g) => ({ key: g.key, label: g.heading, count: g.rows.length })),
     ...(unlisted.length > 0 ? [{ key: "unlisted", label: "No longer listed", count: unlisted.length }] : [])
   ];
   const filter = filters.some((f) => f.key === filterKey) ? filterKey : "all";
   // The cards the filter pill keeps, which the status menu counts and then narrows to one status.
-  const cards = filter === "unlisted" ? [] : listCards(groups, filter, { classHash: scope.class_hash, results, runner, mark, requests, newest, behind });
-  const pillUnlisted = filter === "all" || filter === "unlisted" ? unlisted : [];
+  const context = { classHash: scope.class_hash, results, runner, mark, requests, newest, behind };
+  const cards = filter === "search" ? listCards(searchGroups, "all", context) : filter === "unlisted" ? [] : listCards(groups, filter, context);
+  const pillUnlisted = filter === "search" ? searchUnlisted : filter === "all" || filter === "unlisted" ? unlisted : [];
   const unlistedStatus = new Map(pillUnlisted.map((r) => [r, statusPill(unlistedModel(r, runner, mark, scope.class_hash)).status]));
   const statusCounts = new Map<Status, number>();
   for (const s of [...cards.map((c) => statusPill(c.model).status), ...unlistedStatus.values()]) statusCounts.set(s, (statusCounts.get(s) ?? 0) + 1);
@@ -344,6 +353,10 @@ export function ClassDashboard({ services, onExpired, user = null, demo = false 
     else void run(row, resume);
   };
   const confirm = (row: PackageRow) => { setConfirming(null); void run(row, false); };
+  const anyListed = grouped.length + unlisted.length > 0;
+  // Any pill but Search Results ends the search.
+  const selectFilter = (key: string) => { setFilter(key); if (key !== "search" && search) navigate(ALL_PACKAGES); };
+  const searchFor = (q: string | null) => { setFilter(q ? "search" : "all"); navigate(q ? { tab: "packages", key: null, q } : ALL_PACKAGES); };
   const allPackages = () => { setFilter("all"); navigate(ALL_PACKAGES); };
   // The open package's own group for its breadcrumb, whatever filter it was opened from; its link filters the list to it.
   const crumbKey = selectedRow ? groups.find((g) => g.rows.includes(selectedRow))?.key : selectedUnlisted ? "unlisted" : undefined;
@@ -394,22 +407,23 @@ export function ClassDashboard({ services, onExpired, user = null, demo = false 
           ) : listShown && rows && (
             <section className="all-packages" aria-labelledby="packages-heading">
               <h2 id="packages-heading" className="visually-hidden">All Packages</h2>
-              {filters[0].count > 0 && (
+              {anyListed && <PackageSearch search={search} onSearch={searchFor} />}
+              {anyListed && (
                 <div className="list-filters">
-                  <PackageFilters options={filters} selected={filter} onSelect={setFilter} />
+                  <PackageFilters options={filters} selected={filter} onSelect={selectFilter} />
                   <StatusFilter counts={statusCounts} selected={statusFilter} onSelect={setStatus} />
                 </div>
               )}
               {filter !== "unlisted" && groups.length === 0 && <p>No packages apply to this class yet.</p>}
-              {filters[0].count > 0 && shownCards.length === 0 && shownUnlisted.length === 0 && statusFilter !== "all" && (
-                <p>No packages here have the status {statusFilter}.</p>
+              {anyListed && shownCards.length === 0 && shownUnlisted.length === 0 && (filter === "search" || statusFilter !== "all") && (
+                <p>{statusFilter === "all" ? `No packages match “${search}”.` : `No packages here have the status ${statusFilter}.`}</p>
               )}
               {shownCards.length > 0 && (
-                <PackageList cards={shownCards} onRun={press} onOpen={openPackage} linkRef={linkRef}
+                <PackageList cards={shownCards} search={filter === "search" ? search : null} onRun={press} onOpen={openPackage} linkRef={linkRef}
                   confirming={confirming} onConfirm={confirm} onCancel={() => setConfirming(null)} />
               )}
               {shownUnlisted.length > 0 && (
-                <Unlisted results={shownUnlisted} titles={allTitles} notes={allNotes} runner={runner} mark={mark}
+                <Unlisted results={shownUnlisted} search={filter === "search" ? search : null} titles={allTitles} notes={allNotes} runner={runner} mark={mark}
                   classHash={scope.class_hash} onOpen={openPackage} linkRef={linkRef} />
               )}
             </section>

@@ -1,6 +1,6 @@
 import { packageKey } from "../shell/packages";
 import { latestFinished, millis, rowState, type Result, type Runner, type SessionMark } from "../shell/runs";
-import { OpenLink, quietUpdate, rowLine, RowStatus, StatusPill, ViewResult, type StatusModel } from "./PackageList";
+import { GroupTag, Highlight, OpenLink, quietUpdate, rowLine, RowStatus, StatusPill, ViewResult, type StatusModel } from "./PackageList";
 
 // A result whose package the page does not list any more. It has no Run control, so its state is
 // worded without the instruction to press one.
@@ -24,8 +24,9 @@ export function unlistedTitle(identity: string, titles: Map<string, string>): st
   return words ? words[0].toUpperCase() + words.slice(1) : identity;
 }
 
-export function Unlisted({ results, titles, notes, runner, mark, classHash, onOpen, linkRef }: {
+export function Unlisted({ results, search, titles, notes, runner, mark, classHash, onOpen, linkRef }: {
   results: Result[];
+  search: string | null;
   titles: Map<string, string>;
   notes: Map<string, string | null>;
   runner: Runner | null;
@@ -46,9 +47,9 @@ export function Unlisted({ results, titles, notes, runner, mark, classHash, onOp
           return (
             <li key={key} className="card">
               <div className="card-main">
-                <OpenLink resultKey={key} onOpen={onOpen} linkRef={linkRef}>{title}</OpenLink>{" "}
-                <span className="version">{result.package.version}</span> <span className="tag">No longer listed</span>
-                <code className="identity">{identity}</code>
+                <OpenLink resultKey={key} onOpen={onOpen} linkRef={linkRef}><Highlight text={title} search={search} /></OpenLink>{" "}
+                <span className="version">{result.package.version}</span> <GroupTag group="unlisted">No longer listed</GroupTag>
+                <code className="identity"><Highlight text={identity} search={search} /></code>
                 {note && <p className="notice">{note}</p>}
                 <RowStatus model={model} />
               </div>

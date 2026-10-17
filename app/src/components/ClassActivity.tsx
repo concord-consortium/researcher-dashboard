@@ -1,4 +1,4 @@
-import { UserIcon, UsersIcon } from "@heroicons/react/16/solid";
+import { AcademicCapIcon, UsersIcon } from "@heroicons/react/16/solid";
 import { useEffect, useState } from "react";
 import { activeCount, ACTIVE_WINDOW_MINUTES, nextChangeIn, windowLabel, type Activity } from "../shell/activity";
 
@@ -37,7 +37,7 @@ export function ActiveCount({ activity, now }: { activity: Map<string, Activity>
   const text = activeText(n);
   return (
     <p className="badge active-count" title={text}>
-      <span className="badge-icon" aria-hidden="true"><UserIcon /></span>
+      <span className="badge-icon" aria-hidden="true"><AcademicCapIcon /></span>
       <span className="badge-info" aria-hidden="true">{n}</span>
       <span className="visually-hidden">{text}</span>
     </p>

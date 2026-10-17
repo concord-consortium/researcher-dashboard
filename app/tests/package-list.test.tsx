@@ -22,14 +22,14 @@ function result(r: PackageRow, over: Partial<Result> = {}): Result {
 
 function list(rows: PackageRow[], over: {
   results?: Map<string, Result>; runner?: Runner | null; requests?: Map<string, RunRequest>;
-  newest?: number | null; behind?: Map<string, unknown>; filter?: string;
+  newest?: number | null; behind?: Map<string, unknown>; filter?: string; search?: string;
   onRun?: (r: PackageRow, resume: boolean) => void; onOpen?: (key: string) => void;
 } = {}) {
   render(
     <PackageList cards={listCards(groupPackages(rows, SCOPE), over.filter ?? "all", {
       classHash: SCOPE.class_hash, results: over.results ?? new Map(), runner: over.runner ?? null, mark: null,
       requests: over.requests ?? new Map(), newest: over.newest ?? null, behind: over.behind ?? new Map()
-    })} onRun={over.onRun ?? vi.fn()} onOpen={over.onOpen ?? vi.fn()} linkRef={vi.fn()}
+    })} search={over.search ?? null} onRun={over.onRun ?? vi.fn()} onOpen={over.onOpen ?? vi.fn()} linkRef={vi.fn()}
       confirming={null} onConfirm={vi.fn()} onCancel={vi.fn()} />
   );
 }
@@ -61,6 +61,21 @@ describe("PackageList", () => {
     list([stranger, mine, official], { filter: "community" });
     expect([...document.querySelectorAll(".title")].map((e) => e.textContent)).toEqual(["Stranger's"]);
     expect(screen.queryByText(/not reviewed by Concord/)).toBeNull();
+  });
+
+  it("marks each place a search's words appear in a card's title, description and identity, and nothing with no search", () => {
+    const r = row({ official: true, identity: "official/model-use", current_version: { version: "1.0.0", title: "Wildfire Model use", description: "How the model (a.k.a. MODEL) ran" } });
+    list([r], { search: "model (a.k.a." });
+    const card = () => document.querySelector(".package-rows > li")!;
+    const marks = (selector: string) => [...card().querySelectorAll(`${selector} mark.match`)].map((m) => m.textContent);
+    expect(marks(".title")).toEqual(["Model"]);
+    expect(marks(".description")).toEqual(["model", "(a.k.a.", "MODEL"]);
+    expect(marks(".identity")).toEqual(["model"]);
+    expect(card().querySelector(".title")!.textContent).toBe("Wildfire Model use");
+    expect(card().querySelector(".description")!.textContent).toBe("How the model (a.k.a. MODEL) ran");
+    cleanup();
+    list([r]);
+    expect(document.querySelector("mark")).toBeNull();
   });
 
   it("keeps every group in title order, whatever the results say", () => {

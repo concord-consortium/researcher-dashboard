@@ -1,9 +1,29 @@
 import { ChevronRightIcon } from "@heroicons/react/16/solid";
 import { useEffect, useRef, type ReactNode } from "react";
 import { ALL_PACKAGES, routeHash } from "../shell/route";
-import type { Finished } from "../shell/runs";
-import { RowStatus, type StatusModel } from "./PackageList";
+import { formatTime, millis, type Finished } from "../shell/runs";
+import { Callout } from "./Callout";
+import { RowStatus, statusPill, type Status, type StatusModel } from "./PackageList";
 import { ResultActions, ResultView, ResultWhen } from "./ResultView";
+
+// What a newer run is doing while the view shows an earlier run's result. A failed re-run is left out:
+// its error panel already says which result is showing.
+const NEWER: Partial<Record<Status, string>> = {
+  Requesting: "A new run is being requested.",
+  "Waiting for a runner": "A new run is waiting for a runner.",
+  Queued: "A new run is queued.",
+  Running: "A new run is in progress.",
+  Paused: "A new run is paused partway through.",
+  Interrupted: "A new run was interrupted."
+};
+
+// The warning above a result that a newer run will replace, with when that result finished.
+export function olderResult(status: StatusModel, finished: Finished | null): string | null {
+  const newer = NEWER[statusPill(status).status];
+  if (!finished || !newer) return null;
+  const at = millis(finished.finished_at);
+  return `This result is from an earlier run${at === null ? "" : `, finished ${formatTime(at)}`}. ${newer}`;
+}
 
 // One package, opened from the list: a subheader that stays under the page header, holding the way
 // back, the package's title and state, its Run and its result's Copy and Download, then the result. Each
@@ -26,6 +46,7 @@ export function PackageView({ title, status, note, run, warning, messages, class
   onAll: () => void;
 }) {
   const heading = useRef<HTMLHeadingElement>(null);
+  const older = olderResult(status, finished);
   useEffect(() => { heading.current?.focus(); }, []);
   return (
     <div className="package-view">
@@ -57,6 +78,7 @@ export function PackageView({ title, status, note, run, warning, messages, class
         {warning}
       </div>
       {messages}
+      {older && <Callout tone="notice">{older}</Callout>}
       {finished
         ? <ResultView finished={finished} updated={updated} />
         : <p className="no-result">No result yet.</p>}
