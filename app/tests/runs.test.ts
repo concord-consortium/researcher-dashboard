@@ -176,9 +176,9 @@ describe("sessionLines", () => {
     expect(lines({ queue: [{ class_hash: H, package_key: K }] })).toEqual([]);
   });
 
-  it("says the machine is starting, or ready", () => {
-    expect(lines(runner({ state: "starting" }))).toEqual(["Starting a machine for your runs…"]);
-    expect(lines(runner({ state: "ready" }))).toEqual(["Your machine is ready."]);
+  it("says the runner is starting, or ready", () => {
+    expect(lines(runner({ state: "starting" }))).toEqual(["Starting a runner for your runs…"]);
+    expect(lines(runner({ state: "ready" }))).toEqual(["Your runner is ready."]);
   });
 
   it("names the package it runs for this class", () => {
@@ -189,9 +189,9 @@ describe("sessionLines", () => {
 
   it("says it is moving on once the package it names has finished", () => {
     const current = runner({ current_package: { class_hash: H, package_key: K } });
-    expect(lines(current, new Map([[K, result({ status: "done" })]]))).toEqual(["Your machine is starting its next package."]);
-    expect(lines(current, new Map([[K, result({ status: "failed" })]]))).toEqual(["Your machine is starting its next package."]);
-    expect(lines(current, new Map([[K, result({ status: "queued" })]]))).toEqual(["Your machine is starting its next package."]);
+    expect(lines(current, new Map([[K, result({ status: "done" })]]))).toEqual(["Your runner is starting its next package."]);
+    expect(lines(current, new Map([[K, result({ status: "failed" })]]))).toEqual(["Your runner is starting its next package."]);
+    expect(lines(current, new Map([[K, result({ status: "queued" })]]))).toEqual(["Your runner is starting its next package."]);
   });
 
   it("says nothing of a running session that names no package", () => {
@@ -202,31 +202,31 @@ describe("sessionLines", () => {
     expect(lines(runner({ current_package: { class_hash: "other", package_key: K } }))).toEqual(["Running a package for another of your classes."]);
   });
 
-  it("says the machine is paused, and when queued work will start", () => {
-    expect(lines(runner({ state: "suspended", queue: [] }))).toEqual(["Your machine is paused."]);
+  it("says the runner is paused, and when queued work will start", () => {
+    expect(lines(runner({ state: "suspended", queue: [] }))).toEqual(["Your runner is paused."]);
     expect(lines(runner({ state: "suspending", queue: [{ class_hash: "other", package_key: K }] })))
-      .toEqual(["Your machine is paused.", "Queued packages will start within a couple of minutes."]);
+      .toEqual(["Your runner is paused.", "Queued packages will start within a couple of minutes."]);
   });
 
-  it("says the machine stopped, and how to start queued work", () => {
+  it("says the runner stopped, and how to start queued work", () => {
     const queued = new Map([[K, result({ status: "queued" })]]);
-    expect(lines(runner({ state: "terminated" }))).toEqual(["Your machine has stopped."]);
+    expect(lines(runner({ state: "terminated" }))).toEqual(["Your runner has stopped."]);
     const finished = new Map([[K, result({ status: "done" })], ["users__1__x", result({ status: "running" })]]);
-    expect(lines(runner({ state: "terminated" }), finished)).toEqual(["Your machine has stopped."]);
-    expect(lines(runner({ state: "failed", error: "x" }), finished)).toEqual(["Your machine stopped with an error: x."]);
-    expect(lines(runner({ state: "terminated" }), queued)).toEqual(["Your machine has stopped.", "Queued, waiting for a machine: run it to start one."]);
+    expect(lines(runner({ state: "terminated" }), finished)).toEqual(["Your runner has stopped."]);
+    expect(lines(runner({ state: "failed", error: "x" }), finished)).toEqual(["Your runner stopped with an error: x."]);
+    expect(lines(runner({ state: "terminated" }), queued)).toEqual(["Your runner has stopped.", "Queued, waiting for a runner: run it to start one."]);
     expect(lines(runner({ state: "failed", error: "sync failed" }), queued))
-      .toEqual(["Your machine stopped with an error: sync failed.", "Queued, waiting for a machine: run it to start one."]);
+      .toEqual(["Your runner stopped with an error: sync failed.", "Queued, waiting for a runner: run it to start one."]);
   });
 
   it("says a session failed, with or without a reason given", () => {
-    expect(lines(runner({ state: "failed" }))).toEqual(["Your machine stopped with an error: no reason was given."]);
-    expect(lines(runner({ state: "failed", error: "The sync did not verify." }))).toEqual(["Your machine stopped with an error: The sync did not verify."]);
+    expect(lines(runner({ state: "failed" }))).toEqual(["Your runner stopped with an error: no reason was given."]);
+    expect(lines(runner({ state: "failed", error: "The sync did not verify." }))).toEqual(["Your runner stopped with an error: The sync did not verify."]);
   });
 
   it("does not ask for a run while one is being requested", () => {
     const queued = new Map([[K, result({ status: "queued" })]]);
-    expect(lines(runner({ state: "terminated" }), queued, true)).toEqual(["Your machine has stopped."]);
-    expect(lines(runner({ state: "failed", error: "x" }), queued, true)).toEqual(["Your machine stopped with an error: x."]);
+    expect(lines(runner({ state: "terminated" }), queued, true)).toEqual(["Your runner has stopped."]);
+    expect(lines(runner({ state: "failed", error: "x" }), queued, true)).toEqual(["Your runner stopped with an error: x."]);
   });
 });

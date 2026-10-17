@@ -21,7 +21,7 @@
   "include": [
     "src",
     "tests",
-    "harness",
+    "demo",
     "vite.config.ts"
   ]
 }

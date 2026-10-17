@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "harness": "vite --open /harness/",
+    "demo": "vite --open /demo/",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "lint": "eslint src",

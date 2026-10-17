@@ -63,8 +63,9 @@ describe("ActiveCount", () => {
 describe("ClassActivity", () => {
   it("says what the count means under its heading", () => {
     show({ activity: docs(START - MIN) });
-    expect(screen.getByRole("heading", { level: 2, name: "Class activity" })).toBeDefined();
-    expect(screen.getByText(/counts students who saved an answer/).textContent).toMatch(/same for every researcher of this class/);
+    expect(screen.getByRole("heading", { level: 2, name: "Class Activity" })).toBeDefined();
+    expect(screen.getByText(/how many students saved an answer/).textContent).toMatch(/in the last 5 minutes\.$/);
+    expect(screen.getByText(/not a count of who is logged in/).textContent).toMatch(/same for every researcher of this class/);
     expect(screen.getByText("Your finished packages re-run on their own as soon as students save new work.")).toBeDefined();
     expect(count()).toBeNull();
   });
@@ -72,12 +73,12 @@ describe("ClassActivity", () => {
   it("shows the refusal and no explanation", () => {
     show({ activity: undefined, problem: "Class activity could not be read." });
     expect(screen.getByText("Class activity could not be read.").closest("[aria-live]")).not.toBeNull();
-    expect(screen.queryByText(/counts students who saved an answer/)).toBeNull();
+    expect(screen.queryByText(/how many students saved an answer/)).toBeNull();
   });
 
   it("shows only the heading before the first snapshot", () => {
     show({ activity: undefined });
-    expect(screen.queryByText(/counts students who saved an answer/)).toBeNull();
+    expect(screen.queryByText(/how many students saved an answer/)).toBeNull();
     expect(screen.queryByText(/re-run on their own/)).toBeNull();
     expect(screen.getByRole("status").textContent).toBe("");
   });

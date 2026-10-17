@@ -34,17 +34,24 @@ describe("App", () => {
     expect(screen.getByText(/signing in/i)).toBeDefined();
   });
 
-  const signedIn = (accessToken: string) => {
+  const signedIn = (accessToken: string, demo = false) => {
     const token = { accessToken, issuedAt: 0, expiresAt: 1 };
     const portal = { origin: "https://p.test", reportServer: "https://r.test", firebaseProject: "f" };
     const services = { portal: { scope: async () => SCOPE } as unknown as Portal, reportServer: {} as ReportServer, watchClass: async () => () => {}, now: () => 0 };
-    render(<App start={{ kind: "ready", portal, launch: { authDomain: "https://p.test", classId: "1", loginHint: null }, token }} reauthorize={none} services={services} />);
+    render(<App start={{ kind: "ready", portal, launch: { authDomain: "https://p.test", classId: "1", loginHint: null }, token }} reauthorize={none} services={services} demo={demo} />);
   };
 
   it("renders the class once signed in, with no name for a token that has none", async () => {
     signedIn("at");
     expect(await screen.findByRole("heading", { level: 1, name: SCOPE.name })).toBeDefined();
     expect(document.querySelector(".app-header .user")).toBeNull();
+    expect(within(screen.getByRole("banner")).queryByText("Demo with sample data")).toBeNull();
+  });
+
+  it("says it is a demo in the header only on the demo page", async () => {
+    signedIn("at", true);
+    const pill = within(await screen.findByRole("banner")).getByText("Demo with sample data");
+    expect(pill.getAttribute("title")).toMatch(/made-up class and simulated runs/);
   });
 
   it("names the signed-in user in the header, with their username, from the token's claims", async () => {

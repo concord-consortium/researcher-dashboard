@@ -45,8 +45,8 @@ export const SCHEMA: SanitizeSchema = {
   protocols: { href: ["http", "https", "mailto"], src: ["data"] }
 };
 
-// The opened result's title is an h3, so a package's "#" is an h4.
-const HEADINGS = ["h4", "h5", "h6", "h6", "h6", "h6"] as const;
+// The open package's title is an h2, so a package's "#" is an h3.
+const HEADINGS = ["h3", "h4", "h5", "h6", "h6", "h6"] as const;
 
 const COMPONENTS: Components = {
   a: ({ href, children }) => href

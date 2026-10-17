@@ -49,7 +49,7 @@ export class World {
       portal: {
         scope: async () => { world.log("portal scope"); return world.state.scope; },
         refreshProfile: async () => { world.log("portal refresh_profile"); return { queued: true }; },
-        firebaseToken: async () => "harness",
+        firebaseToken: async () => "demo",
         runPackage: async (identity: string, version: string) => {
           world.log(`portal run_package ${identity}@${version}`);
           await delay(300);
@@ -122,7 +122,7 @@ export class World {
     const identity = this.state.rows.find((r) => packageKey(r.identity) === key)?.identity ?? key;
     this.setResult(key, {
       status: "queued",
-      package: { identity, version, checksum: "sha256:harness" },
+      package: { identity, version, checksum: "sha256:demo" },
       previous: latestFinished(prior),
       updated_at: stamp(Date.now())
     });
@@ -130,7 +130,7 @@ export class World {
     const queue = [...(runner.queue ?? []), this.entry(key)];
     const taking = ["starting", "ready", "running"].includes(runner.state ?? "");
     this.setRunner({ ...runner, queue, state: taking ? runner.state : "starting",
-      microvm_id: runner.microvm_id ?? "vm-harness-1", error: null, updated_at: stamp(Date.now()) });
+      microvm_id: runner.microvm_id ?? "vm-demo-1", error: null, updated_at: stamp(Date.now()) });
     void this.work();
   }
 
@@ -164,7 +164,7 @@ export class World {
     const runner = this.state.runner!;
     const [current, ...queue] = runner.queue!;
     const key = current.package_key;
-    const vm = runner.microvm_id ?? "vm-harness-1";
+    const vm = runner.microvm_id ?? "vm-demo-1";
     this.setRunner({ ...runner, state: "running", current_package: current, queue, updated_at: stamp(Date.now()) });
     const queued = this.state.results.get(key)!;
     const startedAt = Date.now();

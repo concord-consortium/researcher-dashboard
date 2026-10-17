@@ -131,7 +131,7 @@ export function runOffer(runnable: boolean, state: RowState): { enabled: boolean
   return { enabled: true };
 }
 
-export const WAITING = "Queued, waiting for a machine: run it to start one.";
+export const WAITING = "Queued, waiting for a runner: run it to start one.";
 
 // A run request from one row: in flight, refused with a message, an accepted Resume, or an
 // accepted Run whose queued result has not arrived yet. `at` is the row's result `updated_at` when
@@ -159,25 +159,25 @@ export function sessionLines(runner: Runner | null, classHash: string, results: 
   const waiting = () => ([...results.values()].some((r) => r.status === "queued") && !requesting ? [WAITING] : []);
   switch (runner?.state) {
     case "starting":
-      return ["Starting a machine for your runs…"];
+      return ["Starting a runner for your runs…"];
     case "ready":
-      return ["Your machine is ready."];
+      return ["Your runner is ready."];
     case "running": {
       const current = runner.current_package;
       if (!current) return [];
       if (current.class_hash !== classHash) return ["Running a package for another of your classes."];
       const status = results.get(current.package_key)?.status;
-      if (status && status !== "running") return ["Your machine is starting its next package."];
+      if (status && status !== "running") return ["Your runner is starting its next package."];
       return [`Running ${titleOf(current.package_key) ?? identityOfKey(current.package_key)}.`];
     }
     case "suspending":
     case "suspended":
-      return ["Your machine is paused.",
+      return ["Your runner is paused.",
         ...((runner.queue ?? []).length > 0 ? ["Queued packages will start within a couple of minutes."] : [])];
     case "terminated":
-      return ["Your machine has stopped.", ...waiting()];
+      return ["Your runner has stopped.", ...waiting()];
     case "failed":
-      return [`Your machine stopped with an error: ${sentence(runner.error ?? "no reason was given")}`, ...waiting()];
+      return [`Your runner stopped with an error: ${sentence(runner.error ?? "no reason was given")}`, ...waiting()];
     default:
       return [];
   }

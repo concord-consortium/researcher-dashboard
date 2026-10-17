@@ -31,7 +31,7 @@ describe("scopeUrls", () => {
 const titles = (rows: { current_version: { title: string | null } }[]) => rows.map((r) => r.current_version.title);
 
 describe("groupPackages", () => {
-  it("puts each applicable row in the first group it qualifies for", () => {
+  it("puts each applicable row in the first group it qualifies for, in the order the page offers them", () => {
     const groups = groupPackages([
       row({ title: "Official one", official: true, visibility: "public", mine: true }),
       row({ title: "Project 20's", visibility: "project", project: { id: 20, name: "Wildfire" }, mine: true }),
@@ -40,11 +40,11 @@ describe("groupPackages", () => {
       row({ title: "Another project's", visibility: "project", project: { id: 99, name: "Other" } }),
       row({ title: "Not applicable", official: true, applies: false })
     ], SCOPE);
-    expect(groups.map((g) => [g.heading, titles(g.rows), g.collapsed])).toEqual([
-      ["Official", ["Official one"], false],
-      ["Wildfire", ["Project 20's"], false],
-      ["Mine", ["Mine"], false],
-      ["Community", ["A stranger's"], true]
+    expect(groups.map((g) => [g.heading, titles(g.rows)])).toEqual([
+      ["Official", ["Official one"]],
+      ["Mine", ["Mine"]],
+      ["Community", ["A stranger's"]],
+      ["Wildfire", ["Project 20's"]]
     ]);
   });
 

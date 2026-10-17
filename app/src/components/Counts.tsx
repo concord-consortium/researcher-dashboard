@@ -1,23 +1,36 @@
+import { ChartBarIcon } from "@heroicons/react/16/solid";
+import type { Activity } from "../shell/activity";
+import { ACTIVE_WINDOW_MINUTES } from "../shell/activity";
 import { formatTime, millis, type Counts as CountsDoc } from "../shell/runs";
+import { useActiveCount } from "./ClassActivity";
 
-// The researcher's own counts, from the scope document the runner writes after each run.
-export function Counts({ counts }: { counts: CountsDoc | null | undefined }) {
-  if (counts === undefined) return null;
+const number = (n: number | undefined) => (n === undefined ? "not reported" : n.toLocaleString());
+
+// The runner's lines and the active count the header shows, then the researcher's own counts, from
+// the scope document the runner writes after each run. Not a live region: the header's lines are.
+export function Counts({ counts, session, activity, now }: {
+  counts: CountsDoc | null | undefined;
+  session: string[];
+  activity: Map<string, Activity> | undefined;
+  now: () => number;
+}) {
+  const active = useActiveCount(activity, now);
   const data = counts?.data;
   const lastPull = millis(data?.last_pull_at), freshness = millis(data?.log_freshness_at);
   return (
-    <section aria-labelledby="counts-heading">
-      <h2 id="counts-heading">Your counts</h2>
-      {counts === null ? (
-        <p>No runs yet.</p>
-      ) : (
-        <ul className="counts">
-          <li>Answers {data?.answers ?? "not reported"}</li>
-          <li>Logs {data?.logs ?? "not reported"}</li>
-          {lastPull !== null && <li>From your last run, {formatTime(lastPull)}</li>}
-          {freshness !== null && <li>Logs current to {formatTime(freshness)}</li>}
-        </ul>
-      )}
+    <section className="info-card" aria-labelledby="counts-heading">
+      <h2 id="counts-heading"><ChartBarIcon aria-hidden="true" />Current Status</h2>
+      <dl className="counts">
+        {session.length > 0 && <div><dt>Runner</dt><dd>{session.join(" ")}</dd></div>}
+        {active !== null && <div><dt>Active students</dt><dd>{active} <span className="when">(last {ACTIVE_WINDOW_MINUTES} minutes)</span></dd></div>}
+        {data && <>
+          <div><dt>Answers</dt><dd>{number(data.answers)}</dd></div>
+          <div><dt>Logs</dt><dd>{number(data.logs)}</dd></div>
+        </>}
+        {lastPull !== null && <div><dt>Your last run</dt><dd>{formatTime(lastPull)}</dd></div>}
+        {freshness !== null && <div><dt>Logs current to</dt><dd>{formatTime(freshness)}</dd></div>}
+      </dl>
+      {counts === null && <p>No runs yet.</p>}
     </section>
   );
 }

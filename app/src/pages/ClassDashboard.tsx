@@ -1,10 +1,12 @@
+import { ClipboardDocumentListIcon, CubeIcon, UserGroupIcon } from "@heroicons/react/16/solid";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ClassActivity, type Stopped } from "../components/ClassActivity";
 import { Counts } from "../components/Counts";
 import { Header } from "../components/Header";
-import { PackageList } from "../components/PackageList";
-import { ResultView } from "../components/ResultView";
-import { Unlisted } from "../components/Unlisted";
+import { CommunityConfirm, PackageFilters, PackageList, rowModel, RunButton, type FilterOption } from "../components/PackageList";
+import { PackageView } from "../components/PackageView";
+import { panelId, tabId, Tabs } from "../components/Tabs";
+import { Unlisted, unlistedModel } from "../components/Unlisted";
 import { groupPackages, needsRefresh, packageKey, scopeUrls, titleOf, type Profile } from "../shell/packages";
 import { ApiError, SessionExpired, type PackageRow, type Scope } from "../shell/portal";
 import { PROFILE_MAX_AGE_MS } from "../shell/portals";
@@ -15,6 +17,7 @@ import {
 import { behindRows, newestActivity, type Activity } from "../shell/activity";
 import { useAutoRerun } from "../shell/rerun";
 import type { TokenUser } from "../shell/oauth";
+import { ALL_PACKAGES, useRoute } from "../shell/route";
 import type { DashboardServices } from "../shell/services";
 import type { InfoReason } from "../shell/start";
 import { Info } from "./Info";
@@ -32,10 +35,11 @@ const PROFILE_REFUSED = "This class's profile could not be read.";
 const ACTIVITY_REFUSED = "Class activity could not be read.";
 
 // The dashboard for the class the token is bound to, never the one the launch link asked for.
-export function ClassDashboard({ services, onExpired, user = null }: {
+export function ClassDashboard({ services, onExpired, user = null, demo = false }: {
   services: DashboardServices;
   onExpired: () => void;
   user?: TokenUser | null;
+  demo?: boolean;
 }) {
   const [scope, setScope] = useState<Scope | null>(null);
   const [info, setInfo] = useState<InfoReason | null>(null);
@@ -50,11 +54,11 @@ export function ClassDashboard({ services, onExpired, user = null }: {
   const [counts, setCounts] = useState<CountsDoc | null | undefined>(undefined);
   const [received, setReceived] = useState<Map<string, Result>>(new Map());
   const [requests, setRequests] = useState<Map<string, RunRequest>>(new Map());
-  // The open result, by package key, and the finish time of the result it opened on. Each opening
-  // is numbered, so opening the result already open mounts its view again and takes focus to it.
-  const [open, setOpen] = useState<{ key: string; shownAt: number | null; opening: number } | null>(null);
-  const showButtons = useRef(new Map<string, HTMLButtonElement>());
-  const resultsHeading = useRef<HTMLHeadingElement>(null);
+  const [route, navigate] = useRoute();
+  const selectedKey = route.tab === "packages" ? route.key : null;
+  // The open package, and the finish time of the result it opened on, which a newer one is updated from.
+  const [opening, setOpening] = useState<{ key: string; shownAt: number | null } | null>(null);
+  const openLinks = useRef(new Map<string, HTMLAnchorElement>());
   // What the page says of a result whose package it no longer lists, by identity.
   const [notes, setNotes] = useState<Map<string, string | null>>(new Map());
   const asked = useRef(new Set<string>());
@@ -129,7 +133,7 @@ export function ClassDashboard({ services, onExpired, user = null }: {
         }
         if (which === "counts") {
           setCounts(undefined);
-          return setCountsProblem("Your counts could not be read.");
+          return setCountsProblem("Your current status could not be read.");
         }
         if (which === "runner") setRunner(null);
         setRunsProblem("Your runs could not be read.");
@@ -220,7 +224,13 @@ export function ClassDashboard({ services, onExpired, user = null }: {
   }
 
   const listShown = Boolean(profile && rows && !listProblem && !profileProblem);
-  const grouped = useMemo(() => (rows && scope ? groupPackages(rows, scope).flatMap((g) => g.rows) : []), [rows, scope]);
+  const groups = useMemo(() => (rows && scope ? groupPackages(rows, scope) : []), [rows, scope]);
+  const grouped = useMemo(() => groups.flatMap((g) => g.rows), [groups]);
+  // The list's filter pill, by group key; "all" when the group it named has gone.
+  const [filterKey, setFilter] = useState("all");
+  // The community package whose warning is showing, which runs only on Confirm.
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const community = useMemo(() => new Set(groups.find((g) => g.key === "community")?.rows.map((r) => packageKey(r.identity))), [groups]);
   const listedTitles = useMemo(() => new Map(grouped.map((r) => [packageKey(r.identity), titleOf(r)])), [grouped]);
 
   const newest = activity ? newestActivity(activity) : null;
@@ -259,33 +269,28 @@ export function ClassDashboard({ services, onExpired, user = null }: {
     }
   }, [unlisted, rowNotes, services]);
 
-  // A result queued before the function kept the last finished run has nothing left to show.
-  useEffect(() => {
-    if (open && !latestFinished(received.get(open.key))) {
-      setOpen(null);
-      resultsHeading.current?.focus();
-    }
-  }, [open, received]);
+  if ((opening?.key ?? null) !== selectedKey) {
+    setOpening(selectedKey ? { key: selectedKey, shownAt: millis(latestFinished(received.get(selectedKey))?.finished_at) } : null);
+  }
 
-  const showRef = (key: string, button: HTMLButtonElement | null) => {
-    if (button) showButtons.current.set(key, button);
-    else showButtons.current.delete(key);
+  // Leaving a package for the list puts focus back on the package's link there.
+  const left = useRef<string | null>(null);
+  useEffect(() => {
+    const key = left.current;
+    left.current = selectedKey;
+    if (!key || selectedKey) return;
+    openLinks.current.get(key)?.focus();
+  }, [selectedKey]);
+
+  const linkRef = (key: string, link: HTMLAnchorElement | null) => {
+    if (link) openLinks.current.set(key, link);
+    else openLinks.current.delete(key);
   };
-  const show = (key: string) => setOpen((o) => ({
-    key, shownAt: millis(latestFinished(results.get(key))?.finished_at), opening: (o?.opening ?? 0) + 1
-  }));
-  const close = () => {
-    const key = open?.key;
-    setOpen(null);
-    const button = key ? showButtons.current.get(key) : undefined;
-    // A Community row's button is hidden while its disclosure is closed, and cannot take focus.
-    const disclosure = button?.closest("details");
-    if (disclosure) disclosure.open = true;
-    (button ?? resultsHeading.current)?.focus();
-  };
+  const openPackage = (key: string) => navigate({ tab: "packages", key });
   // The open view keeps the result it read even if a listener is refused later.
-  const opened = open ? latestFinished(received.get(open.key)) : null;
+  const opened = selectedKey ? latestFinished(received.get(selectedKey)) : null;
   const openedAt = millis(opened?.finished_at);
+  const updated = opening && openedAt !== null && opening.shownAt !== null && openedAt > opening.shownAt ? openedAt : null;
 
   const session = scope ? sessionLines(runner, scope.class_hash, results, (key) => listedTitles.get(key) ?? null,
     [...requests.values()].some((r) => "pending" in r)) : [];
@@ -304,32 +309,39 @@ export function ClassDashboard({ services, onExpired, user = null }: {
     );
   }
 
+  const selectedRow = selectedKey && listShown ? grouped.find((r) => packageKey(r.identity) === selectedKey) ?? null : null;
+  const selectedUnlisted = selectedKey && !selectedRow ? unlisted.find((r) => packageKey(r.package.identity) === selectedKey) ?? null : null;
+  const selectedModel = selectedRow && rowModel({
+    row: selectedRow, result: results.get(selectedKey!), runner, mark, classHash: scope.class_hash,
+    request: requests.get(selectedKey!), newest, behind
+  });
+  const allNotes = new Map([...notes, ...rowNotes]);
+  const filters: FilterOption[] = [
+    { key: "all", label: "All", count: grouped.length + unlisted.length },
+    ...groups.map((g) => ({ key: g.key, label: g.heading, count: g.rows.length })),
+    ...(unlisted.length > 0 ? [{ key: "unlisted", label: "No longer listed", count: unlisted.length }] : [])
+  ];
+  const filter = filters.some((f) => f.key === filterKey) ? filterKey : "all";
+  // A pressed Run of a community package asks first; Resume finishes a run already confirmed.
+  const press = (row: PackageRow, resume: boolean) => {
+    if (!resume && community.has(packageKey(row.identity))) setConfirming(packageKey(row.identity));
+    else void run(row, resume);
+  };
+  const confirm = (row: PackageRow) => { setConfirming(null); void run(row, false); };
+  const allPackages = () => { setFilter("all"); navigate(ALL_PACKAGES); };
+  // The open package's own group for its breadcrumb, whatever filter it was opened from; its link filters the list to it.
+  const crumbKey = selectedRow ? groups.find((g) => g.rows.includes(selectedRow))?.key : selectedUnlisted ? "unlisted" : undefined;
+  const crumbOption = filters.find((f) => f.key === crumbKey);
+  const filterCrumb = crumbOption ? { label: crumbOption.label, onSelect: () => { setFilter(crumbOption.key); navigate(ALL_PACKAGES); } } : null;
+  const tab = route.tab;
+
   return (
     <>
-      <Header scope={scope} user={user} activity={activity} now={services.now} session={session} announce={!rerunning} />
+      <Header scope={scope} user={user} demo={demo} activity={activity} now={services.now} session={session} runnerFailed={runner?.state === "failed"} announce={!rerunning}
+        tabs={<Tabs label="Dashboard sections" selected={tab} tabs={[{ key: "packages", label: "Packages", icon: CubeIcon }, { key: "info", label: "Info", icon: UserGroupIcon }]}
+          onSelect={(key) => navigate(key === "info" ? { tab: "info" } : ALL_PACKAGES)} />} />
       <main className="class-dashboard">
-        <p className="ownership">
-          Your results and counts on this page are your own: another researcher of this class sees their own runs. Class activity is the same for every researcher of this class.
-        </p>
-
-        <ClassActivity activity={activity} problem={activityProblem} stopped={stopped} />
-
-        <section aria-labelledby="assignments-heading">
-          <h2 id="assignments-heading">Assignments</h2>
-          <ul className="assignments">
-            {scope.assignments.map((a) => (
-              <li key={a.offering_id}>
-                {a.name ?? "Untitled"}
-                {a.tool && <span className="tool"> · {a.tool}</span>}
-              </li>
-            ))}
-          </ul>
-        </section>
-
-        <Counts counts={counts} />
-
-        <section aria-labelledby="packages-heading">
-          <h2 id="packages-heading">Packages</h2>
+        <div role="tabpanel" id={panelId("packages")} aria-labelledby={tabId("packages")} hidden={tab !== "packages"}>
           <div className="status" aria-live="polite">
             {profileProblem && <p className="error">{profileProblem}</p>}
             {!profileProblem && !profile && !refreshProblem && <p>Reading this class's activities…</p>}
@@ -344,25 +356,50 @@ export function ClassDashboard({ services, onExpired, user = null }: {
             {countsProblem && <p className="error">{countsProblem}</p>}
             {profile && !rows && !listProblem && !profileProblem && <p>Listing the packages that apply…</p>}
           </div>
-          {listShown && rows && (
-            <PackageList rows={rows} scope={scope} results={results} runner={runner} mark={mark} requests={requests}
-              newest={newest} behind={behind} onRun={run} onShow={show} showRef={showRef} />
+          {selectedRow && selectedModel ? (
+            <PackageView key={selectedKey} title={selectedModel.title} status={selectedModel} note={null}
+              run={<RunButton row={selectedRow} model={selectedModel} onRun={press} held={confirming === selectedKey} />}
+              warning={confirming === selectedKey && <CommunityConfirm onConfirm={() => confirm(selectedRow)} onCancel={() => setConfirming(null)} />}
+              classTitle={scope.name} finished={opened} updated={updated} filter={filterCrumb} onAll={allPackages} />
+          ) : selectedUnlisted ? (
+            <PackageView key={selectedKey} title={selectedUnlisted.package.identity}
+              status={unlistedModel(selectedUnlisted, runner, mark, scope.class_hash)}
+              note={allNotes.get(selectedUnlisted.package.identity) ?? null} run={null}
+              classTitle={scope.name} finished={opened} updated={updated} filter={filterCrumb} onAll={allPackages} />
+          ) : listShown && rows && (
+            <section className="all-packages" aria-labelledby="packages-heading">
+              <h2 id="packages-heading" className="visually-hidden">All Packages</h2>
+              {filters[0].count > 0 && <PackageFilters options={filters} selected={filter} onSelect={setFilter} />}
+              {filter !== "unlisted" && (
+                <PackageList groups={groups} filter={filter} classHash={scope.class_hash} results={results} runner={runner}
+                  mark={mark} requests={requests} newest={newest} behind={behind} onRun={press} onOpen={openPackage} linkRef={linkRef}
+                  confirming={confirming} onConfirm={confirm} onCancel={() => setConfirming(null)} />
+              )}
+              {unlisted.length > 0 && (filter === "all" || filter === "unlisted") && (
+                <Unlisted results={unlisted} notes={allNotes} runner={runner} mark={mark}
+                  classHash={scope.class_hash} onOpen={openPackage} linkRef={linkRef} />
+              )}
+            </section>
           )}
-        </section>
+        </div>
 
-        <section aria-labelledby="results-heading">
-          <h2 id="results-heading" ref={resultsHeading} tabIndex={-1}>Results</h2>
-          {open && opened && (
-            <ResultView key={`${open.key}:${open.opening}`} title={listedTitles.get(open.key) ?? opened.package.identity}
-              classTitle={scope.name} finished={opened}
-              updated={openedAt !== null && open.shownAt !== null && openedAt > open.shownAt ? openedAt : null} onClose={close} />
-          )}
-          {unlisted.length > 0 && (
-            <Unlisted results={unlisted} notes={new Map([...notes, ...rowNotes])} runner={runner} mark={mark}
-              classHash={scope.class_hash} onShow={show} showRef={showRef} />
-          )}
-          {!(open && opened) && unlisted.length === 0 && <p>Open a finished package's result to read it here.</p>}
-        </section>
+        <div role="tabpanel" id={panelId("info")} aria-labelledby={tabId("info")} hidden={tab !== "info"}>
+          <div className="info-grid">
+            <section className="info-card wide" aria-labelledby="assignments-heading">
+              <h2 id="assignments-heading"><ClipboardDocumentListIcon aria-hidden="true" />Assignments</h2>
+              <ul className="assignments">
+                {scope.assignments.map((a) => (
+                  <li key={a.offering_id}>
+                    {a.name ?? "Untitled"}
+                    {a.tool && <span className="tool"> · {a.tool}</span>}
+                  </li>
+                ))}
+              </ul>
+            </section>
+            <Counts counts={counts} session={session} activity={activity} now={services.now} />
+            <ClassActivity activity={activity} problem={activityProblem} stopped={stopped} />
+          </div>
+        </div>
       </main>
     </>
   );

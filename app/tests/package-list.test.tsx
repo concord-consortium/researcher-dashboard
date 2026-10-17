@@ -1,10 +1,12 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { PackageList, quietUpdate, stateText } from "../src/components/PackageList";
-import { packageKey } from "../src/shell/packages";
+import { PackageList, quietUpdate, stateText, statusPill, type StatusModel } from "../src/components/PackageList";
+import { groupPackages, packageKey } from "../src/shell/packages";
 import type { PackageRow } from "../src/shell/portal";
 import { formatTime, type Result, type Runner, type RunRequest } from "../src/shell/runs";
 import { row, SCOPE, stamp } from "./fixtures";
+
+const titleOfRow = (r: PackageRow) => r.current_version.title!;
 
 afterEach(cleanup);
 
@@ -19,20 +21,39 @@ function result(r: PackageRow, over: Partial<Result> = {}): Result {
 
 function list(rows: PackageRow[], over: {
   results?: Map<string, Result>; runner?: Runner | null; requests?: Map<string, RunRequest>;
-  newest?: number | null; behind?: Map<string, unknown>;
-  onRun?: (r: PackageRow, resume: boolean) => void; onShow?: (key: string) => void;
+  newest?: number | null; behind?: Map<string, unknown>; filter?: string;
+  onRun?: (r: PackageRow, resume: boolean) => void; onOpen?: (key: string) => void;
 } = {}) {
   render(
-    <PackageList rows={rows} scope={SCOPE} results={over.results ?? new Map()} runner={over.runner ?? null} mark={null}
-      requests={over.requests ?? new Map()} newest={over.newest ?? null} behind={over.behind ?? new Map()} onRun={over.onRun ?? vi.fn()} onShow={over.onShow ?? vi.fn()} showRef={vi.fn()} />
+    <PackageList groups={groupPackages(rows, SCOPE)} filter={over.filter ?? "all"} classHash={SCOPE.class_hash} results={over.results ?? new Map()} runner={over.runner ?? null} mark={null}
+      requests={over.requests ?? new Map()} newest={over.newest ?? null} behind={over.behind ?? new Map()} onRun={over.onRun ?? vi.fn()} onOpen={over.onOpen ?? vi.fn()} linkRef={vi.fn()}
+      confirming={null} onConfirm={vi.fn()} onCancel={vi.fn()} />
   );
 }
 
 const item = (title: string) => screen.getByText(title, { selector: ".title" }).closest("li")!;
-const stateLine = (title: string) => item(title).querySelector(".state p")!.textContent;
+const stateLine = (title: string) => item(title).querySelector(".state p")?.textContent ?? null;
+const pill = (title: string) => item(title).querySelector(".status-pill .label")!.textContent;
+const pillTitle = (title: string) => item(title).querySelector(".status-pill")!.getAttribute("title");
 const runButton = (title: string) => within(item(title)).getByRole("button", { name: new RegExp(`^(Run|Resume) ${title}$`) });
 
 describe("PackageList", () => {
+  it("lists every group's packages in one list, each tagged with its group, and keeps only the filter's group", () => {
+    const official = row({ title: "Ours", official: true }), mine = row({ title: "My own", mine: true });
+    const stranger = row({ title: "Stranger's", visibility: "public" });
+    list([stranger, mine, official]);
+    expect([...document.querySelectorAll(".package-rows > li")].map((li) => [li.querySelector(".title")!.textContent, li.querySelector(".tag")!.textContent]))
+      .toEqual([["Ours", "Official"], ["My own", "Mine"], ["Stranger's", "Community"]]);
+    expect(screen.queryByRole("heading")).toBeNull();
+    cleanup();
+    list([stranger, mine, official], { filter: "mine" });
+    expect([...document.querySelectorAll(".title")].map((e) => e.textContent)).toEqual(["My own"]);
+    cleanup();
+    list([stranger, mine, official], { filter: "community" });
+    expect([...document.querySelectorAll(".title")].map((e) => e.textContent)).toEqual(["Stranger's"]);
+    expect(screen.queryByText(/not reviewed by Concord/)).toBeNull();
+  });
+
   it("keeps every group in title order, whatever the results say", () => {
     const b = row({ title: "Beta", official: true }), a = row({ title: "Alpha", official: true });
     list([b, a], { results: new Map([[packageKey(b.identity), result(b, { finished_at: stamp(9) })], [packageKey(a.identity), result(a, { finished_at: stamp(1) })]]) });
@@ -54,15 +75,21 @@ describe("PackageList", () => {
         [key(stuck), result(stuck, { status: "running", microvm_id: "vm-1", updated_at: stamp(1500), finished_at: null })]
       ])
     });
-    expect(stateLine("Not")).toBe("Not run.");
+    expect(stateLine("Not")).toBeNull();
+    expect(item("Not").querySelector(".state [aria-live]")).not.toBeNull();
+    expect([...document.querySelectorAll(".status-pill.throb .label")].map((e) => e.textContent)).toEqual(["Running"]);
+    expect(["Not", "Queued", "Lagging", "Busy", "Done", "Failed", "Stuck"].map(pill))
+      .toEqual(["Not run", "Queued, #2", "Queued", "Running", "Finished", "Failed", "Interrupted"]);
     expect(stateLine("Queued")).toBe("Queued, number 2 in line.");
     expect(stateLine("Lagging")).toBe("Queued.");
     expect(stateLine("Busy")).toBe("Running Busy: preparing the package.");
     expect(stateLine("Done")).toBe("6 open responses from 3 learners.");
-    expect(within(item("Done")).getByText(`Finished ${formatTime(1000)}`)).toBeDefined();
+    expect(pillTitle("Done")).toBe(`Finished ${formatTime(1000)}`);
+    expect(item("Done").querySelector(".status-pill .visually-hidden")!.textContent).toBe(`, Finished ${formatTime(1000)}`);
+    expect(pillTitle("Not")).toBeNull();
     expect(stateLine("Failed")).toBe("Failed: The machine running it stopped before the run finished; run it again.");
     expect(within(item("Failed")).getByText(formatTime(5000))).toBeDefined();
-    expect(stateLine("Stuck")).toBe("Interrupted: the machine running it stopped partway. This is being checked.");
+    expect(stateLine("Stuck")).toBe("Interrupted: its runner stopped partway. This is being checked.");
     expect(within(item("Stuck")).getByText("It can be run again once it is marked failed.")).toBeDefined();
   });
 
@@ -82,25 +109,25 @@ describe("PackageList", () => {
   it("asks for a run of queued work nobody will take", () => {
     const r = row({ title: "Stranded", official: true });
     list([r], { runner: { state: "terminated" }, results: new Map([[packageKey(r.identity), result(r, { status: "queued" })]]) });
-    expect(stateLine("Stranded")).toBe("Queued, waiting for a machine: run it to start one.");
+    expect(stateLine("Stranded")).toBe("Queued, waiting for a runner: run it to start one.");
     expect(runButton("Stranded").getAttribute("aria-disabled")).toBeNull();
   });
 
   it("says which version the shown result is from", () => {
     const r = row({ title: "Versioned", official: true, current_version: { version: "1.1.0", title: "Versioned", description: null } });
     list([r], { results: new Map([[packageKey(r.identity), result(r)]]) });
-    expect(within(item("Versioned")).getByText(/from 1\.0\.0/)).toBeDefined();
+    expect(pillTitle("Versioned")).toBe(`Finished ${formatTime(1000)} · from 1.0.0`);
     cleanup();
     const rerun = row({ title: "Rerun", official: true, current_version: { version: "1.1.0", title: "Rerun", description: null } });
     const previous = { package: { identity: rerun.identity, version: "1.0.0", checksum: "c" }, summary: "Earlier", finished_at: stamp(1000) };
     list([rerun], { results: new Map([[packageKey(rerun.identity), result(rerun, {
       status: "queued", package: { identity: rerun.identity, version: "1.1.0", checksum: "c" }, previous
     })]]) });
-    expect(within(item("Rerun")).getByText(/from 1\.0\.0/)).toBeDefined();
+    expect(pillTitle("Rerun")).toBe(`Finished ${formatTime(1000)} · from 1.0.0`);
     cleanup();
     const same = row({ title: "Same", official: true });
     list([same], { results: new Map([[packageKey(same.identity), result(same)]]) });
-    expect(within(item("Same")).queryByText(/from 1\.0\.0/)).toBeNull();
+    expect(pillTitle("Same")).toBe(`Finished ${formatTime(1000)}`);
   });
 
   it("keeps the latest finished result on the row through a re-run", () => {
@@ -122,8 +149,7 @@ describe("PackageList", () => {
     expect(within(item("Refailed").querySelector(".state") as HTMLElement).getByText(formatTime(4000))).toBeDefined();
     for (const title of ["Requeued", "Rerunning", "Refailed"]) {
       expect(within(item(title)).getByText("Earlier summary")).toBeDefined();
-      expect(within(item(title)).getByText(`Finished ${formatTime(1000)}`)).toBeDefined();
-      expect(within(item(title)).getByRole("button", { name: `Show result for ${title}` })).toBeDefined();
+      expect(pillTitle(title)).toBe(`Finished ${formatTime(1000)}`);
     }
   });
 
@@ -156,7 +182,7 @@ describe("PackageList", () => {
     expect(onRun).toHaveBeenCalledWith(queued, false);
   });
 
-  it("offers Resume on a run paused on the same machine", () => {
+  it("offers Resume on a run paused on the same runner", () => {
     const r = row({ title: "Paused", official: true });
     const onRun = vi.fn();
     list([r], {
@@ -181,30 +207,31 @@ describe("PackageList", () => {
     expect(runButton("Resumed").getAttribute("aria-disabled")).toBe("true");
   });
 
-  it("puts a disabled Run's reason beside it, before Show result", () => {
+  it("puts a disabled Run's reason beside it", () => {
     const r = row({ title: "Unreviewed done", official: true, runnable: false });
     list([r], { results: new Map([[packageKey(r.identity), result(r)]]) });
-    const [run, reason, show] = [...item("Unreviewed done").querySelector(".controls")!.children];
-    expect(run).toBe(runButton("Unreviewed done"));
+    const [runRow, reason] = [...item("Unreviewed done").querySelector(".controls")!.children];
+    expect([...runRow.children]).toEqual([item("Unreviewed done").querySelector(".status-pill"), runButton("Unreviewed done")]);
     expect(reason.textContent).toBe("Only official packages can be run here for now.");
-    expect(show.textContent).toBe("Show result");
   });
 
-  it("offers Show result only with a finished result", () => {
-    const r = row({ title: "Fresh", official: true });
-    const onShow = vi.fn();
-    list([r], { onShow });
-    expect(within(item("Fresh")).queryByRole("button", { name: /Show result/ })).toBeNull();
-    cleanup();
-    list([r], { results: new Map([[packageKey(r.identity), result(r)]]), onShow });
-    fireEvent.click(within(item("Fresh")).getByRole("button", { name: "Show result for Fresh" }));
-    expect(onShow).toHaveBeenCalledWith(packageKey(r.identity));
+  it("opens a package from its title, run or not, at its own address", () => {
+    const fresh = row({ title: "Fresh", official: true }), done = row({ title: "Done", official: true });
+    const onOpen = vi.fn();
+    list([fresh, done], { results: new Map([[packageKey(done.identity), result(done)]]), onOpen });
+    for (const r of [fresh, done]) {
+      const link = screen.getByRole("link", { name: titleOfRow(r) });
+      expect(link.getAttribute("href")).toBe(`#packages/${encodeURIComponent(packageKey(r.identity))}`);
+      fireEvent.click(link);
+      expect(onOpen).toHaveBeenLastCalledWith(packageKey(r.identity));
+    }
+    expect(onOpen).toHaveBeenCalledTimes(2);
   });
 
   it("leaves out the instruction to press a control on a row that has none", () => {
-    expect(stateText({ kind: "queued", position: null, waiting: true }, "T", false)).toBe("Queued, waiting for a machine.");
+    expect(stateText({ kind: "queued", position: null, waiting: true }, "T", false)).toBe("Queued, waiting for a runner.");
     expect(stateText({ kind: "stuck", resumable: true }, "T", false)).toBe("Paused partway through.");
-    expect(stateText({ kind: "queued", position: null, waiting: true }, "T", true)).toBe("Queued, waiting for a machine: run it to start one.");
+    expect(stateText({ kind: "queued", position: null, waiting: true }, "T", true)).toBe("Queued, waiting for a runner: run it to start one.");
     expect(stateText({ kind: "stuck", resumable: true }, "T", true)).toBe("Paused partway through: resume it to finish.");
   });
 
@@ -262,5 +289,22 @@ describe("a re-run on the row", () => {
     cleanup();
     list([r], { results: new Map([[key, result]]), newest: 500, behind: new Map([[key, {}]]) });
     expect(within(item("Rerun")).queryByText("Students have saved work since this result.")).toBeNull();
+  });
+});
+
+describe("statusPill", () => {
+  const model = (over: Partial<StatusModel>): StatusModel => ({
+    state: { kind: "not-run" }, line: "", quiet: false, pending: false, refusal: null, finished: null, outdated: false, versionNote: null, ...over
+  });
+  const finished = { package: { identity: "x", version: "1.0.0", checksum: "c" } };
+
+  it.each([
+    ["a request in flight, whatever the state", model({ pending: true, state: { kind: "done", summary: null, finishedAt: 1 } }), "Requesting", "busy"],
+    ["queued work nothing will take", model({ state: { kind: "queued", position: null, waiting: true } }), "Waiting for a runner", "warn"],
+    ["a run paused on its runner", model({ state: { kind: "stuck", resumable: true } }), "Paused", "warn"],
+    ["a failed re-run over a finished result", model({ state: { kind: "failed", error: "x", finishedAt: 1 }, finished }), "Re-run failed", "error"],
+    ["a failed first run", model({ state: { kind: "failed", error: "x", finishedAt: 1 } }), "Failed", "error"]
+  ] as const)("says %s", (_name, m, label, tone) => {
+    expect(statusPill(m)).toEqual({ label, tone });
   });
 });

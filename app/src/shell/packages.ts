@@ -37,7 +37,6 @@ export interface Group {
   key: string;
   heading: string;
   rows: PackageRow[];
-  collapsed: boolean;
 }
 
 export function titleOf(row: PackageRow): string {
@@ -49,8 +48,10 @@ function byTitle(a: PackageRow, b: PackageRow): number {
   return titleOf(a).localeCompare(titleOf(b), undefined, { sensitivity: "base" });
 }
 
-// The heading is where the researcher's claim on a package comes from, so each applicable row
-// goes in the first group it qualifies for, and a row in none is not listed.
+// The group is where the researcher's claim on a package comes from, so each applicable row goes in
+// the first group it qualifies for (official, a project of the class, their own, public), and a row
+// in none is not listed. The groups come back in the order the page offers them: Official, Mine,
+// Community, then the class's projects.
 export function groupPackages(rows: PackageRow[], scope: Scope): Group[] {
   const official: PackageRow[] = [], mine: PackageRow[] = [], community: PackageRow[] = [];
   const projects = new Map<number, PackageRow[]>(scope.project_ids.map((id) => [id, []]));
@@ -62,13 +63,15 @@ export function groupPackages(rows: PackageRow[], scope: Scope): Group[] {
     else if (row.visibility === "public") community.push(row);
   }
 
-  const groups: Group[] = [{ key: "official", heading: "Official", rows: official, collapsed: false }];
+  const groups: Group[] = [
+    { key: "official", heading: "Official", rows: official },
+    { key: "mine", heading: "Mine", rows: mine },
+    { key: "community", heading: "Community", rows: community }
+  ];
   for (const [id, projectRows] of projects) {
     const name = projectRows.find((r) => r.project?.name)?.project?.name;
-    groups.push({ key: `project-${id}`, heading: name ?? `Project ${id}`, rows: projectRows, collapsed: false });
+    groups.push({ key: `project-${id}`, heading: name ?? `Project ${id}`, rows: projectRows });
   }
-  groups.push({ key: "mine", heading: "Mine", rows: mine, collapsed: false });
-  groups.push({ key: "community", heading: "Community", rows: community, collapsed: true });
 
   return groups
     .filter((g) => g.rows.length > 0)

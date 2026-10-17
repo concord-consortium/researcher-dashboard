@@ -3,7 +3,7 @@
 
 export const WILDFIRE_RESPONSES = `6 open responses to 2 questions from 3 learners.
 
-#### Activity 1, page 2: Where do wildfires start?
+# Activity 1, page 2: Where do wildfires start?
 
 | Learner | Response |
 |---|---|
@@ -11,7 +11,7 @@ export const WILDFIRE_RESPONSES = `6 open responses to 2 questions from 3 learne
 | Learner 2 | Mostly in dry places. The model showed the fire spreading faster uphill. |
 | Learner 3 | When it is hot and windy. |
 
-#### Activity 1, page 4: Explain what the wind did to the fire.
+# Activity 1, page 4: Explain what the wind did to the fire.
 
 | Learner | Response |
 |---|---|
@@ -31,33 +31,33 @@ export const MODEL_USE = `13 students, 13 ran the model, 8 completed a task page
 
 Includes logs up to 2026-08-06 02:00 UTC. A student's work after that time shows in the next run once the logs have caught up.
 
-#### Patterns
+# Patterns
 
 | Task | Students who opened the model | Ran it once | Ran it 2 to 5 times | Ran it more than 5 times |
 |---|---:|---:|---:|---:|
 ${TASKS.map((t, i) => `| Task ${t} | ${13 - i} | ${2 + i} | ${6 - i} | ${5 - i} |`).join("\n")}
 
-#### Simulation use
+# Simulation use
 
 ${repeat(LEARNERS, (i) => `- Student ${i + 1}: ${3 + (i * 7) % 11} runs, longest ${(1.5 + (i % 4) * 0.75).toFixed(2)} minutes, last on Task ${TASKS[i % TASKS.length]}`).join("\n")}
 
-#### Settings
+# Settings
 
 | Task | Wind speed | Wind direction | Terrain | Vegetation | Drought index | Runs |
 |---|---|---|---|---|---|---:|
 ${TASKS.flatMap((t) => repeat(4, (j) => `| Task ${t} | ${[0, 10, 20, 30][j]} mph | ${["north", "east", "south", "west"][j]} | ${["plains", "foothills", "mountains", "plains"][j]} | ${["grass", "shrub", "forest", "grass"][j]} | ${["low", "medium", "high", "severe"][j]} | ${4 + j * 3} |`)).join("\n")}
 
-#### Page progress
+# Page progress
 
-${TASKS.map((t, i) => `##### Task ${t}
+${TASKS.map((t, i) => `## Task ${t}
 
 | Page | Opened | Answered every question | Completed |
 |---|---:|---:|---:|
 ${repeat(5, (p) => `| Activity ${1 + (i % 2)}, page ${p + 1}: ${["Introduction", "Make a prediction", "Run the model", "Compare runs", "Make a claim"][p]} | ${13 - p} | ${11 - p} | ${10 - p - (i % 2)} |`).join("\n")}`).join("\n\n")}
 
-#### Claims
+# Claims
 
-${TASKS.map((t, i) => `##### Task ${t}: "${["Which direction will the fire spread fastest?", "How does terrain change the spread?", "What happens with no wind?", "Which vegetation burns fastest?", "What is the main source of fuel in the grassland?"][i]}"
+${TASKS.map((t, i) => `## Task ${t}: "${["Which direction will the fire spread fastest?", "How does terrain change the spread?", "What happens with no wind?", "Which vegetation burns fastest?", "What is the main source of fuel in the grassland?"][i]}"
 
 | Choice | Students | Correct |
 |---|---:|:---:|
