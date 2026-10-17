@@ -38,6 +38,7 @@ const item = (title: string) => screen.getByText(title, { selector: ".title" }).
 // The state line's words, leaving out the time a failure's panel adds under them.
 const stateLine = (title: string) => item(title).querySelector(".state p")?.textContent ?? null;
 const failurePanel = (title: string) => item(title).querySelector(".row-problems .callout.error");
+const NEXT_STEP = "Run it again; if it keeps failing, contact Concord.";
 // A failure panel's words, leaving out the time under them.
 const failureText = (title: string) => {
   const words = failurePanel(title)!.querySelector("span")!.cloneNode(true) as Element;
@@ -114,7 +115,8 @@ describe("PackageList", () => {
     expect(item("Done").querySelector(".status-pill")!.textContent).toBe("Finished");
     expect(finishedAt("Not")).toBeNull();
     expect(stateLine("Failed")).toBeNull();
-    expect(failureText("Failed")).toBe("Failed: The machine running it stopped before the run finished; run it again.");
+    expect(failureText("Failed")).toBe(`Failed: The machine running it stopped before the run finished; run it again. ${NEXT_STEP}`);
+    expect(failurePanel("Failed")!.querySelector("a")!.getAttribute("href")).toBe("https://concord.org/about/contact/");
     expect(failurePanel("Failed")!.querySelector(".when")!.textContent).toBe(`Failed at ${formatTime(5000)}`);
     expect(failurePanel("Done")).toBeNull();
     expect(stateLine("Stuck")).toBe("Interrupted: its runner stopped partway. This is being checked.");
@@ -172,7 +174,7 @@ describe("PackageList", () => {
     expect(stateLine("Requeued")).toBe("Re-run: queued, number 1 in line.");
     expect(stateLine("Rerunning")).toBe("Re-run: running the package.");
     expect(failureText("Refailed")).toBe(
-      `The latest re-run failed: No VM took this package before its VM's life ended; run it again. Showing the result from ${formatTime(1000)}.`
+      `The latest re-run failed: No VM took this package before its VM's life ended; run it again. Showing the result from ${formatTime(1000)}. ${NEXT_STEP}`
     );
     expect(failurePanel("Refailed")!.querySelector(".when")!.textContent).toBe(`Failed at ${formatTime(4000)}`);
     for (const title of ["Requeued", "Rerunning", "Refailed"]) {

@@ -248,6 +248,7 @@ section { border-top: 1px solid var(--line); padding-top: 0.5rem; }
 .callout svg { flex: none; width: 16px; height: 16px; margin-top: 0.15rem; }
 .callout.notice { border-color: var(--warn-line); background: var(--warn-bg); }
 .callout.error { border-color: #e08a8a; background: #fdecec; }
+.callout a { color: inherit; }
 .error { color: var(--error); }
 .tool { color: var(--muted); }
 

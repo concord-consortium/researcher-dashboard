@@ -140,7 +140,8 @@ describe("stageWords", () => {
     expect(stageWords("starting")).toBe("starting");
     expect(stageWords("prepare_package")).toBe("preparing the package");
     expect(stageWords("run_package")).toBe("running the package");
-    expect(stageWords("something_new")).toBe("something_new");
+    expect(stageWords("pull")).toBe("reading the class's data");
+    expect(stageWords("something_new")).toBe("working");
   });
 });
 

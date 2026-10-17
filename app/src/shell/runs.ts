@@ -112,11 +112,13 @@ export function rowState(result: Result | undefined, runner: Runner | null, mark
 
 const STAGES: Record<string, string> = {
   starting: "starting",
+  pull: "reading the class's data",
   prepare_package: "preparing the package",
   run_package: "running the package"
 };
 
-export const stageWords = (stage: string) => STAGES[stage] ?? stage;
+// A stage the page has no words for reads as working, never as the runner's own name for it.
+export const stageWords = (stage: string) => STAGES[stage] ?? "working";
 
 // How long an accepted Run or Resume holds its row without a write to its result. The function can
 // accept a package it already counts as queued and write nothing, so the hold has to end on its own.

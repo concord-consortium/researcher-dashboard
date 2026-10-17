@@ -126,14 +126,19 @@ export function RowStatus({ model, withFinished = true, withNotRun = true }: {
   );
 }
 
-// A failed run, with when it failed, and a refused Run, as error panels the full width of what holds
-// them.
+export const CONTACT_URL = "https://concord.org/about/contact/";
+
+// A failed run, with what to do next and when it failed, and a refused Run, as error panels the full
+// width of what holds them.
 export function RowProblems({ model }: { model: StatusModel }) {
   const { state, line, refusal } = model;
   return (
     <div className="row-problems">
       {state.kind === "failed" && (
-        <Callout tone="error">{line} {state.finishedAt !== null && <span className="when">Failed at {formatTime(state.finishedAt)}</span>}</Callout>
+        <Callout tone="error">
+          {line} Run it again; if it keeps failing, <a href={CONTACT_URL} target="_blank" rel="noopener noreferrer">contact Concord</a>.
+          {" "}{state.finishedAt !== null && <span className="when">Failed at {formatTime(state.finishedAt)}</span>}
+        </Callout>
       )}
       {refusal && <Callout tone="error">{refusal}</Callout>}
     </div>
