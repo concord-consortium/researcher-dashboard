@@ -52,9 +52,9 @@ const OUTPUTS = new Map([
   ["official/runner-smoke", { summary: "Runner smoke test passed.", display: RUNNER_SMOKE }],
   ["official/isolation-probe", { summary: "No network reachable from the package sandbox.", display: ISOLATION_PROBE }],
   ["users/200/explanation-keywords", { summary: "8 science keywords in 6 responses.", display: EXPLANATION_KEYWORDS }],
-  ["projects/20/claim-coding", { summary: "11 claims coded: 7 strong, 3 partial, 1 missing evidence.", display: "11 claims coded: 7 strong, 3 partial, 1 missing evidence.\n\n| Code | Claims |\n|---|---:|\n| Claim with evidence and reasoning | 7 |\n| Claim with evidence only | 3 |\n| Claim without evidence | 1 |\n" }],
-  ["users/402/time-on-task", { summary: "Median 14 minutes per page across 9 pages.", display: "Median 14 minutes per page across 9 pages.\n\n| Page | Median minutes |\n|---|---:|\n| Activity 2, page 3 | 18 |\n| Activity 2, page 4 | 15 |\n| Activity 3, page 2 | 12 |\n" }],
-  ["users/311/word-cloud", { summary: "12 words used more than 3 times.", display: "12 words used more than 3 times.\n\n| Word | Uses |\n|---|---:|\n| fire | 14 |\n| wind | 9 |\n| grass | 6 |\n" }]
+  ["projects/20/claim-coding", { summary: "11 claims coded: 7 strong, 3 partial, 1 missing evidence.", display: "# Claim coding for Wildfire\n\n11 claims coded: 7 strong, 3 partial, 1 missing evidence.\n\n| Code | Claims |\n|---|---:|\n| Claim with evidence and reasoning | 7 |\n| Claim with evidence only | 3 |\n| Claim without evidence | 1 |\n" }],
+  ["users/402/time-on-task", { summary: "Median 14 minutes per page across 9 pages.", display: "# Time on task\n\nMedian 14 minutes per page across 9 pages.\n\n| Page | Median minutes |\n|---|---:|\n| Activity 2, page 3 | 18 |\n| Activity 2, page 4 | 15 |\n| Activity 3, page 2 | 12 |\n" }],
+  ["users/311/word-cloud", { summary: "12 words used more than 3 times.", display: "# Response word cloud\n\n12 words used more than 3 times.\n\n| Word | Uses |\n|---|---:|\n| fire | 14 |\n| wind | 9 |\n| grass | 6 |\n" }]
 ].map(([identity, output]) => [packageKey(identity as string), output as { summary: string; display: string }]));
 
 const row = (identity: string) => ROWS.find((r) => r.identity === identity)!;

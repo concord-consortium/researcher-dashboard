@@ -19,7 +19,9 @@ Questions with an open response, by assignment, in question-id order rather than
 // up, so nothing from a real class is in this repo.
 export { default as MODEL_USE } from "./model-use.md?raw";
 
-export const RUNNER_SMOKE = `Runner smoke test passed.
+export const RUNNER_SMOKE = `# Runner smoke test
+
+Runner smoke test passed.
 
 - cc-data: v0.3.0-pre.1
 - Python: 3.11.9
@@ -27,7 +29,9 @@ export const RUNNER_SMOKE = `Runner smoke test passed.
 - Logs pulled: 59
 `;
 
-export const ISOLATION_PROBE = `No network reachable from the package sandbox.
+export const ISOLATION_PROBE = `# Isolation probe
+
+No network reachable from the package sandbox.
 
 | Probe | Result |
 |---|---|
@@ -36,7 +40,9 @@ export const ISOLATION_PROBE = `No network reachable from the package sandbox.
 | DNS lookup | blocked |
 `;
 
-export const EXPLANATION_KEYWORDS = `8 science keywords in 6 responses.
+export const EXPLANATION_KEYWORDS = `# Explanation keywords
+
+8 science keywords in 6 responses.
 
 | Keyword | Responses | Learners |
 |---|---:|---:|
