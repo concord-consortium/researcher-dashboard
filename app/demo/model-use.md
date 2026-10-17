@@ -4,9 +4,9 @@ Simulation data comes from the logs, copied nightly; the newest event is from 20
 
 No student opened Tasks 46 and 55, so they are left out below.
 
-# Simulation-use patterns
+## Simulation-use patterns
 
-## Task 23: Not all wildfires behave the same way
+### Task 23: Not all wildfires behave the same way
 
 Students who opened the model: 14
 
@@ -20,7 +20,7 @@ Students who opened the model: 14
 |   | Ran the model but never clicked Hazbot after running | 0 of 14 (0%) |
 | 100 | Student repeats run after success and wants more feedback from Hazbot (also counted in a level above) | 1 of 14 (7%) |
 
-## Task 24: Red Flag Warning
+### Task 24: Red Flag Warning
 
 Students who opened the model: 13
 
@@ -34,7 +34,7 @@ Students who opened the model: 13
 |   | Ran the model but never clicked Hazbot after running | 0 of 13 (0%) |
 | 100 | Student repeats run after success and wants more feedback from Hazbot (also counted in a level above) | 0 of 13 (0%) |
 
-## Task 25: The lay of the land
+### Task 25: The lay of the land
 
 Students who opened the model: 12
 
@@ -49,7 +49,7 @@ Students who opened the model: 12
 |   | Ran the model but never clicked Hazbot after running | 1 of 12 (8%) |
 | 100 | Student repeats run after success and wants more feedback from Hazbot (also counted in a level above) | 0 of 12 (0%) |
 
-## Task 32: Natural Vegetation
+### Task 32: Natural Vegetation
 
 Students who opened the model: 10
 
@@ -64,7 +64,7 @@ Students who opened the model: 10
 |   | Ran the model but never clicked Hazbot after running | 0 of 10 (0%) |
 | 100 | Student repeats run after success and wants more feedback from Hazbot (also counted in a level above) | 0 of 10 (0%) |
 
-## Task 33: Back to Suppression
+### Task 33: Back to Suppression
 
 Students who opened the model: 9
 
@@ -79,7 +79,7 @@ Students who opened the model: 9
 |   | Ran the model but never clicked Hazbot after running | 0 of 9 (0%) |
 | 100 | Student repeats run after success and wants more feedback from Hazbot (also counted in a level above) | 0 of 9 (0%) |
 
-## Task 34: Fire Intensity
+### Task 34: Fire Intensity
 
 Students who opened the model: 8
 
@@ -93,7 +93,7 @@ Students who opened the model: 8
 |   | Ran the model but never clicked Hazbot after running | 2 of 8 (25%) |
 | 100 | Student repeats run after success and wants more feedback from Hazbot (also counted in a level above) | 0 of 8 (0%) |
 
-## Task 35: Standing through fire
+### Task 35: Standing through fire
 
 Students who opened the model: 5
 
@@ -109,7 +109,7 @@ Students who opened the model: 5
 |   | Ran the model but never clicked Hazbot after running | 0 of 5 (0%) |
 | 100 | Student repeats run after success and wants more feedback from Hazbot (also counted in a level above) | 0 of 5 (0%) |
 
-## Task 41: Estimating risk
+### Task 41: Estimating risk
 
 Students who opened the model: 3
 
@@ -121,7 +121,7 @@ Students who opened the model: 3
 |   | Ran the model but never clicked Hazbot after running | 0 of 3 (0%) |
 | 100 | Student repeats run after success and wants more feedback from Hazbot (also counted in a level above) | 0 of 3 (0%) |
 
-## Task 44: Fighting fires
+### Task 44: Fighting fires
 
 Students who opened the model: 2
 
@@ -134,7 +134,7 @@ Students who opened the model: 2
 |   | Ran the model but never clicked Hazbot after running | 0 of 2 (0%) |
 | 100 | Student repeats run after success and wants more feedback from Hazbot (also counted in a level above) | 2 of 2 (100%) |
 
-# Simulation use
+## Simulation use
 
 Runs per student are over the students who opened the page's model, counting 0 for those who never ran it, and count a pause and resume as one run.
 
@@ -150,11 +150,11 @@ Runs per student are over the students who opened the page's model, counting 0 f
 | 41 | 3 | 3 | 3.3 (2.5) | 3 | 1 to 6 |
 | 44 | 2 | 2 | 3.5 (0.7) | 3.5 | 3 to 4 |
 
-# Settings tried
+## Settings tried
 
 Share of the students who ran the model on that page who used each setting at least once. A student can use several, so a row can add up to more than 100%.
 
-## Terrain
+### Terrain
 
 | Task | Plains | Hills | Mountains |
 |---|---|---|---|
@@ -168,7 +168,7 @@ Share of the students who ran the model on that page who used each setting at le
 | 41 | none | none | none |
 | 44 | 2 of 2 (100%) | 2 of 2 (100%) | 2 of 2 (100%) |
 
-## Vegetation
+### Vegetation
 
 | Task | Grass | Shrub | Forest | Forest with Suppression |
 |---|---|---|---|---|
@@ -182,7 +182,7 @@ Share of the students who ran the model on that page who used each setting at le
 | 41 | none | none | none | none |
 | 44 | 1 of 2 (50%) | 2 of 2 (100%) | 2 of 2 (100%) | 2 of 2 (100%) |
 
-## Drought
+### Drought
 
 | Task | No Drought | Mild Drought | Medium Drought | Severe Drought |
 |---|---|---|---|---|
@@ -196,7 +196,7 @@ Share of the students who ran the model on that page who used each setting at le
 | 41 | none | none | none | none |
 | 44 | 1 of 2 (50%) | 0 of 2 (0%) | 1 of 2 (50%) | 0 of 2 (0%) |
 
-## Wind and sparks
+### Wind and sparks
 
 | Task | Changed the wind | One spark in each zone | One spark only | Two or more sparks in one zone |
 |---|---|---|---|---|
@@ -212,7 +212,7 @@ Share of the students who ran the model on that page who used each setting at le
 
 Tasks 41 and 44 open with their sparks already placed, so their spark columns include placements students left as the page set them.
 
-# Page progress
+## Page progress
 
 | Task | Page | Not started | Working on it | Completed | Working now |
 |---|---|---|---|---|---|
@@ -226,7 +226,7 @@ Tasks 41 and 44 open with their sparks already placed, so their spark columns in
 | 41 | Activity 4, page 1: Estimating risk | 12 | 3 | 0 | 0 |
 | 44 | Activity 4, page 4: Fighting fires | 13 | 1 | 1 | 0 |
 
-# Claim questions
+## Claim questions
 
 | Task | Question | Answered | Correct |
 |---|---|---|---|

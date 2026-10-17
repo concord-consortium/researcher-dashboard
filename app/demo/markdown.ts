@@ -1,9 +1,11 @@
 // Result markdown shaped like what the packages write: wildfire-responses' open-response tables,
 // wildfire-model-use's longer multi-section report, and the smaller packages' results.
 
-export const WILDFIRE_RESPONSES = `6 open responses to 2 questions from 3 learners.
+export const WILDFIRE_RESPONSES = `# Wildfire open responses
 
-# Activity 1, page 2: Where do wildfires start?
+6 open responses to 2 questions from 3 learners.
+
+## Activity 1, page 2: Where do wildfires start?
 
 | Learner | Response |
 |---|---|
@@ -11,7 +13,7 @@ export const WILDFIRE_RESPONSES = `6 open responses to 2 questions from 3 learne
 | Learner 2 | Mostly in dry places. The model showed the fire spreading faster uphill. |
 | Learner 3 | When it is hot and windy. |
 
-# Activity 1, page 4: Explain what the wind did to the fire.
+## Activity 1, page 4: Explain what the wind did to the fire.
 
 | Learner | Response |
 |---|---|

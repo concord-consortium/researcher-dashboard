@@ -32,7 +32,10 @@
 }
 
 body { margin: 0; background: #fff; }
-main { max-width: 60rem; margin: 0 auto; padding: 1.5rem; }
+/* The info page's prose column; the dashboard spans the window. */
+:root { --info-width: 60rem; }
+main { margin: 0 auto; padding: 1.5rem; }
+main.info { max-width: var(--info-width); }
 /* The page's first content sits as far below the header as it sits in from the sides. */
 main > :first-child, [role="tabpanel"] > :first-child, .status > :first-child { margin-top: 0; }
 /* Nothing inside a box adds to its padding. */
@@ -45,7 +48,7 @@ h3 { font-size: 1rem; }
 html { scroll-padding-top: calc(var(--header-height, 0px) + var(--subheader-height, 0px) + 0.5rem); }
 /* Short or narrow, as when zoomed in, nothing sticks: the bars would cover most of the page. */
 @media (max-width: 40em), (max-height: 40em) {
-  .app-header, .package-subheader { position: static; }
+  .app-header, .package-subheader, .result-layout.sidebar .result-contents { position: static; }
   html { scroll-padding-top: 0.5rem; }
 }
 /* A heading focused by the page, not by the keyboard, needs no ring. */
@@ -93,7 +96,7 @@ h2[tabindex="-1"]:focus { outline: none; }
 /* The info page fills the window, so its build info sits at the bottom however little is above it. */
 .info-page { display: flex; flex-direction: column; min-height: 100vh; }
 .info-page main { flex: 1; width: 100%; box-sizing: border-box; }
-.build { width: 100%; max-width: 60rem; box-sizing: border-box; margin: 0 auto; padding: 1rem 1.5rem 1.5rem; color: var(--muted); font-size: 0.85rem; }
+.build { width: 100%; max-width: var(--info-width); box-sizing: border-box; margin: 0 auto; padding: 1rem 1.5rem 1.5rem; color: var(--muted); font-size: 0.85rem; }
 .build h2 { margin: 0 0 0.25rem; font-size: 0.85rem; }
 .build p { margin: 0; }
 a { color: var(--cc-teal-dark2); }
@@ -438,6 +441,27 @@ mark.match { background: #fff1b8; color: inherit; border-radius: 2px; }
 :where(.table-actions) button:hover { background: var(--cc-teal-light7); }
 button.copy-ok, button.copy-ok:hover { border-color: var(--ok); background: var(--ok-bg); color: var(--ok); }
 .result-markdown { overflow-x: auto; }
+.result-markdown :is(h3, h4)[tabindex="-1"]:focus:not(:focus-visible) { outline: none; }
+.result-contents { margin: 0 0 1.5rem; padding: var(--box-pad); border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+.result-contents .contents-title { margin: 0; font-weight: 700; }
+.result-contents summary { cursor: pointer; }
+.result-contents ol { margin: 0; padding: 0; list-style: none; }
+.result-contents nav > ol { columns: 3 14rem; column-gap: 2rem; margin-top: 0.5rem; }
+/* Wide enough for both, the contents is a column beside the result that stays in view as it scrolls. */
+.result-layout.sidebar { display: grid; grid-template-columns: 16rem minmax(0, 1fr); gap: 2rem; align-items: start; }
+.result-layout.sidebar .result-contents {
+  position: sticky;
+  top: calc(var(--header-height, 0px) + var(--subheader-height, 0px) + 1rem);
+  max-height: calc(100vh - var(--header-height, 0px) - var(--subheader-height, 0px) - 2rem);
+  overflow-y: auto;
+  margin: 0;
+}
+.result-layout.sidebar .result-contents nav > ol { columns: auto; }
+.result-contents nav > ol > li { break-inside: avoid; padding-bottom: 0.5rem; }
+.result-contents li li { padding-left: 1rem; }
+.result-contents nav > ol > li > .contents-link { font-weight: 700; }
+.contents-link { padding: 0.05rem 0; border: 0; background: none; color: var(--cc-teal-dark2); font-size: 0.9rem; font-weight: 400; text-align: left; }
+.contents-link:hover { background: none; text-decoration: underline; }
 .result-markdown > :first-child { margin-top: 0; }
 .result-markdown h3 { margin: 2rem 0 0.75rem; font-size: 1.3rem; }
 .result-markdown h4 { margin: 1.5rem 0 0.5rem; font-size: 1.1rem; }
