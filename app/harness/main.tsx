@@ -47,7 +47,7 @@ function Harness() {
     <>
       <App key={`${scenario.key}:${generation}`} start={start} services={services}
         reauthorize={() => window.alert("The page would sign in again here.")} />
-      <aside style={panel}>
+      <aside style={open ? panel : { ...panel, width: "auto" }}>
         <button type="button" style={toggle} onClick={() => setOpen((o) => !o)}>
           {open ? "Hide harness" : "Harness"}
         </button>
