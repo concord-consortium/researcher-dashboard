@@ -29,7 +29,7 @@ async function downloaded(block: HTMLElement) {
   let saved: Blob | null = null, name = "";
   vi.stubGlobal("URL", { createObjectURL: (blob: Blob) => { saved = blob; return "blob:t"; }, revokeObjectURL: () => {} });
   vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) { name = this.download; });
-  fireEvent.click(within(block).getByRole("button", { name: "Download CSV" }));
+  fireEvent.click(within(block).getByRole("button", { name: /^Download CSV/ }));
   const text = await read(saved!);
   // The link's object URL is released on the next tick, while URL is still the stub.
   await new Promise((resolve) => setTimeout(resolve, 0));
@@ -45,6 +45,11 @@ describe("a result's tables", () => {
       expect(within(block.querySelector(".table-actions") as HTMLElement).getAllByRole("button").map((b) => b.textContent))
         .toEqual(["Copy table", "Download CSV"]);
     }
+    const named = blocks()[1];
+    expect(named.querySelector("table")!.getAttribute("aria-label")).toBe("Task 23: Fires");
+    expect(within(named).getAllByRole("button").map((b) => b.getAttribute("aria-label")))
+      .toEqual(["Copy table: Task 23: Fires", "Download CSV: Task 23: Fires"]);
+    expect(blocks()[0].querySelector("table")!.hasAttribute("aria-label")).toBe(false);
   });
 
   it("download as CSV named after the heading above, else by their place", async () => {
@@ -58,7 +63,7 @@ describe("a result's tables", () => {
     vi.stubGlobal("ClipboardItem", class { constructor(readonly items: Record<string, Blob>) {} });
     vi.stubGlobal("navigator", { clipboard: { write } });
     render(<ResultMarkdown markdown={MARKDOWN} />);
-    const button = within(blocks()[1]).getByRole("button", { name: "Copy table" });
+    const button = within(blocks()[1]).getByRole("button", { name: /^Copy table/ });
     await act(async () => fireEvent.click(button));
     const [[[item]]] = write.mock.calls as unknown as [[[{ items: Record<string, Blob> }]]];
     expect(await read(item.items["text/plain"])).toBe("Level\tStudents\n1\t0 of 14\n2\t3, of 14");
@@ -72,7 +77,7 @@ describe("a result's tables", () => {
     vi.stubGlobal("ClipboardItem", undefined);
     vi.stubGlobal("navigator", { clipboard: { writeText } });
     render(<ResultMarkdown markdown={MARKDOWN} />);
-    await act(async () => fireEvent.click(within(blocks()[0]).getByRole("button", { name: "Copy table" })));
+    await act(async () => fireEvent.click(within(blocks()[0]).getByRole("button", { name: /^Copy table/ })));
     expect(writeText).toHaveBeenCalledWith("Untitled\tn\na\t1");
   });
 });

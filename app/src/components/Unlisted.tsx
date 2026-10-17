@@ -1,6 +1,6 @@
 import { packageKey } from "../shell/packages";
 import { latestFinished, millis, rowState, type Result, type Runner, type SessionMark } from "../shell/runs";
-import { GroupTag, Highlight, OpenLink, rowLine, RowProblems, RowStatus, StatusPill, ViewResult, type StatusModel } from "./PackageList";
+import { CardTitle, GroupTag, Highlight, OpenLink, rowLine, RowProblems, RowStatus, StatusPill, ViewResult, type StatusModel } from "./PackageList";
 
 // A result whose package the page does not list any more. It has no Run control, so its state is
 // worded without the instruction to press one.
@@ -46,8 +46,8 @@ export function Unlisted({ results, search, titles, notes, runner, mark, classHa
           return (
             <li key={key} className="card">
               <div className="card-main">
-                <OpenLink resultKey={key} onOpen={onOpen} linkRef={linkRef}><Highlight text={title} search={search} /></OpenLink>{" "}
-                <span className="version">{result.package.version}</span> <GroupTag group="unlisted">No longer listed</GroupTag>
+                <CardTitle link={<OpenLink resultKey={key} onOpen={onOpen} linkRef={linkRef}><Highlight text={title} search={search} /></OpenLink>}
+                  version={result.package.version} tag={<GroupTag group="unlisted">No longer listed</GroupTag>} />
                 <code className="identity"><Highlight text={identity} search={search} /></code>
                 {note && <p className="notice">{note}</p>}
                 <RowStatus model={model} />

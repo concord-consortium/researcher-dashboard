@@ -104,6 +104,7 @@ describe("ClassDashboard", () => {
     expect([packages.tabIndex, info.tabIndex]).toEqual([-1, 0]);
     expect(window.location.hash).toBe("#info");
     expect(screen.getByRole("heading", { name: "Assignments" })).toBeDefined();
+    expect(screen.getByRole("tabpanel").tabIndex).toBe(0);
     fireEvent.keyDown(info, { key: "ArrowRight" });
     expect(packages.getAttribute("aria-selected")).toBe("true");
     expect(window.location.hash).toBe("#packages");
@@ -386,7 +387,7 @@ describe("ClassDashboard", () => {
     expect(document.activeElement).toBe(run());
     expect(s.runPackage).not.toHaveBeenCalled();
     fireEvent.click(run());
-    await act(async () => { fireEvent.click(within(card()).getByRole("button", { name: "Confirm" })); });
+    await act(async () => { fireEvent.click(within(card()).getByRole("button", { name: "Run anyway" })); });
     expect(s.runPackage).toHaveBeenCalledWith("users/9/stranger", "1.0.0");
     expect(within(card()).queryByRole("group", { name: "Run a community package?" })).toBeNull();
   });
@@ -398,7 +399,7 @@ describe("ClassDashboard", () => {
     fireEvent.click(screen.getByRole("link", { name: "Stranger's" }));
     const view = document.querySelector(".package-view") as HTMLElement;
     fireEvent.click(within(view).getByRole("button", { name: "Run Stranger's" }));
-    await act(async () => { fireEvent.click(within(view).getByRole("button", { name: "Confirm" })); });
+    await act(async () => { fireEvent.click(within(view).getByRole("button", { name: "Run anyway" })); });
     expect(s.runPackage).toHaveBeenCalledTimes(1);
     fireEvent.click(within(view).getByRole("link", { name: "All Packages" }));
     await act(async () => { fireEvent.click(runButton()); });
@@ -649,7 +650,7 @@ describe("running a package", () => {
     const message = await within(wildfireProblems() as HTMLElement).findByText("projects/20/wildfire-responses@1.0.0 cannot be run");
     expect(message.closest(".callout")!.className).toBe("callout error");
     expect(within(wildfireRow()).getAllByText(/cannot be run/)).toHaveLength(1);
-    expect(announced()).toBe("Wildfire open responses could not be run: projects/20/wildfire-responses@1.0.0 cannot be run.");
+    await vi.waitFor(() => expect(announced()).toBe("Wildfire open responses could not be run: projects/20/wildfire-responses@1.0.0 cannot be run."));
     await s.results(new Map([[KEY, wildfire({ status: "done", summary: "Earlier", updated_at: stamp(5) })]]));
     expect(within(wildfireRow()).getByText(/cannot be run/)).toBeDefined();
     await s.results(new Map([[KEY, wildfire({ updated_at: stamp(6) })]]));
@@ -971,7 +972,7 @@ describe("opening a package", () => {
     }
     await s.results(new Map([[KEY, done(WILDFIRE.identity, "Newer summary", 3000, { previous })]]));
     expect(within(result()).getByRole("heading", { level: 3, name: "Newer summary" })).toBeDefined();
-    expect(announced()).toBe("Wildfire open responses finished: Newer summary.");
+    await vi.waitFor(() => expect(announced()).toBe("Wildfire open responses finished: Newer summary."));
     expect(document.activeElement).toBe(heading);
   });
 
@@ -1008,6 +1009,9 @@ describe("opening a package", () => {
     const titles = () => [...document.querySelectorAll(".title")].map((e) => e.textContent);
     fireEvent.click(link("My own"));
     expect(crumbs()).toEqual(["All Packages", "Mine", "My own"]);
+    const nav = within(view()).getByRole("navigation", { name: "Breadcrumb" });
+    expect([...nav.querySelectorAll("ol > li > a")].map((a) => a.textContent)).toEqual(["All Packages", "Mine"]);
+    expect(nav.querySelector("h2")).toBeNull();
     fireEvent.click(within(view()).getByRole("link", { name: "Mine" }));
     expect(titles()).toEqual(["My own"]);
     expect(within(screen.getByRole("group", { name: "Filter packages" })).getByRole("button", { name: /^Mine/ }).getAttribute("aria-pressed")).toBe("true");
@@ -1113,9 +1117,9 @@ describe("opening a package", () => {
     await s.results(new Map([["users__7__hidden", wildfire({
       package: pkg, status: "running", previous: { package: pkg, summary: "Hidden summary", finished_at: stamp(500) }
     })]]));
-    expect(announced()).toBe("Hidden is running.");
+    await vi.waitFor(() => expect(announced()).toBe("Hidden is running."));
     await s.results(new Map([["users__7__hidden", done("users/7/hidden", "Newer hidden summary", 2000)]]));
-    expect(announced()).toBe("Hidden finished: Newer hidden summary.");
+    await vi.waitFor(() => expect(announced()).toBe("Hidden finished: Newer hidden summary."));
     expect(unlistedRow("users/7/hidden").querySelector("[aria-live], [role=status]")).toBeNull();
   });
 
@@ -1253,9 +1257,9 @@ describe("the automatic re-run", () => {
     await act(async () => answer.resolve({ queue: [], appended: [], vm: "launched" }));
     expect(within(wildfireRow()).queryByText("Requesting…")).toBeNull();
     expect(within(wildfireRow()).queryByText(OUT_OF_DATE)).toBeNull();
-    expect(announced()).toBe("Wildfire open responses finished: Earlier.");
+    await vi.waitFor(() => expect(announced()).toBe("Wildfire open responses finished: Earlier."));
     await s.results(new Map([[KEY, doneAt(40_000, { summary: "Newest", finished_at: stamp(40_100) })]]));
-    expect(announced()).toBe("Wildfire open responses finished: Newest.");
+    await vi.waitFor(() => expect(announced()).toBe("Wildfire open responses finished: Newest."));
   });
 
   it("still re-runs and announces the outcome when the re-run finishes before its request is answered", async () => {
@@ -1268,7 +1272,7 @@ describe("the automatic re-run", () => {
     await s.results(new Map([[KEY, wildfire({ status: "running", started_at: stamp(30_000), updated_at: stamp(30_000) })]]));
     await s.results(new Map([[KEY, doneAt(30_000, { summary: "Newer" })]]));
     await act(async () => answer.resolve({ queue: [], appended: [], vm: "launched" }));
-    expect(announced()).toBe("Wildfire open responses finished: Newer.");
+    await vi.waitFor(() => expect(announced()).toBe("Wildfire open responses finished: Newer."));
     await s.activity(learner(40_000));
     await vi.waitFor(() => expect(s.runPackage).toHaveBeenCalledTimes(2));
   });
@@ -1393,11 +1397,11 @@ describe("the automatic re-run", () => {
     const runner: Runner = { state: "running", current_package: { class_hash: SCOPE.class_hash, package_key: KEY } };
     await s.runner(runner);
     await s.results(new Map([[KEY, wildfire({ status: "running", previous: { package: WILDFIRE_PACKAGE, summary: "Earlier" } })]]));
-    expect(announced()).toBe("Wildfire open responses is running.");
+    await vi.waitFor(() => expect(announced()).toBe("Wildfire open responses is running."));
     await s.results(new Map([[KEY, wildfire({ status: "queued" })]]));
     await s.results(new Map([[KEY, wildfire({ status: "running" })]]));
     // The same words a second time end in a no-break space, so they are announced again.
-    expect(announced()).toBe("Wildfire open responses is running.\u00a0");
+    await vi.waitFor(() => expect(announced()).toBe("Wildfire open responses is running.\u00a0"));
     expect(screen.getByRole("banner").querySelector("[aria-live], [role=status]")).toBeNull();
   });
 });

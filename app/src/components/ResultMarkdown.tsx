@@ -2,7 +2,7 @@ import Markdown, { type Components, type UrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeSanitize, { type Options as SanitizeSchema } from "rehype-sanitize";
 import { ArrowDownTrayIcon } from "@heroicons/react/16/solid";
-import { createContext, memo, useContext, useRef, type ReactNode } from "react";
+import { createContext, memo, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { saveText, tableFileName } from "../shell/download";
 import { toCsv, toHtml, toTsv } from "../shell/tables";
 import { CopyButton } from "./CopyButton";
@@ -63,10 +63,13 @@ function headingBefore(block: Element): string | null {
   return null;
 }
 
-// A table, with Copy table and Download CSV under it. Both read the cells' text as rendered.
+// A table, with Copy table and Download CSV under it. Both read the cells' text as rendered. The table
+// and its buttons are named after the heading above it, found once it is in the page.
 function ResultTable({ children }: { children?: ReactNode }) {
   const table = useRef<HTMLTableElement>(null);
   const base = useContext(FileBase);
+  const [heading, setHeading] = useState<string | null>(null);
+  useEffect(() => { setHeading(headingBefore(table.current!.parentElement!)); }, []);
   const rows = () => [...table.current!.rows].map((row) => [...row.cells].map((cell) => cell.textContent ?? ""));
   const copy = () => {
     const tsv = toTsv(rows());
@@ -83,11 +86,13 @@ function ResultTable({ children }: { children?: ReactNode }) {
   };
   return (
     <div className="result-table">
-      <table ref={table}>{children}</table>
+      <table ref={table} aria-label={heading ?? undefined}>{children}</table>
       <div className="table-actions">
-        <CopyButton label="Copy table" title="Copy this table, to paste into a document or a spreadsheet" copy={copy}
+        <CopyButton label="Copy table" name={heading ? `Copy table: ${heading}` : undefined}
+          title="Copy this table, to paste into a document or a spreadsheet" copy={copy}
           done="Copied the table." failed="The table could not be copied." />
-        <button type="button" className="icon-button" title="Download this table as a CSV file" onClick={download}>
+        <button type="button" className="icon-button" title="Download this table as a CSV file" onClick={download}
+          aria-label={heading ? `Download CSV: ${heading}` : undefined}>
           <ArrowDownTrayIcon aria-hidden="true" />Download CSV
         </button>
       </div>
@@ -111,7 +116,8 @@ export const ResultMarkdown = memo(function ResultMarkdown({ markdown, sanitize 
 }) {
   return (
     <FileBase.Provider value={fileBase}>
-      <div className="result-markdown">
+      {/* A named, focusable region, so a keyboard can scroll what is too wide for the page. */}
+      <div className="result-markdown" role="region" aria-label="Result text" tabIndex={0}>
         <Markdown remarkPlugins={[noHtml, remarkGfm, noFootnotes]} rehypePlugins={sanitize ? [[rehypeSanitize, SCHEMA]] : []}
           urlTransform={keepUrl} components={COMPONENTS}>
           {markdown}

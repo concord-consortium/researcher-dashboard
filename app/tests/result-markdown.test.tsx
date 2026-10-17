@@ -1,4 +1,4 @@
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import Markdown from "react-markdown";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize from "rehype-sanitize";
@@ -50,6 +50,12 @@ describe.each([true, false])("ResultMarkdown with the sanitizer %s", (sanitize) 
     const hrefs = [...container.querySelectorAll("[href]")].map((e) => e.getAttribute("href")!);
     expect(hrefs).toContain("https://concord.org");
     for (const href of hrefs) expect(href).toMatch(LINK);
+  });
+
+  it("is a named region the keyboard can reach, to scroll what is too wide", () => {
+    render(<ResultMarkdown markdown="Text" />);
+    const region = screen.getByRole("region", { name: "Result text" });
+    expect(region.tabIndex).toBe(0);
   });
 
   it("shows the HTML as text", () => {

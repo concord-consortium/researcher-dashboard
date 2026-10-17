@@ -45,7 +45,7 @@ const failureText = (title: string) => {
   return words.textContent!.trim();
 };
 const pill = (title: string) => item(title).querySelector(".status-pill .label")!.textContent;
-const pillTitle = (title: string) => item(title).querySelector(".status-pill")!.getAttribute("title");
+const finishedAt = (title: string) => item(title).querySelector(".finished-at")?.textContent ?? null;
 const runButton = (title: string) => within(item(title)).getByRole("button", { name: new RegExp(`^(Run|Resume) ${title}$`) });
 
 describe("PackageList", () => {
@@ -55,7 +55,8 @@ describe("PackageList", () => {
     list([stranger, mine, official]);
     expect([...document.querySelectorAll(".package-rows > li")].map((li) => [li.querySelector(".title")!.textContent, li.querySelector(".tag")!.textContent]))
       .toEqual([["Ours", "Official"], ["My own", "Mine"], ["Stranger's", "Community"]]);
-    expect(screen.queryByRole("heading")).toBeNull();
+    expect(screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent))
+      .toEqual(["Ours Version 1.0.0 Group: Official", "My own Version 1.0.0 Group: Mine", "Stranger's Version 1.0.0 Group: Community"]);
     cleanup();
     list([stranger, mine, official], { filter: "mine" });
     expect([...document.querySelectorAll(".title")].map((e) => e.textContent)).toEqual(["My own"]);
@@ -109,9 +110,9 @@ describe("PackageList", () => {
     expect(stateLine("Lagging")).toBe("Queued.");
     expect(stateLine("Busy")).toBe("Running Busy: preparing the package.");
     expect(stateLine("Done")).toBe("6 open responses from 3 learners.");
-    expect(pillTitle("Done")).toBe(`Finished ${formatTime(1000)}`);
-    expect(item("Done").querySelector(".status-pill .visually-hidden")!.textContent).toBe(`, Finished ${formatTime(1000)}`);
-    expect(pillTitle("Not")).toBeNull();
+    expect(finishedAt("Done")).toBe(`Finished ${formatTime(1000)}`);
+    expect(item("Done").querySelector(".status-pill")!.textContent).toBe("Finished");
+    expect(finishedAt("Not")).toBeNull();
     expect(stateLine("Failed")).toBeNull();
     expect(failureText("Failed")).toBe("Failed: The machine running it stopped before the run finished; run it again.");
     expect(failurePanel("Failed")!.querySelector(".when")!.textContent).toBe(`Failed at ${formatTime(5000)}`);
@@ -143,18 +144,18 @@ describe("PackageList", () => {
   it("says which version the shown result is from", () => {
     const r = row({ title: "Versioned", official: true, current_version: { version: "1.1.0", title: "Versioned", description: null } });
     list([r], { results: new Map([[packageKey(r.identity), result(r)]]) });
-    expect(pillTitle("Versioned")).toBe(`Finished ${formatTime(1000)} · from 1.0.0`);
+    expect(finishedAt("Versioned")).toBe(`Finished ${formatTime(1000)} · from 1.0.0`);
     cleanup();
     const rerun = row({ title: "Rerun", official: true, current_version: { version: "1.1.0", title: "Rerun", description: null } });
     const previous = { package: { identity: rerun.identity, version: "1.0.0", checksum: "c" }, summary: "Earlier", finished_at: stamp(1000) };
     list([rerun], { results: new Map([[packageKey(rerun.identity), result(rerun, {
       status: "queued", package: { identity: rerun.identity, version: "1.1.0", checksum: "c" }, previous
     })]]) });
-    expect(pillTitle("Rerun")).toBe(`Finished ${formatTime(1000)} · from 1.0.0`);
+    expect(finishedAt("Rerun")).toBe(`Finished ${formatTime(1000)} · from 1.0.0`);
     cleanup();
     const same = row({ title: "Same", official: true });
     list([same], { results: new Map([[packageKey(same.identity), result(same)]]) });
-    expect(pillTitle("Same")).toBe(`Finished ${formatTime(1000)}`);
+    expect(finishedAt("Same")).toBe(`Finished ${formatTime(1000)}`);
   });
 
   it("keeps the latest finished result on the row through a re-run", () => {
@@ -176,7 +177,7 @@ describe("PackageList", () => {
     expect(failurePanel("Refailed")!.querySelector(".when")!.textContent).toBe(`Failed at ${formatTime(4000)}`);
     for (const title of ["Requeued", "Rerunning", "Refailed"]) {
       expect(within(item(title)).getByText("Earlier summary")).toBeDefined();
-      expect(pillTitle(title)).toBe(`Finished ${formatTime(1000)}`);
+      expect(finishedAt(title)).toBe(`Finished ${formatTime(1000)}`);
     }
   });
 

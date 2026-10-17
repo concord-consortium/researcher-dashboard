@@ -5,7 +5,7 @@ import {
 import { outOfDate } from "../shell/activity";
 import { packageKey, searchWords, titleOf, type Group } from "../shell/packages";
 import type { PackageRow } from "../shell/portal";
-import { useEffect, useRef, useState, type ComponentType, type ReactNode, type SVGProps } from "react";
+import { useEffect, useId, useRef, useState, type ComponentType, type ReactNode, type SVGProps } from "react";
 import { routeHash } from "../shell/route";
 import { Callout } from "./Callout";
 import {
@@ -108,8 +108,9 @@ export function rowModel({ row, result, runner, mark, classHash, request, newest
 }
 
 // The state line and Requesting; with `withFinished`, the summary of the finished result a row keeps
-// through a re-run (a done row's state line already holds its summary). A failure and a refusal are
-// RowProblems'. `withNotRun` false leaves out the line of a package never run, where a status pill says it.
+// through a re-run (a done row's state line already holds its summary), and when it finished. A
+// failure and a refusal are RowProblems'. `withNotRun` false leaves out the line of a package never
+// run, where a status pill says it.
 export function RowStatus({ model, withFinished = true, withNotRun = true }: {
   model: StatusModel; withFinished?: boolean; withNotRun?: boolean;
 }) {
@@ -119,6 +120,7 @@ export function RowStatus({ model, withFinished = true, withNotRun = true }: {
     <>
       <StateRegion line={line}>{pending && <p>Requesting…</p>}</StateRegion>
       {withFinished && finished && state.kind !== "done" && <p className="summary">{finished.summary ?? "Finished."}</p>}
+      {withFinished && finished && <p className="when finished-at">{finishedNote(model)}</p>}
       {outdated && <p className="notice">Students have saved work since this result.</p>}
     </>
   );
@@ -170,15 +172,12 @@ export function finishedNote({ finished, versionNote }: StatusModel): string | n
   return `${finishedWhen(millis(finished.finished_at))}${versionNote ? ` · ${versionNote}` : ""}`;
 }
 
-// Not a live region: the state line under the title announces the same change in full. When the kept
-// result finished is the pill's title, and said to a screen reader after its label.
+// A package's state in a word or two. When its kept result finished is shown in words beside it.
 export function StatusPill({ model }: { model: StatusModel }) {
   const { label, tone } = statusPill(model);
-  const note = finishedNote(model);
   return (
-    <span className={`status-pill ${tone}${model.state.kind === "running" && !model.pending ? " throb" : ""}`} title={note ?? undefined}>
+    <span className={`status-pill ${tone}${model.state.kind === "running" && !model.pending ? " throb" : ""}`}>
       <span className="label">{label}</span>
-      {note && <span className="visually-hidden">, {note}</span>}
     </span>
   );
 }
@@ -214,23 +213,24 @@ export function RunButton({ row, model, onRun, before, held = false }: {
 export const COMMUNITY_WARNING = "Community packages are not reviewed by Concord. Running one runs a stranger's code with "
   + "your access to student data, and nothing stops it sending that data elsewhere.";
 
-// Asked before a community package runs. Cancel takes focus, so pressing Enter twice does not run a
-// stranger's code, and Escape cancels. Focus goes back to where it was when the warning first showed,
-// the Run that asked, when either answer removes it; that is read as it renders, before another
-// warning's removal moves focus.
+// Asked before a community package runs, with the warning as the group's description. Cancel takes
+// focus, so pressing Enter twice does not run a stranger's code, and Escape cancels. Focus goes back
+// to where it was when the warning first showed, the Run that asked, when either answer removes it;
+// that is read as it renders, before another warning's removal moves focus.
 export function CommunityConfirm({ onConfirm, onCancel }: { onConfirm: () => void; onCancel: () => void }) {
   const cancel = useRef<HTMLButtonElement>(null);
   const [before] = useState(() => document.activeElement as HTMLElement | null);
+  const warning = useId();
   useEffect(() => {
     cancel.current?.focus();
     return () => before?.focus();
   }, [before]);
   return (
-    <div className="community-confirm" role="group" aria-label="Run a community package?"
+    <div className="community-confirm" role="group" aria-label="Run a community package?" aria-describedby={warning}
       onKeyDown={(e) => { if (e.key === "Escape") onCancel(); }}>
-      <p>{COMMUNITY_WARNING}</p>
+      <p id={warning}>{COMMUNITY_WARNING}</p>
       <div className="confirm-buttons">
-        <button type="button" className="icon-button danger" onClick={onConfirm}><CheckIcon aria-hidden="true" />Confirm</button>
+        <button type="button" className="icon-button danger" onClick={onConfirm}><CheckIcon aria-hidden="true" />Run anyway</button>
         <button type="button" ref={cancel} className="icon-button" onClick={onCancel}><XMarkIcon aria-hidden="true" />Cancel</button>
       </div>
     </div>
@@ -277,9 +277,18 @@ const GroupIcon = ({ group }: { group: string }) => {
   return Icon ? <Icon aria-hidden="true" /> : null;
 };
 
-// A card's group tag, after its version.
+// A card's group tag, after its version, which a screen reader hears as the group.
 export function GroupTag({ group, children }: { group: string; children: ReactNode }) {
-  return <span className="tag"><GroupIcon group={group} />{children}</span>;
+  return <><span className="visually-hidden">Group: </span><span className="tag"><GroupIcon group={group} />{children}</span></>;
+}
+
+// A card's heading: its title link, version and group, so a screen reader can move from card to card.
+export function CardTitle({ link, version, tag }: { link: ReactNode; version: string; tag: ReactNode }) {
+  return (
+    <h3 className="card-title">
+      {link}{" "}<span className="visually-hidden">Version </span><span className="version">{version}</span> {tag}
+    </h3>
+  );
 }
 
 export interface Card {
@@ -304,8 +313,8 @@ function Row({ row, group, tag, model, search, onRun, onOpen, linkRef, confirmin
   return (
     <li className="card">
       <div className="card-main">
-        <OpenLink resultKey={model.key} onOpen={onOpen} linkRef={linkRef}><Highlight text={model.title} search={search} /></OpenLink>{" "}
-        <span className="version">{row.current_version.version}</span> <GroupTag group={group}>{tag}</GroupTag>
+        <CardTitle link={<OpenLink resultKey={model.key} onOpen={onOpen} linkRef={linkRef}><Highlight text={model.title} search={search} /></OpenLink>}
+          version={row.current_version.version} tag={<GroupTag group={group}>{tag}</GroupTag>} />
         {row.current_version.description && <p className="description"><Highlight text={row.current_version.description} search={search} /></p>}
         <code className="identity"><Highlight text={row.identity} search={search} /></code>
         <RowStatus model={model} withNotRun={false} />

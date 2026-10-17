@@ -67,15 +67,23 @@ export function PackageView({ title, description, status, note, run, warning, me
       <div className="package-subheader" ref={subheader}>
         <div className="package-bar">
           <div className="package-main">
-            <nav aria-label="Breadcrumb" className="breadcrumb">
-              <a href={routeHash(ALL_PACKAGES)} onClick={(e) => { e.preventDefault(); onAll(); }}>All Packages</a>
-              <ChevronRightIcon aria-hidden="true" />
-              {filter && <>
-                <a href={routeHash(ALL_PACKAGES)} onClick={(e) => { e.preventDefault(); filter.onSelect(); }}>{filter.label}</a>
-                <ChevronRightIcon aria-hidden="true" />
-              </>}
-              <h2 id="package-title" ref={heading} tabIndex={-1} aria-current="page">{title}</h2>
-            </nav>
+            <div className="breadcrumb">
+              <nav aria-label="Breadcrumb">
+                <ol>
+                  <li>
+                    <a href={routeHash(ALL_PACKAGES)} onClick={(e) => { e.preventDefault(); onAll(); }}>All Packages</a>
+                    <ChevronRightIcon aria-hidden="true" />
+                  </li>
+                  {filter && (
+                    <li>
+                      <a href={routeHash(ALL_PACKAGES)} onClick={(e) => { e.preventDefault(); filter.onSelect(); }}>{filter.label}</a>
+                      <ChevronRightIcon aria-hidden="true" />
+                    </li>
+                  )}
+                </ol>
+              </nav>
+              <h2 id="package-title" ref={heading} tabIndex={-1}>{title}</h2>
+            </div>
             {description && <p className="description">{description}</p>}
             {note && <p className="notice">{note}</p>}
             <RowStatus model={status} withFinished={false} withNotRun={false} />

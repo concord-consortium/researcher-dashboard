@@ -25,6 +25,8 @@
   --box-pad: 1rem;
   /* Gray text on the header's teal, where --muted falls short of 4.5:1. */
   --header-muted: #555555;
+  /* A form field's edge, at least 3:1 against white. */
+  --field-line: #8a8a8a;
   font-family: lato, arial, helvetica, sans-serif;
   color: var(--ink);
 }
@@ -47,7 +49,7 @@ html { scroll-padding-top: calc(var(--header-height, 0px) + var(--subheader-heig
   html { scroll-padding-top: 0.5rem; }
 }
 /* A heading focused by the page, not by the keyboard, needs no ring. */
-[tabindex="-1"]:focus { outline: none; }
+h2[tabindex="-1"]:focus { outline: none; }
 .meta { color: var(--muted); margin-top: 0; }
 /* No tabs below the brand here, so the bar ends as far below it as it starts above. */
 .app-header .header-main.info-header { padding-bottom: 0.5rem; }
@@ -82,7 +84,7 @@ html { scroll-padding-top: calc(var(--header-height, 0px) + var(--subheader-heig
   text-decoration: none;
   white-space: nowrap;
 }
-.link-button:hover { background: var(--cc-teal); }
+.link-button:hover { text-decoration: underline; }
 .link-button:focus-visible { outline: 2px solid var(--cc-teal-dark2); outline-offset: 2px; }
 .link-button svg { width: 16px; height: 16px; }
 .info-card ul, .info-card ol { margin: 0.4rem 0; padding-left: 1.4rem; }
@@ -181,22 +183,24 @@ a { color: var(--cc-teal-dark2); }
   display: inline-flex;
   align-items: stretch;
   box-sizing: border-box;
-  height: 1.5rem;
+  min-height: 1.5rem;
   margin: 0;
-  overflow: hidden;
   border-radius: 4px;
   background: var(--cc-teal-light6);
   font-size: 0.8rem;
   line-height: 1.2;
 }
+/* The badge grows to fit wrapped text, so its icon square rounds its own outer corners. */
 .badge-icon {
   display: flex;
   align-items: center;
   padding: 0 0.35rem;
+  border-radius: 4px 0 0 4px;
   background: var(--cc-teal-dark2);
   color: #fff;
 }
 .badge-icon svg { width: 14px; height: 14px; }
+.badge-icon:last-child { border-radius: 4px; }
 .badge.error .badge-icon { background: var(--error); }
 .badge.error { background: #fdecec; color: var(--error); }
 .badge-info { display: flex; align-items: center; padding: 0 0.5rem; }
@@ -275,13 +279,15 @@ button[aria-disabled="true"], button:disabled { opacity: 0.55; cursor: not-allow
   border-radius: 6px;
 }
 .card:hover { border-color: var(--cc-teal); background: var(--cc-teal-light7); }
+.card-title { display: block; margin: 0; font-size: 1rem; font-weight: 400; }
 .card .title { font-weight: 700; color: var(--ink); text-decoration: none; }
 .card .title svg { width: 14px; height: 14px; margin-right: 0.35rem; vertical-align: -1px; color: var(--cc-teal-dark2); }
 /* The title's link covers the whole card; the card's own controls sit above it. */
 .card .title::after { content: ""; position: absolute; inset: 0; }
 .card .title:focus-visible { outline: none; }
 .card:has(.title:focus-visible) { outline: 2px solid var(--cc-teal-dark2); outline-offset: 2px; }
-.card .controls, .card .identity { position: relative; z-index: 1; }
+/* Above the title's covering link: what can be pressed, and text worth selecting or reading as it is. */
+.card .controls, .card .identity, .card .description, .card .row-problems { position: relative; z-index: 1; }
 .run, .icon-button { display: inline-flex; align-items: center; gap: 0.3rem; }
 .run svg, .icon-button svg { width: 14px; height: 14px; }
 
@@ -300,12 +306,14 @@ button[aria-disabled="true"], button:disabled { opacity: 0.55; cursor: not-allow
 .card-main > p, .package-main > p { margin: 0.2rem 0; }
 .package-side { display: flex; flex-direction: column; align-items: flex-end; gap: 0.3rem; margin-left: auto; }
 .result-when { margin: 0; font-size: 0.85rem; text-align: right; }
+.card .finished-at { font-size: 0.85rem; }
 .package-bar .controls { margin: 0; }
 .package-bar .reason { display: none; }
-.breadcrumb { display: flex; align-items: center; gap: 0.4rem; min-width: 0; }
+.breadcrumb, .breadcrumb ol, .breadcrumb li { display: flex; align-items: center; gap: 0.4rem; min-width: 0; }
+.breadcrumb ol { margin: 0; padding: 0; list-style: none; }
 .breadcrumb a { color: var(--cc-teal-dark2); }
 .breadcrumb svg { width: 16px; height: 16px; color: var(--muted); flex: none; }
-.breadcrumb h2 { margin: 0; font-size: 1.15rem; }
+.breadcrumb h2 { margin: 0; font-size: 1rem; }
 .no-result { color: var(--muted); }
 .version { color: var(--muted); }
 .description { margin: 0.2rem 0; }
@@ -366,7 +374,8 @@ button.danger:focus-visible { outline-color: var(--error); }
 .status-pill.ok { background: var(--ok-bg); color: var(--ok); }
 .status-pill.warn { background: var(--warn-bg); color: var(--warn); }
 .status-pill.error { background: #fdecec; color: var(--error); }
-.status-pill.throb { animation: throb 1.6s ease-in-out infinite; }
+/* A few pulses when a run starts, then still: the word Running says the rest. */
+.status-pill.throb { animation: throb 1.6s ease-in-out 3; }
 @keyframes throb {
   0%, 100% { box-shadow: 0 0 0 0 rgba(5, 146, 175, 0.45); }
   50% { box-shadow: 0 0 0 5px rgba(5, 146, 175, 0); background: var(--cc-teal-light4); }
@@ -379,7 +388,7 @@ mark.match { background: #fff1b8; color: inherit; border-radius: 2px; }
   flex: 1;
   min-width: 0;
   padding: 0.3rem 0.6rem;
-  border: 1px solid var(--line);
+  border: 1px solid var(--field-line);
   border-radius: 4px;
   font: inherit;
   color: var(--ink);
@@ -389,7 +398,7 @@ mark.match { background: #fff1b8; color: inherit; border-radius: 2px; }
 .status-filter {
   margin-left: auto;
   padding: 0.2rem 0.5rem;
-  border: 1px solid var(--line);
+  border: 1px solid var(--field-line);
   border-radius: 4px;
   background: #fff;
   color: var(--ink);
@@ -428,3 +437,11 @@ button.copy-ok, button.copy-ok:hover { border-color: var(--ok); background: var(
 .result-markdown th { text-align: left; }
 .result-markdown tbody tr:hover { background: var(--cc-teal-light7); }
 .result-markdown img { max-width: 100%; }
+
+/* In forced colors the tints that mark state are gone, so state is drawn in system colors. */
+@media (forced-colors: active) {
+  .filters button[aria-pressed="true"] { background: Highlight; color: HighlightText; border-color: Highlight; }
+  .filters button[aria-pressed="true"] .count { background: HighlightText; color: Highlight; }
+  .tabs [role="tab"][aria-selected="true"] { border-top: 3px solid CanvasText; }
+  .status-pill, .tag, .badge, button { border: 1px solid CanvasText; }
+}

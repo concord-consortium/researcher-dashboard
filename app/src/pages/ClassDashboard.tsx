@@ -324,6 +324,16 @@ export function ClassDashboard({ services, onExpired, user = null, demo = false 
   const session = scope ? sessionLines(runnerDoc, scope.class_hash, results, (key) => listedTitles.get(key) ?? null,
     [...requests.values()].some((r) => "pending" in r)) : [];
 
+  // The browser tab names the view, the open package or the tab, then the class, before the page's own title.
+  const [baseTitle] = useState(() => document.title);
+  const viewTitle = route.tab === "info" ? "Info"
+    : selectedKey ? listedTitles.get(selectedKey) ?? unlistedTitle(identityOfKey(selectedKey), new Map()) : "Packages";
+  const className = scope?.name ?? null;
+  useEffect(() => {
+    document.title = className && !info ? `${viewTitle} - ${className} - ${baseTitle}` : baseTitle;
+    return () => { document.title = baseTitle; };
+  }, [viewTitle, className, info, baseTitle]);
+
   if (info) return <Info reason={info} demo={demo} user={user} />;
   if (!scope) {
     return (
@@ -458,7 +468,8 @@ export function ClassDashboard({ services, onExpired, user = null, demo = false 
           )}
         </div>
 
-        <div role="tabpanel" id={panelId("info")} aria-labelledby={tabId("info")} hidden={tab !== "info"}>
+        {/* Focusable itself, as it holds nothing that is. */}
+        <div role="tabpanel" id={panelId("info")} aria-labelledby={tabId("info")} hidden={tab !== "info"} tabIndex={0}>
           <div className="info-grid">
             <section className="info-card wide" aria-labelledby="assignments-heading">
               <h2 id="assignments-heading"><ClipboardDocumentListIcon aria-hidden="true" />Assignments</h2>
