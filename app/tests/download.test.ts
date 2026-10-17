@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resultFileName } from "../src/shell/download";
+import { resultFileName, tableFileName } from "../src/shell/download";
 
 const AT = new Date(2026, 9, 17, 23, 30).getTime();
 
@@ -18,5 +18,14 @@ describe("resultFileName", () => {
 
   it("names a file with no parts at all", () => {
     expect(resultFileName("", "", null)).toBe("result.md");
+  });
+});
+
+describe("tableFileName", () => {
+  it("names a table's CSV after the heading above it, else by its place among the result's tables", () => {
+    expect(tableFileName("model-use-period-2", "Task 23: Not all wildfires behave the same way", 2))
+      .toBe("model-use-period-2-task-23-not-all-wildfires-behave-the-same-way.csv");
+    expect(tableFileName("model-use-period-2", null, 3)).toBe("model-use-period-2-table-3.csv");
+    expect(tableFileName("model-use-period-2", "???", 1)).toBe("model-use-period-2-table-1.csv");
   });
 });

@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { COPIED_MS, ResultActions, ResultView, ResultWhen } from "../src/components/ResultView";
+import { COPIED_MS } from "../src/components/CopyButton";
+import { ResultActions, ResultView, ResultWhen } from "../src/components/ResultView";
 import { formatTime } from "../src/shell/runs";
 import { stamp } from "./fixtures";
 
@@ -13,7 +14,7 @@ const FINISHED = {
 
 describe("ResultView", () => {
   it("renders the display as markdown", () => {
-    render(<ResultView finished={FINISHED} updated={null} />);
+    render(<ResultView classTitle="Period 2" finished={FINISHED} updated={null} />);
     expect(screen.getByRole("heading", { level: 3, name: "Heading" })).toBeDefined();
   });
 

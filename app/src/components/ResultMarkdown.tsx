@@ -1,7 +1,11 @@
 import Markdown, { type Components, type UrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeSanitize, { type Options as SanitizeSchema } from "rehype-sanitize";
-import { memo, type ReactNode } from "react";
+import { ArrowDownTrayIcon } from "@heroicons/react/16/solid";
+import { createContext, memo, useContext, useRef, type ReactNode } from "react";
+import { saveText, tableFileName } from "../shell/download";
+import { toCsv, toHtml, toTsv } from "../shell/tables";
+import { CopyButton } from "./CopyButton";
 import type { Processor } from "unified";
 
 // A result is markdown written by fetched code, shown on a page holding the researcher's bearer
@@ -48,7 +52,51 @@ export const SCHEMA: SanitizeSchema = {
 // The open package's title is an h2, so a package's "#" is an h3.
 const HEADINGS = ["h3", "h4", "h5", "h6", "h6", "h6"] as const;
 
+// The file name a result's table downloads under starts with the result's.
+const FileBase = createContext("result");
+
+// The heading a table sits under: the nearest h3 to h6 before it among the result's blocks.
+function headingBefore(block: Element): string | null {
+  for (let el = block.previousElementSibling; el; el = el.previousElementSibling) {
+    if (/^H[3-6]$/.test(el.tagName)) return el.textContent;
+  }
+  return null;
+}
+
+// A table, with Copy table and Download CSV under it. Both read the cells' text as rendered.
+function ResultTable({ children }: { children?: ReactNode }) {
+  const table = useRef<HTMLTableElement>(null);
+  const base = useContext(FileBase);
+  const rows = () => [...table.current!.rows].map((row) => [...row.cells].map((cell) => cell.textContent ?? ""));
+  const copy = () => {
+    const tsv = toTsv(rows());
+    if (typeof ClipboardItem === "undefined") return navigator.clipboard.writeText(tsv);
+    const html = toHtml(rows(), table.current!.tHead?.rows.length ?? 0);
+    return navigator.clipboard.write([new ClipboardItem({
+      "text/html": new Blob([html], { type: "text/html" }), "text/plain": new Blob([tsv], { type: "text/plain" })
+    })]);
+  };
+  const download = () => {
+    const block = table.current!.parentElement!;
+    const index = [...block.parentElement!.querySelectorAll(":scope > .result-table")].indexOf(block) + 1;
+    saveText(toCsv(rows()), tableFileName(base, headingBefore(block), index), "text/csv");
+  };
+  return (
+    <div className="result-table">
+      <table ref={table}>{children}</table>
+      <div className="table-actions">
+        <CopyButton label="Copy table" title="Copy this table, to paste into a document or a spreadsheet" copy={copy}
+          done="Copied the table." failed="The table could not be copied." />
+        <button type="button" className="icon-button" title="Download this table as a CSV file" onClick={download}>
+          <ArrowDownTrayIcon aria-hidden="true" />Download CSV
+        </button>
+      </div>
+    </div>
+  );
+}
+
 const COMPONENTS: Components = {
+  table: ({ children }) => <ResultTable>{children}</ResultTable>,
   a: ({ href, children }) => href
     ? <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>
     : <span>{children}</span>,
@@ -57,13 +105,18 @@ const COMPONENTS: Components = {
 };
 
 // Memoized: the page re-renders on every learner's save, and a parse of a long result is not cheap.
-export const ResultMarkdown = memo(function ResultMarkdown({ markdown, sanitize = true }: { markdown: string; sanitize?: boolean }) {
+// `fileBase` starts the file name each table downloads under.
+export const ResultMarkdown = memo(function ResultMarkdown({ markdown, sanitize = true, fileBase = "result" }: {
+  markdown: string; sanitize?: boolean; fileBase?: string;
+}) {
   return (
-    <div className="result-markdown">
-      <Markdown remarkPlugins={[noHtml, remarkGfm, noFootnotes]} rehypePlugins={sanitize ? [[rehypeSanitize, SCHEMA]] : []}
-        urlTransform={keepUrl} components={COMPONENTS}>
-        {markdown}
-      </Markdown>
-    </div>
+    <FileBase.Provider value={fileBase}>
+      <div className="result-markdown">
+        <Markdown remarkPlugins={[noHtml, remarkGfm, noFootnotes]} rehypePlugins={sanitize ? [[rehypeSanitize, SCHEMA]] : []}
+          urlTransform={keepUrl} components={COMPONENTS}>
+          {markdown}
+        </Markdown>
+      </div>
+    </FileBase.Provider>
   );
 });

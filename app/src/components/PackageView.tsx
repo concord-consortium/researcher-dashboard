@@ -80,7 +80,7 @@ export function PackageView({ title, status, note, run, warning, messages, class
       {messages}
       {older && <Callout tone="notice">{older}</Callout>}
       {finished
-        ? <ResultView finished={finished} updated={updated} />
+        ? <ResultView classTitle={classTitle} finished={finished} updated={updated} />
         : <p className="no-result">No result yet.</p>}
     </div>
   );
