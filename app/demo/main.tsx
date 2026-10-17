@@ -2,6 +2,7 @@ import { StrictMode, useEffect, useMemo, useRef, useState, type CSSProperties, t
 import { ArrowPathIcon, BeakerIcon, ChevronDownIcon, PencilSquareIcon } from "@heroicons/react/16/solid";
 import { createRoot } from "react-dom/client";
 import { App } from "../src/App";
+import { DEMO_LABEL } from "../src/components/Brand";
 import { base64url } from "../src/shell/oauth";
 import type { Start } from "../src/shell/start";
 import { SCENARIOS, type Scenario } from "./scenarios";
@@ -102,7 +103,7 @@ function Demo() {
       <aside ref={aside} aria-label="Demo controls"
         style={{ ...panel, ...(open ? {} : { width: "auto" }), ...(at ? { left: at.x, top: at.y, right: "auto", bottom: "auto" } : {}) }}>
         <div style={{ ...head, ...(open ? { marginBottom: 6 } : {}) }} onPointerDown={grab} onPointerMove={move} onPointerUp={drop} onPointerCancel={drop}>
-          {open && <h2 style={title}><BeakerIcon style={icon} aria-hidden="true" />Demo</h2>}
+          {open && <h2 style={title}><BeakerIcon style={icon} aria-hidden="true" />{DEMO_LABEL}</h2>}
           <button type="button" style={open ? { ...toggle, padding: 2 } : toggle} aria-label={open ? "Hide the demo controls" : "Show the demo controls"}
             title={open ? "Hide the demo controls" : "Show the demo controls"} onClick={() => { if (open) setAt(null); setOpen(!open); }}>
             {open ? <ChevronDownIcon style={small} aria-hidden="true" /> : <BeakerIcon style={icon} aria-hidden="true" />}
@@ -124,6 +125,12 @@ function Demo() {
             {world && (
               <>
                 <div style={knobs}>
+                  <label style={{ ...field, flex: 1 }}>
+                    <span style={{ fontWeight: 700, whiteSpace: "nowrap" }}>Runner step</span>
+                    <select style={{ ...select, display: "block", width: "100%", marginTop: 2 }} value={stepMs} onChange={(e) => setStepMs(Number(e.target.value))}>
+                      {[300, 1500, 4000, 10000].map((ms) => <option key={ms} value={ms}>{ms / 1000} s</option>)}
+                    </select>
+                  </label>
                   <div style={field}>
                     <label style={check}>
                       <input type="checkbox" checked={world.knobs.failNext}
@@ -136,12 +143,6 @@ function Demo() {
                       Next run is refused
                     </label>
                   </div>
-                  <label style={{ ...field, flex: 1 }}>
-                    <span style={{ fontWeight: 700, whiteSpace: "nowrap" }}>Runner step</span>
-                    <select style={{ ...select, display: "block", width: "100%", marginTop: 2 }} value={stepMs} onChange={(e) => setStepMs(Number(e.target.value))}>
-                      {[300, 1500, 4000, 10000].map((ms) => <option key={ms} value={ms}>{ms / 1000} s</option>)}
-                    </select>
-                  </label>
                 </div>
                 <div style={buttons}>
                   <button type="button" className="icon-button" style={plain} onClick={() => world.save()}>
