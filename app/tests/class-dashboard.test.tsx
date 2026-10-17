@@ -67,7 +67,10 @@ async function mounted(s: ReturnType<typeof services>, onExpired = vi.fn()) {
 describe("ClassDashboard", () => {
   it("shows the class, its teachers, cohorts and assignments", async () => {
     await mounted(services());
-    expect(screen.getByText(/T\. Teacher · Spike cohort/)).toBeDefined();
+    const banner = screen.getByRole("banner");
+    expect(within(banner).getByRole("heading", { level: 1, name: SCOPE.name })).toBeDefined();
+    expect(within(banner).getByText(/T\. Teacher · Spike cohort/)).toBeDefined();
+    expect(within(banner).getByRole("img", { name: "Concord Consortium" })).toBeDefined();
     expect(screen.getByRole("listitem").textContent).toBe("Wildfire · ActivityPlayer");
   });
 
@@ -431,13 +434,13 @@ describe("running a package", () => {
     expect(wildfireLine().querySelector("p")!.textContent).toBe("Queued, waiting for a machine: run it to start one.");
   });
 
-  it("does not ask for a run above the list while one is being requested", async () => {
+  it("does not ask for a run in the header while one is being requested", async () => {
     const answer = deferred<unknown>();
     const s = services({ run: () => answer.promise });
     await listed(s);
     await s.runner({ state: "terminated", queue: [{ class_hash: SCOPE.class_hash, package_key: KEY }] });
     await s.results(new Map([[KEY, wildfire()]]));
-    const status = () => document.querySelector(".status")!.textContent;
+    const status = () => document.querySelector(".machine")!.textContent;
     expect(status()).toContain("Queued, waiting for a machine: run it to start one.");
     fireEvent.click(runButton());
     expect(status()).toContain("Your machine has stopped.");
@@ -595,6 +598,7 @@ describe("what the page says of the researcher's own runs", () => {
     await s.runner({ state: "running", current_package: { class_hash: SCOPE.class_hash, package_key: KEY } });
     const line = screen.getByText("Running Wildfire open responses.");
     expect(line.closest("[aria-live]")).not.toBeNull();
+    expect(screen.getByRole("banner").contains(line)).toBe(true);
   });
 
   it("shows the researcher's counts, and says when there are none", async () => {

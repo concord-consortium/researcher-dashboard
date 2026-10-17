@@ -1,19 +1,64 @@
+@import "@fontsource/lato/latin-400.css";
+@import "@fontsource/lato/latin-700.css";
+
+/* Concord Consortium's palette, as portal-report's dashboard uses it. */
 :root {
-  --ink: #17232c;
-  --muted: #5a6b78;
-  --line: #d6dee4;
+  --cc-charcoal: #3f3f3f;
+  --cc-charcoal-hint: #6b6b6b;
+  --cc-charcoal-light2: #dfdfdf;
+  --cc-teal: #0592af;
+  --cc-teal-dark2: #016082;
+  --cc-teal-light4: #b7e2ec;
+  --cc-teal-light6: #e2f4f8;
+  --cc-teal-light7: #f5fbfc;
+  --ink: var(--cc-charcoal);
+  --muted: var(--cc-charcoal-hint);
+  --line: var(--cc-charcoal-light2);
   --warn: #8a4b00;
-  --error: #9b1c1c;
-  font-family: system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  --error: #b0101f;
+  font-family: lato, arial, helvetica, sans-serif;
   color: var(--ink);
 }
 
-body { margin: 0; background: #f7f9fa; }
+body { margin: 0; background: #fff; }
 main { max-width: 60rem; margin: 0 auto; padding: 1.5rem; }
 h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
-h2 { font-size: 1.1rem; margin-top: 2rem; }
+h2 { font-size: 1.15rem; margin-top: 2rem; }
 h3 { font-size: 1rem; }
+/* Headings the page moves focus to scroll clear of the sticky header. */
+h2, h3 { scroll-margin-top: 7rem; }
 .meta, .build { color: var(--muted); margin-top: 0; }
+a { color: var(--cc-teal-dark2); }
+
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1.5rem;
+  padding: 0.5rem 1.25rem;
+  background: var(--cc-teal-light4);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+.app-header .brand { display: flex; align-items: center; gap: 0.6rem; }
+.app-header .logo { height: 36px; }
+.app-header .product { font-weight: 700; white-space: nowrap; }
+.app-header .class { flex: 1; min-width: 12rem; }
+.app-header h1 { font-size: 1.15rem; margin: 0; }
+.app-header .meta { margin: 0; font-size: 0.9rem; }
+.app-header .status-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+.app-header .status-bar p {
+  margin: 0;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  background: var(--cc-teal-light6);
+  font-size: 0.9rem;
+}
+.app-header .status-bar .active-count { font-weight: 700; }
+.app-header .machine { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.app-header .machine p:empty { display: none; }
 
 section { border-top: 1px solid var(--line); padding-top: 0.5rem; }
 .assignments { list-style: none; padding: 0; }
@@ -21,6 +66,21 @@ section { border-top: 1px solid var(--line); padding-top: 0.5rem; }
 .notice { color: var(--warn); }
 .error { color: var(--error); }
 .tool { color: var(--muted); }
+
+button {
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 700;
+  padding: 0.25rem 0.75rem;
+  border: 1.5px solid var(--cc-teal);
+  border-radius: 4px;
+  background: var(--cc-teal-light6);
+  color: var(--cc-charcoal);
+  cursor: pointer;
+}
+button:hover { background: var(--cc-teal-light4); }
+button:focus-visible { outline: 2px solid var(--cc-teal-dark2); outline-offset: 2px; }
+button[aria-disabled="true"], button:disabled { opacity: 0.55; cursor: not-allowed; background: var(--cc-teal-light7); }
 
 .package-rows { list-style: none; padding: 0; }
 .package-rows li { margin-bottom: 0.75rem; }
@@ -31,14 +91,16 @@ section { border-top: 1px solid var(--line); padding-top: 0.5rem; }
 .disclosure { color: var(--warn); }
 .ownership { color: var(--muted); }
 .counts { list-style: none; padding: 0; }
-.active-count { font-weight: 600; margin-bottom: 0.2rem; }
 .note { color: var(--muted); margin-top: 0; }
 .state p, .finished p, .reason { margin: 0.2rem 0; }
 .when, .reason { color: var(--muted); }
 .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-top: 0.3rem; }
-button[aria-disabled="true"] { opacity: 0.55; cursor: not-allowed; }
-.result-view { border: 1px solid var(--line); border-radius: 4px; padding: 0 1rem 1rem; background: #fff; }
+.result-view { border: 1px solid var(--line); border-radius: 4px; padding: 0 1rem 1rem; background: var(--cc-teal-light7); }
+.result-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem; }
+.result-actions { display: flex; gap: 0.5rem; }
+.copied { margin: 0; color: var(--muted); }
+.copied:empty { display: none; }
 .result-markdown { overflow-x: auto; }
-.result-markdown table { border-collapse: collapse; }
+.result-markdown table { border-collapse: collapse; background: #fff; }
 .result-markdown th, .result-markdown td { border: 1px solid var(--line); padding: 0.25rem 0.5rem; }
 .result-markdown img { max-width: 100%; }

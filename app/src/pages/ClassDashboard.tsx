@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ClassActivity, type Stopped } from "../components/ClassActivity";
 import { Counts } from "../components/Counts";
+import { Header } from "../components/Header";
 import { PackageList } from "../components/PackageList";
 import { ResultView } from "../components/ResultView";
 import { Unlisted } from "../components/Unlisted";
@@ -285,9 +286,9 @@ export function ClassDashboard({ services, onExpired }: {
   const openedAt = millis(opened?.finished_at);
 
   const session = scope ? sessionLines(runner, scope.class_hash, results, (key) => listedTitles.get(key) ?? null,
-    [...requests.values()].some((r) => "pending" in r)).map((line) => <p key={line} className="session">{line}</p>) : null;
-  // While the machine runs a package that already has a finished result, the session lines stay out
-  // of the live region; the package's row announces the outcome.
+    [...requests.values()].some((r) => "pending" in r)) : [];
+  // While the machine runs a package that already has a finished result, the session lines are not
+  // announced; the package's row announces the outcome.
   const current = runner?.state === "running" ? runner.current_package : null;
   const rerunning = Boolean(current && scope && current.class_hash === scope.class_hash
     && latestFinished(results.get(current.package_key)));
@@ -302,70 +303,65 @@ export function ClassDashboard({ services, onExpired }: {
   }
 
   return (
-    <main className="class-dashboard">
-      <header>
-        <h1>{scope.name}</h1>
-        <p className="meta">
-          {scope.teachers.map((t) => t.name).join(", ")}
-          {scope.cohorts.length > 0 && <> · {scope.cohorts.map((c) => c.name).join(", ")}</>}
-        </p>
+    <>
+      <Header scope={scope} activity={activity} now={services.now} session={session} announce={!rerunning} />
+      <main className="class-dashboard">
         <p className="ownership">
           Your results and counts on this page are your own: another researcher of this class sees their own runs. Class activity is the same for every researcher of this class.
         </p>
-      </header>
 
-      <ClassActivity activity={activity} problem={activityProblem} stopped={stopped} now={services.now} />
+        <ClassActivity activity={activity} problem={activityProblem} stopped={stopped} />
 
-      <section aria-labelledby="assignments-heading">
-        <h2 id="assignments-heading">Assignments</h2>
-        <ul className="assignments">
-          {scope.assignments.map((a) => (
-            <li key={a.offering_id}>
-              {a.name ?? "Untitled"}
-              {a.tool && <span className="tool"> · {a.tool}</span>}
-            </li>
-          ))}
-        </ul>
-      </section>
+        <section aria-labelledby="assignments-heading">
+          <h2 id="assignments-heading">Assignments</h2>
+          <ul className="assignments">
+            {scope.assignments.map((a) => (
+              <li key={a.offering_id}>
+                {a.name ?? "Untitled"}
+                {a.tool && <span className="tool"> · {a.tool}</span>}
+              </li>
+            ))}
+          </ul>
+        </section>
 
-      <Counts counts={counts} />
+        <Counts counts={counts} />
 
-      <section aria-labelledby="packages-heading">
-        <h2 id="packages-heading">Packages</h2>
-        <div className="status" aria-live="polite">
-          {profileProblem && <p className="error">{profileProblem}</p>}
-          {!profileProblem && !profile && !refreshProblem && <p>Reading this class's activities…</p>}
-          {refreshProblem && <p className="error">{refreshProblem}</p>}
-          {profile?.truncated && (
-            <p className="notice">
-              This class's content was too large to read completely, so a package may be missing from this list.
-            </p>
+        <section aria-labelledby="packages-heading">
+          <h2 id="packages-heading">Packages</h2>
+          <div className="status" aria-live="polite">
+            {profileProblem && <p className="error">{profileProblem}</p>}
+            {!profileProblem && !profile && !refreshProblem && <p>Reading this class's activities…</p>}
+            {refreshProblem && <p className="error">{refreshProblem}</p>}
+            {profile?.truncated && (
+              <p className="notice">
+                This class's content was too large to read completely, so a package may be missing from this list.
+              </p>
+            )}
+            {listProblem && <p className="error">{listProblem}</p>}
+            {runsProblem && <p className="error">{runsProblem}</p>}
+            {countsProblem && <p className="error">{countsProblem}</p>}
+            {profile && !rows && !listProblem && !profileProblem && <p>Listing the packages that apply…</p>}
+          </div>
+          {listShown && rows && (
+            <PackageList rows={rows} scope={scope} results={results} runner={runner} mark={mark} requests={requests}
+              newest={newest} behind={behind} onRun={run} onShow={show} showRef={showRef} />
           )}
-          {listProblem && <p className="error">{listProblem}</p>}
-          {runsProblem && <p className="error">{runsProblem}</p>}
-          {countsProblem && <p className="error">{countsProblem}</p>}
-          {!rerunning && session}
-          {profile && !rows && !listProblem && !profileProblem && <p>Listing the packages that apply…</p>}
-        </div>
-        {rerunning && session}
-        {listShown && rows && (
-          <PackageList rows={rows} scope={scope} results={results} runner={runner} mark={mark} requests={requests}
-            newest={newest} behind={behind} onRun={run} onShow={show} showRef={showRef} />
-        )}
-      </section>
+        </section>
 
-      <section aria-labelledby="results-heading">
-        <h2 id="results-heading" ref={resultsHeading} tabIndex={-1}>Results</h2>
-        {open && opened && (
-          <ResultView key={`${open.key}:${open.opening}`} title={listedTitles.get(open.key) ?? opened.package.identity} finished={opened}
-            updated={openedAt !== null && open.shownAt !== null && openedAt > open.shownAt ? openedAt : null} onClose={close} />
-        )}
-        {unlisted.length > 0 && (
-          <Unlisted results={unlisted} notes={new Map([...notes, ...rowNotes])} runner={runner} mark={mark}
-            classHash={scope.class_hash} onShow={show} showRef={showRef} />
-        )}
-        {!(open && opened) && unlisted.length === 0 && <p>Open a finished package's result to read it here.</p>}
-      </section>
-    </main>
+        <section aria-labelledby="results-heading">
+          <h2 id="results-heading" ref={resultsHeading} tabIndex={-1}>Results</h2>
+          {open && opened && (
+            <ResultView key={`${open.key}:${open.opening}`} title={listedTitles.get(open.key) ?? opened.package.identity}
+              classTitle={scope.name} finished={opened}
+              updated={openedAt !== null && open.shownAt !== null && openedAt > open.shownAt ? openedAt : null} onClose={close} />
+          )}
+          {unlisted.length > 0 && (
+            <Unlisted results={unlisted} notes={new Map([...notes, ...rowNotes])} runner={runner} mark={mark}
+              classHash={scope.class_hash} onShow={show} showRef={showRef} />
+          )}
+          {!(open && opened) && unlisted.length === 0 && <p>Open a finished package's result to read it here.</p>}
+        </section>
+      </main>
+    </>
   );
 }

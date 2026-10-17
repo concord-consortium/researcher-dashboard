@@ -1,0 +1,22 @@
+import { describe, expect, it } from "vitest";
+import { resultFileName } from "../src/shell/download";
+
+const AT = new Date(2026, 9, 17, 23, 30).getTime();
+
+describe("resultFileName", () => {
+  it("joins the identity's last segment, the class and the local finish date", () => {
+    expect(resultFileName("official/wildfire-responses", "Wildfire, period 2", AT)).toBe("wildfire-responses-wildfire-period-2-2026-10-17.md");
+  });
+
+  it("leaves out the date when the run has no finish time", () => {
+    expect(resultFileName("official/runner-smoke", "Period 2", null)).toBe("runner-smoke-period-2.md");
+  });
+
+  it("leaves out a part with nothing left after slugging", () => {
+    expect(resultFileName("users/200/draft", "!!!", AT)).toBe("draft-2026-10-17.md");
+  });
+
+  it("names a file with no parts at all", () => {
+    expect(resultFileName("", "", null)).toBe("result.md");
+  });
+});

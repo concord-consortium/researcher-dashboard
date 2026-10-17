@@ -13,10 +13,9 @@ const STOPPED: Record<Stopped, string> = {
   "not-renewed": "Automatic re-runs have stopped because your sign-in could not be renewed. Launch the dashboard again from the portal."
 };
 
-// The count is not in a live region, so a busy class does not announce every save.
-export function ClassActivity({ activity, problem, stopped, now }: {
-  activity: Map<string, Activity> | undefined; problem: string | null; stopped: Stopped | null; now: () => number;
-}) {
+// The learners in the window, and nothing before the first snapshot. It is not in a live region, so a
+// busy class does not announce every save.
+export function ActiveCount({ activity, now }: { activity: Map<string, Activity> | undefined; now: () => number }) {
   const [, tick] = useState(0);
   const at = now();
   const wait = activity ? nextChangeIn(activity, at) : null;
@@ -25,14 +24,21 @@ export function ClassActivity({ activity, problem, stopped, now }: {
     const timer = setTimeout(() => tick((n) => n + 1), Math.min(wait + 1, MAX_TIMEOUT_MS));
     return () => clearTimeout(timer);
   }, [wait, at]);
-  const n = activity ? activeCount(activity, at) : null;
+  if (!activity) return null;
+  const n = activeCount(activity, at);
+  return <p className="active-count">{n} {n === 1 ? "student" : "students"} active {windowLabel(ACTIVE_WINDOW_MINUTES)}</p>;
+}
+
+// What the count in the header means, and whether finished packages re-run on their own.
+export function ClassActivity({ activity, problem, stopped }: {
+  activity: Map<string, Activity> | undefined; problem: string | null; stopped: Stopped | null;
+}) {
   return (
     <section aria-labelledby="activity-heading">
       <h2 id="activity-heading">Class activity</h2>
       <div aria-live="polite">{problem && <p className="error">{problem}</p>}</div>
-      {n !== null && <>
-        <p className="active-count">{n} {n === 1 ? "student" : "students"} active {windowLabel(ACTIVE_WINDOW_MINUTES)}</p>
-        <p className="note">Counts students who saved an answer in this class's Activity Player assignments in that time. A student reading or thinking saves nothing, so this is not a count of who is logged in. It is the same for every researcher of this class.</p>
+      {activity && <>
+        <p className="note">The active count counts students who saved an answer in this class's Activity Player assignments in the last {ACTIVE_WINDOW_MINUTES} minutes. A student reading or thinking saves nothing, so this is not a count of who is logged in. It is the same for every researcher of this class.</p>
         {!stopped && <p>Your finished packages re-run on their own as soon as students save new work.</p>}
       </>}
       <p role="status" className="error">{stopped && STOPPED[stopped]}</p>
