@@ -97,6 +97,7 @@ function base(now: number): WorldState {
 export interface Scenario {
   key: string;
   label: string;
+  // What the scenario shows, in the panel; text between ** and ** is bold.
   about: string;
   world?: (now: number) => WorldState;
   info?: InfoReason;
@@ -159,7 +160,7 @@ export const SCENARIOS: Scenario[] = [
   {
     key: "long",
     label: "A long markdown result",
-    about: "The long result is Wildfire model use's: click its card, or its View result button, to open it. It is a multi-section report of about 14 KB in the real report's layout, with made-up numbers, and scrolling it shows the subheader staying put.",
+    about: "The long result is **Wildfire model use**'s: click its card, or its View result button, to open it. It is a multi-section report of about 14 KB in the real report's layout, with made-up numbers, and scrolling it shows the subheader staying put.",
     world: (now) => ({
       ...base(now),
       results: new Map([done("official/wildfire-model-use", 30, now), done("official/wildfire-responses", 32, now)])

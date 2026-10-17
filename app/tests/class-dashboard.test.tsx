@@ -10,6 +10,9 @@ import pkg from "../package.json";
 import { row, SCOPE, stamp } from "./fixtures";
 
 // The page keeps its place in the URL's fragment, which outlives a test.
+// The title the dashboard's own HTML gives the page, which it keeps after the view and class.
+document.title = "Researcher Dashboard";
+
 afterEach(() => { cleanup(); window.history.replaceState(null, "", "/"); });
 
 const NOW = 100 * 24 * 3600 * 1000;
@@ -75,6 +78,24 @@ describe("ClassDashboard", () => {
     expect(within(banner).getByRole("img", { name: "Concord Consortium" })).toBeDefined();
     infoTab();
     expect(screen.getByRole("listitem").textContent).toBe("Wildfire · Activity Player");
+  });
+
+  it("names the view and the class in the browser tab, and gives the page its own title back when it goes", async () => {
+    await mounted(services());
+    expect(document.title).toBe(`Packages - ${SCOPE.name} - Researcher Dashboard`);
+    infoTab();
+    expect(document.title).toBe(`Info - ${SCOPE.name} - Researcher Dashboard`);
+    cleanup();
+    expect(document.title).toBe("Researcher Dashboard");
+  });
+
+  it("keeps the page's own title once when a new dashboard replaces the last, as a new key makes", async () => {
+    const s = services();
+    const { rerender } = render(<ClassDashboard key="a" services={s.fake} onExpired={vi.fn()} />);
+    await screen.findByRole("heading", { level: 1, name: SCOPE.name });
+    rerender(<ClassDashboard key="b" services={s.fake} onExpired={vi.fn()} />);
+    await screen.findByRole("heading", { level: 1, name: SCOPE.name });
+    expect(document.title).toBe(`Packages - ${SCOPE.name} - Researcher Dashboard`);
   });
 
   it("names the signed-in user on the info page it turns into", async () => {
@@ -574,7 +595,7 @@ function wildfire(over: Partial<Result> = {}): Result {
 
 // The value Current Status gives for `label`, or null when it gives none.
 const countOf = (label: string) =>
-  [...document.querySelectorAll(".counts dt")].find((dt) => dt.textContent === label)?.nextElementSibling?.textContent ?? null;
+  [...document.querySelectorAll("[aria-labelledby=counts-heading] .facts dt")].find((dt) => dt.textContent === label)?.nextElementSibling?.textContent ?? null;
 
 const infoTab = () => fireEvent.click(screen.getByRole("tab", { name: "Info" }));
 
@@ -837,7 +858,7 @@ describe("what the page says of the researcher's own runs", () => {
     await s.activity(new Map([["301", { lastActivityAt: stamp(NOW) }], ["302", { lastActivityAt: stamp(NOW - 3600_000) }]]));
     expect(countOf("Runner")).toBe("Your runner is idle; it starts when you run a package. Queued packages will start within a couple of minutes.");
     expect(countOf("Active students")).toBe("1 (last 5 minutes)");
-    expect(document.querySelector(".counts")!.closest("[aria-live]")).toBeNull();
+    expect(document.querySelector("[aria-labelledby=counts-heading] .facts")!.closest("[aria-live]")).toBeNull();
   });
 
   it("says the results and counts are the researcher's own, in the header's About dialog", async () => {

@@ -13,8 +13,8 @@ import "../src/styles.css";
 
 const READY: Start = {
   kind: "ready",
-  portal: { origin: "https://portal.demo.invalid", reportServer: "https://report-server.demo.invalid", firebaseProject: "demo" },
-  launch: { authDomain: "https://portal.demo.invalid", classId: "590", loginHint: null },
+  portal: { origin: "https://portal.example.com", reportServer: "https://report-server.demo.invalid", firebaseProject: "demo" },
+  launch: { authDomain: "https://portal.example.com", classId: "590", loginHint: null },
   token: { accessToken: unsignedJwt({ uid: 200, first_name: "Demo", last_name: "Researcher", username: "dresearcher" }), issuedAt: 0, expiresAt: Number.MAX_SAFE_INTEGER }
 };
 
@@ -35,12 +35,13 @@ function Demo() {
   const [scenario, setScenario] = useState(chosen);
   const [generation, setGeneration] = useState(0);
   const [stepMs, setStepMs] = useState(1500);
-  const [open, setOpen] = useState(true);
+  // Open where there is room for it beside the page, collapsed on a narrow screen.
+  const [open, setOpen] = useState(() => window.matchMedia("(min-width: 40em)").matches);
   const [at, setAt] = useState<{ x: number; y: number } | null>(null);
   const aside = useRef<HTMLElement>(null);
   const drag = useRef<{ dx: number; dy: number } | null>(null);
-  // Dragged from anywhere but its controls and kept on screen; a reload, a new scenario, Reset or hiding
-  // it puts it back at the bottom right.
+  // Dragged by its title row and kept on screen; a reload, a new scenario, Reset or hiding it puts it
+  // back at the bottom right.
   const grab = (e: PointerEvent<HTMLElement>) => {
     if ((e.target as HTMLElement).closest("button, select, input, label") || !aside.current) return;
     const box = aside.current.getBoundingClientRect();
@@ -65,6 +66,27 @@ function Demo() {
   if (world) world.knobs.stepMs = stepMs;
   const services = useMemo(() => world?.services(), [world]);
 
+  // While open, the page ends the panel's height lower, so it can scroll clear of the panel.
+  useEffect(() => {
+    const panel = aside.current;
+    if (!open || !panel || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => { document.body.style.paddingBottom = `${panel.offsetHeight + 24}px`; });
+    observer.observe(panel);
+    return () => { observer.disconnect(); document.body.style.paddingBottom = ""; };
+  }, [open]);
+
+  // A scenario picked with the mouse applies at once. Arrow keys only move the menu's choice, so
+  // stepping through the list does not rebuild the demo at each step; Enter or leaving the menu applies it.
+  const [picked, setPicked] = useState<string | null>(null);
+  const keyed = useRef(false);
+  const apply = (key: string) => {
+    setPicked(null);
+    if (key === scenario.key) return;
+    setScenario(SCENARIOS.find((s) => s.key === key)!);
+    setGeneration((g) => g + 1);
+    setAt(null);
+  };
+
   useEffect(() => {
     const url = new URL(window.location.href);
     url.searchParams.set("scenario", scenario.key);
@@ -77,9 +99,9 @@ function Demo() {
     <>
       <App key={`${scenario.key}:${generation}`} start={start} services={services}
         reauthorize={() => window.alert("The page would sign in again here.")} demo />
-      <aside ref={aside} aria-label="Demo controls" onPointerDown={grab} onPointerMove={move} onPointerUp={drop} onPointerCancel={drop}
+      <aside ref={aside} aria-label="Demo controls"
         style={{ ...panel, ...(open ? {} : { width: "auto" }), ...(at ? { left: at.x, top: at.y, right: "auto", bottom: "auto" } : {}) }}>
-        <div style={{ ...head, ...(open ? { marginBottom: 6 } : {}) }}>
+        <div style={{ ...head, ...(open ? { marginBottom: 6 } : {}) }} onPointerDown={grab} onPointerMove={move} onPointerUp={drop} onPointerCancel={drop}>
           {open && <h2 style={title}><BeakerIcon style={icon} aria-hidden="true" />Demo</h2>}
           <button type="button" style={open ? { ...toggle, padding: 2 } : toggle} aria-label={open ? "Hide the demo controls" : "Show the demo controls"}
             title={open ? "Hide the demo controls" : "Show the demo controls"} onClick={() => { if (open) setAt(null); setOpen(!open); }}>
@@ -88,14 +110,17 @@ function Demo() {
         </div>
         {open && (
           <div>
-            <select style={{ ...select, width: "100%" }} aria-label="Demo scenario" value={scenario.key} onChange={(e) => {
-              setScenario(SCENARIOS.find((s) => s.key === e.target.value)!);
-              setGeneration((g) => g + 1);
-              setAt(null);
-            }}>
+            <select style={{ ...select, width: "100%" }} aria-label="Demo scenario" value={picked ?? scenario.key}
+              onPointerDown={() => { keyed.current = false; }}
+              onKeyDown={(e) => {
+                keyed.current = true;
+                if (e.key === "Enter" && picked) apply(picked);
+              }}
+              onChange={(e) => (keyed.current ? setPicked(e.target.value) : apply(e.target.value))}
+              onBlur={() => { if (picked) apply(picked); }}>
               {SCENARIOS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
             </select>
-            <p style={about}>{scenario.about}</p>
+            <p style={about}>{scenario.about.split("**").map((part, i) => (i % 2 === 1 ? <strong key={i}>{part}</strong> : part))}</p>
             {world && (
               <>
                 <div style={knobs}>
@@ -108,7 +133,7 @@ function Demo() {
                     <label style={{ ...check, marginTop: 2 }}>
                       <input type="checkbox" checked={world.knobs.refuseNext}
                         onChange={(e) => { world.knobs.refuseNext = e.target.checked; rerender((n) => n + 1); }} />{" "}
-                      Next Run press is refused
+                      Next run is refused
                     </label>
                   </div>
                   <label style={{ ...field, flex: 1 }}>
@@ -136,12 +161,14 @@ function Demo() {
 }
 
 const panel: CSSProperties = {
-  position: "fixed", right: 12, bottom: 12, zIndex: 1000, width: 320, padding: 10,
-  background: "var(--warn-bg)", color: "var(--ink)", border: "1px solid var(--warn-line)", font: "13px system-ui, sans-serif", borderRadius: 6,
-  boxShadow: "0 2px 10px rgba(0,0,0,0.15)", cursor: "move", touchAction: "none", userSelect: "none"
+  position: "fixed", right: 12, bottom: 12, zIndex: 1000, boxSizing: "border-box", width: "20rem", maxWidth: "calc(100vw - 24px)",
+  padding: 10, background: "var(--warn-bg)", color: "var(--ink)", border: "1px solid var(--warn-line)", font: "0.8125rem system-ui, sans-serif",
+  borderRadius: 6, boxShadow: "0 2px 10px rgba(0,0,0,0.15)"
 };
-const head: CSSProperties = { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 };
-const title: CSSProperties = { display: "flex", alignItems: "center", gap: 6, margin: 0, fontSize: 14, color: "var(--warn)" };
+const head: CSSProperties = {
+  display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, cursor: "move", touchAction: "none", userSelect: "none"
+};
+const title: CSSProperties = { display: "flex", alignItems: "center", gap: 6, margin: 0, fontSize: "0.875rem", color: "var(--warn)" };
 const toggle: CSSProperties = { display: "inline-flex", alignItems: "center", padding: 4 };
 const icon: CSSProperties = { width: 16, height: 16 };
 const small: CSSProperties = { width: 12, height: 12 };

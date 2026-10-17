@@ -20,7 +20,7 @@ export function Counts({ counts, session, activity, now }: {
   return (
     <section className="info-card" aria-labelledby="counts-heading">
       <h2 id="counts-heading"><ChartBarIcon aria-hidden="true" />Current Status</h2>
-      <dl className="counts">
+      <dl className="facts">
         {session.length > 0 && <div><dt>Runner</dt><dd>{session.join(" ")}</dd></div>}
         {active !== null && <div><dt>Active students</dt><dd>{active} <span className="when">(last {ACTIVE_WINDOW_MINUTES} minutes)</span></dd></div>}
         {data && <>

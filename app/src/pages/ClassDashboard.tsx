@@ -2,6 +2,7 @@ import { ClipboardDocumentListIcon, CubeIcon, UserGroupIcon } from "@heroicons/r
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Callout } from "../components/Callout";
 import { ClassActivity, type Stopped } from "../components/ClassActivity";
+import { ClassCard } from "../components/ClassCard";
 import { Counts } from "../components/Counts";
 import { Header } from "../components/Header";
 import {
@@ -40,10 +41,16 @@ const PROFILE_REFUSED = "This class's profile could not be read.";
 const ACTIVITY_REFUSED = "Class activity could not be read.";
 
 // The dashboard for the class the token is bound to, never the one the launch link asked for.
-export function ClassDashboard({ services, onExpired, user = null, demo = false }: {
+// The page's own title, as its HTML gave it, read once: a dashboard mounted again sees it unchanged.
+let firstTitle: string | null = null;
+const pageTitle = () => (firstTitle ??= document.title);
+
+// `portal` is the origin of the portal that launched the page, the class's home.
+export function ClassDashboard({ services, onExpired, user = null, portal = null, demo = false }: {
   services: DashboardServices;
   onExpired: () => void;
   user?: TokenUser | null;
+  portal?: string | null;
   demo?: boolean;
 }) {
   const [scope, setScope] = useState<Scope | null>(null);
@@ -245,6 +252,7 @@ export function ClassDashboard({ services, onExpired, user = null, demo = false 
   const [confirming, setConfirming] = useState<string | null>(null);
   const community = useMemo(() => new Set(groups.find((g) => g.key === "community")?.rows.map((r) => packageKey(r.identity))), [groups]);
   const listedTitles = useMemo(() => new Map(grouped.map((r) => [packageKey(r.identity), titleOf(r)])), [grouped]);
+  const projectNames = useMemo(() => new Map((rows ?? []).flatMap((r) => (r.project?.name ? [[r.project.id, r.project.name] as const] : []))), [rows]);
 
   // The page's one announcement of how runs move on: a run starting, finishing or failing, a refused
   // Run, and the runner failing, each said once, naming its package. Rows and the header say nothing.
@@ -325,7 +333,7 @@ export function ClassDashboard({ services, onExpired, user = null, demo = false 
     [...requests.values()].some((r) => "pending" in r)) : [];
 
   // The browser tab names the view, the open package or the tab, then the class, before the page's own title.
-  const [baseTitle] = useState(() => document.title);
+  const baseTitle = pageTitle();
   const viewTitle = route.tab === "info" ? "Info"
     : selectedKey ? listedTitles.get(selectedKey) ?? unlistedTitle(identityOfKey(selectedKey), new Map()) : "Packages";
   const className = scope?.name ?? null;
@@ -471,6 +479,7 @@ export function ClassDashboard({ services, onExpired, user = null, demo = false 
         {/* Focusable itself, as it holds nothing that is. */}
         <div role="tabpanel" id={panelId("info")} aria-labelledby={tabId("info")} hidden={tab !== "info"} tabIndex={0}>
           <div className="info-grid">
+            <ClassCard scope={scope} projectNames={projectNames} portal={portal} />
             <section className="info-card wide" aria-labelledby="assignments-heading">
               <h2 id="assignments-heading"><ClipboardDocumentListIcon aria-hidden="true" />Assignments</h2>
               <ul className="assignments">

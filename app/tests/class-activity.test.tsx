@@ -63,7 +63,7 @@ describe("ActiveCount", () => {
 describe("ClassActivity", () => {
   it("says what the count means under its heading", () => {
     show({ activity: docs(START - MIN) });
-    expect(screen.getByRole("heading", { level: 2, name: "Class Activity" })).toBeDefined();
+    expect(screen.getByRole("heading", { level: 2, name: "Student Saves" })).toBeDefined();
     expect(screen.getByText(/how many students saved an answer/).textContent).toMatch(/in the last 5 minutes\.$/);
     expect(screen.getByText(/not a count of who is logged in/).textContent).toMatch(/same for every researcher of this class/);
     expect(screen.getByText("Your finished packages re-run on their own as soon as students save new work.")).toBeDefined();

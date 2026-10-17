@@ -19,5 +19,6 @@ export function App({ start, reauthorize, services, demo = false }: {
 
   if (start.kind === "info") return <Info reason={start.reason} detail={start.detail} demo={demo} />;
   if (start.kind === "redirecting" || !built) return <main className="loading">Signing in…</main>;
-  return <ClassDashboard services={built} onExpired={reauthorize} user={ready ? tokenUser(ready.token.accessToken) : null} demo={demo} />;
+  return <ClassDashboard services={built} onExpired={reauthorize} user={ready ? tokenUser(ready.token.accessToken) : null}
+    portal={ready?.portal.origin ?? null} demo={demo} />;
 }

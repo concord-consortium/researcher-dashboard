@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
 import type { Portal, ReportServer } from "../src/shell/portal";
@@ -69,6 +69,15 @@ describe("App", () => {
     expect(await screen.findByRole("heading", { level: 1, name: SCOPE.name })).toBeDefined();
     expect(document.querySelector(".app-header .user")).toBeNull();
     expect(within(screen.getByRole("banner")).queryByText("Demo with sample data")).toBeNull();
+  });
+
+  it("links the portal that launched it under the class's name in the Info tab's Class card", async () => {
+    signedIn("at");
+    fireEvent.click(await screen.findByRole("tab", { name: "Info" }));
+    const card = screen.getByRole("region", { name: "Class" });
+    const facts = [...card.querySelectorAll("dt")].map((dt) => [dt.textContent, dt.nextElementSibling!.textContent]);
+    expect(facts.map(([label]) => label)).toEqual(["Name", "Portal", "Class ID", "Teachers", "Cohorts", "Projects"]);
+    expect(within(card).getByRole("link", { name: "https://p.test" }).getAttribute("href")).toBe("https://p.test");
   });
 
   it("says it is a demo in the header only on the demo page", async () => {

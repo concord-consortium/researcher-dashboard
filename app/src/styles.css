@@ -231,9 +231,12 @@ section { border-top: 1px solid var(--line); padding-top: 0.5rem; }
 .info-card p { margin: 0.4rem 0; }
 /* Under .info-card's own list rules, which are for the info page's bulleted and numbered lists. */
 .info-card .assignments { list-style: none; padding: 0; margin: 0; }
-.info-card .assignments li { margin: 0 -0.5rem; padding: 0.3rem 0.5rem; border-top: 1px solid var(--line); border-radius: 4px; }
-.assignments li:hover { background: var(--cc-teal-light7); }
-.assignments li:first-child { border-top: 0; }
+/* Each item's hover tint reaches past the text, so the line between items is drawn inset to the text's width. */
+.info-card .assignments li { margin: 0 -0.5rem; padding: 0.3rem 0.5rem; border-radius: 4px; }
+.info-card .assignments li + li {
+  background: linear-gradient(var(--line), var(--line)) top center / calc(100% - 1rem) 1px no-repeat;
+}
+.info-card .assignments li:hover { background-color: var(--cc-teal-light7); }
 
 .notice { color: var(--warn); }
 .callout {
@@ -344,11 +347,11 @@ button.danger { border-color: #e08a8a; background: #fdecec; color: var(--error);
 button.danger:hover { background: #fbd9d9; }
 button.danger:focus-visible { outline-color: var(--error); }
 .confirm-buttons { display: flex; gap: 0.5rem; }
-.counts { display: grid; grid-template-columns: auto 1fr; gap: 0.3rem 1rem; margin: 0; }
-.counts div { display: contents; }
-.counts dt { color: var(--muted); }
-.counts dd { margin: 0; font-weight: 700; }
-.counts dd .when { font-weight: 400; }
+.facts { display: grid; grid-template-columns: auto 1fr; gap: 0.3rem 1rem; margin: 0; }
+.facts div { display: contents; }
+.facts dt { color: var(--muted); }
+.facts dd { margin: 0; font-weight: 700; }
+.facts dd .when { font-weight: 400; }
 .state p, .finished p, .reason { margin: 0.2rem 0; }
 .callout .when { display: block; }
 .when, .reason { color: var(--muted); }

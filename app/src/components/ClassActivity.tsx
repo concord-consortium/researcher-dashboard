@@ -50,7 +50,7 @@ export function ClassActivity({ activity, problem, stopped }: {
 }) {
   return (
     <section className="info-card" aria-labelledby="activity-heading">
-      <h2 id="activity-heading"><UsersIcon aria-hidden="true" />Class Activity</h2>
+      <h2 id="activity-heading"><UsersIcon aria-hidden="true" />Student Saves</h2>
       <div aria-live="polite">{problem && <p className="error">{problem}</p>}</div>
       {activity && <>
         <p>The student count in the header is how many students saved an answer in this class's Activity Player assignments in the last {ACTIVE_WINDOW_MINUTES} minutes.</p>
