@@ -202,5 +202,10 @@ export const SCENARIOS: Scenario[] = [
     }
   },
   { key: "info", label: "Info page (no launch)", about: "What a visit with no launch parameters shows.", info: "no-launch" },
-  { key: "withdrawn", label: "Info page (access withdrawn)", about: "The page a researcher sees once the portal answers 403.", info: "withdrawn" }
+  {
+    key: "withdrawn",
+    label: "Info page (access withdrawn)",
+    about: "The page a signed-in researcher sees once the portal refuses the class with a 403, with their name in the header.",
+    world: (now) => ({ ...base(now), scopeRefused: 403 })
+  }
 ];

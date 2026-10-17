@@ -77,6 +77,14 @@ describe("ClassDashboard", () => {
     expect(screen.getByRole("listitem").textContent).toBe("Wildfire · ActivityPlayer");
   });
 
+  it("names the signed-in user on the info page it turns into", async () => {
+    const s = services({ scope: async () => { throw new ApiError("forbidden", 403); } });
+    render(<ClassDashboard services={s.fake} onExpired={vi.fn()} user={{ name: "Dana Researcher", username: "dresearcher" }} />);
+    const banner = await screen.findByRole("banner");
+    expect(await within(banner).findByText("Dana Researcher")).toBeDefined();
+    expect(screen.getByRole("status").textContent).toMatch(/withdrawn/);
+  });
+
   it("names an untitled assignment", async () => {
     mount(services({ scope: async () => ({ ...SCOPE, assignments: [{ ...SCOPE.assignments[0], name: null, tool: null }] }) }));
     fireEvent.click(await screen.findByRole("tab", { name: "Info" }));

@@ -28,6 +28,8 @@ export interface WorldState {
   outputs: Map<string, { summary: string; display: string }>;
   // Package keys whose next run fails, with the error each writes.
   failing: Map<string, string>;
+  // The status the portal refuses the class's scope with, which turns the page into an info page.
+  scopeRefused?: number;
 }
 
 const FAILED_ERROR = "cc-data reports filter-options exited 3: NOT_AUTHENTICATED";
@@ -47,7 +49,11 @@ export class World {
     const world = this;
     return {
       portal: {
-        scope: async () => { world.log("portal scope"); return world.state.scope; },
+        scope: async () => {
+          world.log("portal scope");
+          if (world.state.scopeRefused) throw new ApiError("refused", world.state.scopeRefused);
+          return world.state.scope;
+        },
         refreshProfile: async () => { world.log("portal refresh_profile"); return { queued: true }; },
         firebaseToken: async () => "demo",
         runPackage: async (identity: string, version: string) => {

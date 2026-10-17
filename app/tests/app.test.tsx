@@ -12,7 +12,7 @@ describe("App", () => {
   it("renders the info page, naming the portal's link as it is labeled", () => {
     render(<App start={{ kind: "info", reason: "no-launch" }} reauthorize={none} />);
     expect(screen.getByRole("heading", { name: "Researcher Dashboard" })).toBeDefined();
-    expect(screen.getByText(/use the Researcher Dashboard link/)).toBeDefined();
+    expect(screen.getByText(/use the Researcher Dashboard link/i)).toBeDefined();
     expect(document.body.textContent).not.toMatch(/Analy[sz]/);
   });
 
@@ -24,9 +24,32 @@ describe("App", () => {
     expect(list.textContent).toMatch(/How many of the class's students saved work in the last few minutes\./);
   });
 
+  it("links to the demo beside it only when there is no launch, and to its own ready state from the demo", () => {
+    render(<App start={{ kind: "info", reason: "no-launch" }} reauthorize={none} />);
+    expect(screen.getByRole("link", { name: "Open the demo" }).getAttribute("href")).toBe("demo/?scenario=ready");
+    cleanup();
+    render(<App start={{ kind: "info", reason: "no-launch" }} reauthorize={none} demo />);
+    expect(screen.getByRole("link", { name: "Open the demo" }).getAttribute("href")).toBe("?scenario=ready");
+    cleanup();
+    render(<App start={{ kind: "info", reason: "expired" }} reauthorize={none} />);
+    expect(screen.queryByRole("link", { name: "Open the demo" })).toBeNull();
+  });
+
   it("says why it is not showing a class, with the portal's error where it sent one", () => {
     render(<App start={{ kind: "info", reason: "authorize-error", detail: "server_error" }} reauthorize={none} />);
     expect(screen.getByRole("status").textContent).toMatch(/could not sign you in.*server_error/);
+  });
+
+  it.each(["withdrawn", "access-denied", "class-gone"] as const)("leaves out how to open it and what it can show when %s", (reason) => {
+    render(<App start={{ kind: "info", reason }} reauthorize={none} />);
+    expect(screen.getByRole("status")).toBeDefined();
+    expect(screen.queryByRole("heading", { name: "How to use it" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "What it can show" })).toBeNull();
+  });
+
+  it("keeps how to open it where opening it again is the way forward", () => {
+    render(<App start={{ kind: "info", reason: "expired" }} reauthorize={none} />);
+    expect(screen.getByRole("heading", { name: "How to use it" })).toBeDefined();
   });
 
   it("says it is signing in while the browser leaves for the portal", () => {

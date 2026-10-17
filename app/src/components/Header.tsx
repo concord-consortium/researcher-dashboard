@@ -1,10 +1,10 @@
-import { BeakerIcon, CloudIcon, QuestionMarkCircleIcon, XCircleIcon } from "@heroicons/react/16/solid";
+import { CloudIcon, QuestionMarkCircleIcon, XCircleIcon } from "@heroicons/react/16/solid";
 import { useEffect, useRef, type ReactNode } from "react";
-import logo from "../assets/cc-logo.png";
 import { APP_VERSION } from "../build-info";
 import type { Activity } from "../shell/activity";
 import type { TokenUser } from "../shell/oauth";
 import type { Scope } from "../shell/portal";
+import { Brand, UserInfo } from "./Brand";
 import { ActiveCount } from "./ClassActivity";
 
 // The bar that stays at the top of the page: the class, the page's tabs, how many of the class's
@@ -42,17 +42,7 @@ export function Header({ scope, user, demo, tabs, activity, now, session, runner
   return (
     <header className="app-header" ref={bar}>
       <div className="header-main">
-        <div className="brand">
-          <img className="logo" src={logo} alt="Concord Consortium" />
-          <div className="product">
-            <span>Researcher Dashboard</span>
-            {demo && (
-              <span className="demo-pill" title="This dashboard uses a made-up class and simulated runs. Nothing here reaches a portal or real student data.">
-                <BeakerIcon aria-hidden="true" />Demo with sample data
-              </span>
-            )}
-          </div>
-        </div>
+        <Brand demo={demo} />
         <div className="class">
           <h1>{scope.name}</h1>
           <p className="meta">
@@ -60,12 +50,7 @@ export function Header({ scope, user, demo, tabs, activity, now, session, runner
             {scope.cohorts.length > 0 && <> · {scope.cohorts.map((c) => c.name).join(", ")}</>}
           </p>
         </div>
-        {user && (
-          <div className="user">
-            <p className="user-name">{user.name}</p>
-            {user.username && <p className="meta">{user.username}</p>}
-          </div>
-        )}
+        {user && <UserInfo user={user} />}
         <div className="header-row">
           {tabs}
           <div className="status-bar">

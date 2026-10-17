@@ -1,4 +1,4 @@
-Wildfire Explorer: 15 students have opened the module.
+# Wildfire Explorer: 15 students have opened the module.
 
 Simulation data comes from the logs, copied nightly; the newest event is from 2026-10-14 09:12 UTC. Page progress and claims are from saved answers at the time of this run. "Working now" means an answer saved in the 2 minutes before the run.
 

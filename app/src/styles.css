@@ -30,7 +30,52 @@ h3 { font-size: 1rem; }
 h2, h3 { scroll-margin-top: 7rem; }
 /* A heading focused by the page, not by the keyboard, needs no ring. */
 [tabindex="-1"]:focus { outline: none; }
-.meta, .build { color: var(--muted); margin-top: 0; }
+.meta { color: var(--muted); margin-top: 0; }
+/* No tabs below the brand here, so the bar ends as far below it as it starts above. */
+.app-header .header-main.info-header { padding-bottom: 0.5rem; }
+.info h1 { margin: 0 0 0.75rem; }
+.info .callout { margin-bottom: 0; }
+.demo-panel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem 1.5rem;
+  margin-bottom: 1rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid #f3c58a;
+  border-radius: 6px;
+  background: #fff4e5;
+}
+.demo-panel > div { flex: 1; min-width: 16rem; }
+.demo-panel h2 { display: flex; align-items: center; gap: 0.4rem; margin: 0 0 0.25rem; font-size: 1rem; color: var(--warn); }
+.demo-panel h2 svg { width: 16px; height: 16px; }
+.demo-panel p { margin: 0; }
+.link-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.9rem;
+  border: 1.5px solid var(--cc-teal);
+  border-radius: 4px;
+  background: var(--cc-teal-dark2);
+  color: #fff;
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.link-button:hover { background: var(--cc-teal); }
+.link-button:focus-visible { outline: 2px solid var(--cc-teal-dark2); outline-offset: 2px; }
+.link-button svg { width: 16px; height: 16px; }
+.info-card ul, .info-card ol { margin: 0.4rem 0; padding-left: 1.4rem; }
+.info-card li { margin: 0.25rem 0; }
+.info .note { color: var(--muted); font-size: 0.9rem; }
+/* The info page fills the window, so its build info sits at the bottom however little is above it. */
+.info-page { display: flex; flex-direction: column; min-height: 100vh; }
+.info-page main { flex: 1; width: 100%; box-sizing: border-box; }
+.build { width: 100%; max-width: 60rem; box-sizing: border-box; margin: 0 auto; padding: 1rem 1.5rem 1.5rem; color: var(--muted); font-size: 0.85rem; }
+.build h2 { margin: 0 0 0.25rem; font-size: 0.85rem; }
+.build p { margin: 0; }
 a { color: var(--cc-teal-dark2); }
 .visually-hidden {
   position: absolute;

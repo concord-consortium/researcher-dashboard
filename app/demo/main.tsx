@@ -25,20 +25,10 @@ function unsignedJwt(claims: Record<string, unknown>): string {
   return `${part({ alg: "none", typ: "JWT" })}.${part(claims)}.`;
 }
 
-const POSITION_KEY = "researcher-dashboard-demo:panel-position";
-
-function savedPosition(): { x: number; y: number } | null {
-  try {
-    const saved = JSON.parse(localStorage.getItem(POSITION_KEY) ?? "null") as { x: number; y: number } | null;
-    return saved && saved.x < window.innerWidth - 40 && saved.y < window.innerHeight - 40 ? saved : null;
-  } catch {
-    return null;
-  }
-}
-
 function chosen(): Scenario {
-  const key = new URLSearchParams(window.location.search).get("state");
-  return SCENARIOS.find((s) => s.key === key) ?? SCENARIOS[0];
+  const key = new URLSearchParams(window.location.search).get("scenario");
+  // With no scenario named, the demo opens where a visit with no launch does: the info page.
+  return SCENARIOS.find((s) => s.key === key) ?? SCENARIOS.find((s) => s.key === "info")!;
 }
 
 function Demo() {
@@ -46,10 +36,11 @@ function Demo() {
   const [generation, setGeneration] = useState(0);
   const [stepMs, setStepMs] = useState(1500);
   const [open, setOpen] = useState(true);
-  const [at, setAt] = useState(savedPosition);
+  const [at, setAt] = useState<{ x: number; y: number } | null>(null);
   const aside = useRef<HTMLElement>(null);
   const drag = useRef<{ dx: number; dy: number } | null>(null);
-  // Dragged from anywhere but its controls, kept on screen, and remembered across reloads in this browser.
+  // Dragged from anywhere but its controls and kept on screen; a reload, a new scenario or Reset puts it
+  // back at the bottom right.
   const grab = (e: PointerEvent<HTMLElement>) => {
     if ((e.target as HTMLElement).closest("button, select, input, label") || !aside.current) return;
     const box = aside.current.getBoundingClientRect();
@@ -64,10 +55,7 @@ function Demo() {
       y: Math.min(Math.max(0, e.clientY - drag.current.dy), window.innerHeight - height)
     });
   };
-  const drop = () => {
-    drag.current = null;
-    try { if (at) localStorage.setItem(POSITION_KEY, JSON.stringify(at)); } catch { /* a convenience only */ }
-  };
+  const drop = () => { drag.current = null; };
   const world = useMemo(
     () => (scenario.world ? new World(scenario.world(Date.now()), { stepMs, failNext: false, refuseNext: false }) : null),
     // A new world only when the scenario is chosen or reset; the step time is set on it in place.
@@ -79,7 +67,7 @@ function Demo() {
 
   useEffect(() => {
     const url = new URL(window.location.href);
-    url.searchParams.set("state", scenario.key);
+    url.searchParams.set("scenario", scenario.key);
     window.history.replaceState(null, "", url);
   }, [scenario]);
 
@@ -100,9 +88,10 @@ function Demo() {
         </div>
         {open && (
           <div>
-            <select style={{ ...select, width: "100%" }} aria-label="Demo state" value={scenario.key} onChange={(e) => {
+            <select style={{ ...select, width: "100%" }} aria-label="Demo scenario" value={scenario.key} onChange={(e) => {
               setScenario(SCENARIOS.find((s) => s.key === e.target.value)!);
               setGeneration((g) => g + 1);
+              setAt(null);
             }}>
               {SCENARIOS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
             </select>
@@ -129,7 +118,7 @@ function Demo() {
                   <button type="button" className="icon-button" style={plain} onClick={() => world.save()}>
                     <PencilSquareIcon aria-hidden="true" />Student saves
                   </button>
-                  <button type="button" className="icon-button" style={plain} onClick={() => setGeneration((g) => g + 1)}>
+                  <button type="button" className="icon-button" style={plain} onClick={() => { setGeneration((g) => g + 1); setAt(null); }}>
                     <ArrowPathIcon aria-hidden="true" />Reset
                   </button>
                 </div>

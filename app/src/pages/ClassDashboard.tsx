@@ -301,7 +301,7 @@ export function ClassDashboard({ services, onExpired, user = null, demo = false 
   const rerunning = Boolean(current && scope && current.class_hash === scope.class_hash
     && latestFinished(results.get(current.package_key)));
 
-  if (info) return <Info reason={info} />;
+  if (info) return <Info reason={info} demo={demo} user={user} />;
   if (!scope) {
     return (
       <main className="loading">

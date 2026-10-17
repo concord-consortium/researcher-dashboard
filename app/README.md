@@ -34,14 +34,15 @@ again, unless the refused token is under a minute old, which renders the info pa
 
 `demo/index.html`, served by the dev server at `/demo/`, mounts the real `App` and its pages
 over canned services (`demo/world.ts`), for working on the page's look with hot reload. It signs
-in nowhere and reaches no portal, report-server or Firebase. A panel picks the state (several
+in nowhere and reaches no portal, report-server or Firebase. A panel picks the scenario (several
 packages, a package running, a failed run, a long result, no active students, the info pages and
-more, from `demo/scenarios.ts`), and the state is kept in the URL's `state` parameter (`/demo/?state=failed`). Run presses
+more, from `demo/scenarios.ts`), and the scenario is kept in the URL's `scenario` parameter (`/demo/?scenario=failed`). Run presses
 and a "Student saves" button drive a simulated runner through the queued, running and finished
 writes the real one makes, at a step time the panel sets.
 
-The production build takes only `index.html`, so nothing under `demo/` ships. That is
-deliberate: invented results must never reach a researcher (see `src/pages/Info.tsx`).
+The build ships it beside the dashboard, at `demo/` under every deployment, and the info page a
+visit with no launch shows links to it. It is marked as sample data in its header throughout,
+and the dashboard itself never shows invented results (see `src/pages/Info.tsx`).
 
 ## Running against a local portal
 
@@ -116,7 +117,7 @@ the sign-in expired stops automatic re-runs for the page's life rather than sign
 
 ## Content-Security-Policy
 
-The built `index.html` carries a Content-Security-Policy as its first `<head>` element, a
+The built `index.html` and `demo/index.html` carry a Content-Security-Policy as their first `<head>` element, a
 `<meta http-equiv>` added by a build-only plugin in `vite.config.ts`. A package's result is
 markdown written by fetched code, and the policy bounds what the page can load and reach
 whatever that markdown says: images only from the page or `data:`, and connections only to
