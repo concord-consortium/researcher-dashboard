@@ -1,6 +1,7 @@
 import { StrictMode, useEffect, useMemo, useState, type CSSProperties } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "../src/App";
+import { base64url } from "../src/shell/oauth";
 import type { Start } from "../src/shell/start";
 import { SCENARIOS, type Scenario } from "./scenarios";
 import { World } from "./world";
@@ -13,8 +14,15 @@ const READY: Start = {
   kind: "ready",
   portal: { origin: "https://portal.harness.invalid", reportServer: "https://report-server.harness.invalid", firebaseProject: "harness" },
   launch: { authDomain: "https://portal.harness.invalid", classId: "590", loginHint: null },
-  token: { accessToken: "harness", issuedAt: 0, expiresAt: Number.MAX_SAFE_INTEGER }
+  token: { accessToken: unsignedJwt({ uid: 200, first_name: "Dana", last_name: "Researcher", username: "dresearcher" }), issuedAt: 0, expiresAt: Number.MAX_SAFE_INTEGER }
 };
+
+// An access token's shape with the claims the page reads, and no signature, since nothing here
+// sends it anywhere.
+function unsignedJwt(claims: Record<string, unknown>): string {
+  const part = (value: unknown) => base64url(new TextEncoder().encode(JSON.stringify(value)));
+  return `${part({ alg: "none", typ: "JWT" })}.${part(claims)}.`;
+}
 
 function chosen(): Scenario {
   const key = new URLSearchParams(window.location.search).get("s");

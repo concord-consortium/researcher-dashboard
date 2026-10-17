@@ -12,5 +12,5 @@ afterEach(cleanup);
 
 it("names the window from its constant", () => {
   render(<ActiveCount activity={new Map([["u", { lastActivityAt: stamp(Date.now()) }]])} now={Date.now} />);
-  expect(document.querySelector(".active-count")!.textContent).toBe("1 student active in the last 7 minutes");
+  expect(document.querySelector(".active-count")!.getAttribute("title")).toBe("1 student active in the last 7 minutes");
 });

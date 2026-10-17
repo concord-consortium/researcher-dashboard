@@ -1,8 +1,8 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
 import type { Portal, ReportServer } from "../src/shell/portal";
-import { SCOPE } from "./fixtures";
+import { jwt, SCOPE } from "./fixtures";
 
 afterEach(cleanup);
 
@@ -34,11 +34,23 @@ describe("App", () => {
     expect(screen.getByText(/signing in/i)).toBeDefined();
   });
 
-  it("renders the class once signed in", async () => {
-    const token = { accessToken: "at", issuedAt: 0, expiresAt: 1 };
+  const signedIn = (accessToken: string) => {
+    const token = { accessToken, issuedAt: 0, expiresAt: 1 };
     const portal = { origin: "https://p.test", reportServer: "https://r.test", firebaseProject: "f" };
     const services = { portal: { scope: async () => SCOPE } as unknown as Portal, reportServer: {} as ReportServer, watchClass: async () => () => {}, now: () => 0 };
     render(<App start={{ kind: "ready", portal, launch: { authDomain: "https://p.test", classId: "1", loginHint: null }, token }} reauthorize={none} services={services} />);
+  };
+
+  it("renders the class once signed in, with no name for a token that has none", async () => {
+    signedIn("at");
     expect(await screen.findByRole("heading", { level: 1, name: SCOPE.name })).toBeDefined();
+    expect(document.querySelector(".app-header .user")).toBeNull();
+  });
+
+  it("names the signed-in user in the header, with their username, from the token's claims", async () => {
+    signedIn(jwt({ uid: 200, first_name: "Dana", last_name: "Researcher", username: "dresearcher" }));
+    const banner = await screen.findByRole("banner");
+    expect(within(banner).getByText("Dana Researcher")).toBeDefined();
+    expect(within(banner).getByText("dresearcher")).toBeDefined();
   });
 });

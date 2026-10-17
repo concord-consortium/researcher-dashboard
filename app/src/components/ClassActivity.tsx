@@ -1,3 +1,4 @@
+import { UserIcon } from "@heroicons/react/16/solid";
 import { useEffect, useState } from "react";
 import { activeCount, ACTIVE_WINDOW_MINUTES, nextChangeIn, windowLabel, type Activity } from "../shell/activity";
 
@@ -26,7 +27,14 @@ export function ActiveCount({ activity, now }: { activity: Map<string, Activity>
   }, [wait, at]);
   if (!activity) return null;
   const n = activeCount(activity, at);
-  return <p className="active-count">{n} {n === 1 ? "student" : "students"} active {windowLabel(ACTIVE_WINDOW_MINUTES)}</p>;
+  const text = `${n} ${n === 1 ? "student" : "students"} active ${windowLabel(ACTIVE_WINDOW_MINUTES)}`;
+  return (
+    <p className="badge active-count" title={text}>
+      <span className="badge-icon" aria-hidden="true"><UserIcon /></span>
+      <span className="badge-info" aria-hidden="true">{n}</span>
+      <span className="visually-hidden">{text}</span>
+    </p>
+  );
 }
 
 // What the count in the header means, and whether finished packages re-run on their own.

@@ -29,18 +29,28 @@ h3 { font-size: 1rem; }
 h2, h3 { scroll-margin-top: 7rem; }
 .meta, .build { color: var(--muted); margin-top: 0; }
 a { color: var(--cc-teal-dark2); }
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
 
 .app-header {
   position: sticky;
   top: 0;
   z-index: 10;
+  background: var(--cc-teal-light4);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+.app-header .header-main {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 0.5rem 1.5rem;
   padding: 0.5rem 1.25rem;
-  background: var(--cc-teal-light4);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
 }
 .app-header .brand { display: flex; align-items: center; gap: 0.6rem; }
 .app-header .logo { height: 36px; }
@@ -48,17 +58,30 @@ a { color: var(--cc-teal-dark2); }
 .app-header .class { flex: 1; min-width: 12rem; }
 .app-header h1 { font-size: 1.15rem; margin: 0; }
 .app-header .meta { margin: 0; font-size: 0.9rem; }
-.app-header .status-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
-.app-header .status-bar p {
-  margin: 0;
-  padding: 0.25rem 0.6rem;
-  border-radius: 999px;
-  background: var(--cc-teal-light6);
-  font-size: 0.9rem;
-}
-.app-header .status-bar .active-count { font-weight: 700; }
+.app-header .user { margin-left: auto; text-align: right; white-space: nowrap; }
+.app-header .user-name { margin: 0; font-weight: 700; }
+.app-header .status-bar { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
 .app-header .machine { display: flex; flex-wrap: wrap; gap: 0.5rem; }
-.app-header .machine p:empty { display: none; }
+.badge {
+  display: inline-flex;
+  align-items: stretch;
+  margin: 0;
+  overflow: hidden;
+  border-radius: 4px;
+  background: var(--cc-teal-light6);
+  font-size: 0.8rem;
+  line-height: 1.2;
+}
+.badge-icon {
+  display: flex;
+  align-items: center;
+  padding: 0.2rem 0.35rem;
+  background: var(--cc-teal-dark2);
+  color: #fff;
+}
+.badge-icon svg { width: 14px; height: 14px; }
+.badge-info { padding: 0.2rem 0.5rem; }
+.active-count .badge-info { font-weight: 700; }
 
 section { border-top: 1px solid var(--line); padding-top: 0.5rem; }
 .assignments { list-style: none; padding: 0; }

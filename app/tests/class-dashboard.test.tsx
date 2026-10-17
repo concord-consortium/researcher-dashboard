@@ -366,7 +366,7 @@ describe("ClassDashboard", () => {
     const s = services();
     await mounted(s);
     await s.activity(new Map([["301", { lastActivityAt: stamp(NOW) }]]));
-    expect(document.querySelector(".active-count")?.textContent).toMatch(/^1 student active/);
+    expect(document.querySelector(".active-count")?.getAttribute("title")).toMatch(/^1 student active/);
     await s.refuseActivity();
     expect(screen.getByText("Class activity could not be read.")).toBeDefined();
     expect(document.querySelector(".active-count")).toBeNull();

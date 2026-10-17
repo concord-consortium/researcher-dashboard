@@ -14,6 +14,7 @@ import {
 } from "../shell/runs";
 import { behindRows, newestActivity, type Activity } from "../shell/activity";
 import { useAutoRerun } from "../shell/rerun";
+import type { TokenUser } from "../shell/oauth";
 import type { DashboardServices } from "../shell/services";
 import type { InfoReason } from "../shell/start";
 import { Info } from "./Info";
@@ -31,9 +32,10 @@ const PROFILE_REFUSED = "This class's profile could not be read.";
 const ACTIVITY_REFUSED = "Class activity could not be read.";
 
 // The dashboard for the class the token is bound to, never the one the launch link asked for.
-export function ClassDashboard({ services, onExpired }: {
+export function ClassDashboard({ services, onExpired, user = null }: {
   services: DashboardServices;
   onExpired: () => void;
+  user?: TokenUser | null;
 }) {
   const [scope, setScope] = useState<Scope | null>(null);
   const [info, setInfo] = useState<InfoReason | null>(null);
@@ -304,7 +306,7 @@ export function ClassDashboard({ services, onExpired }: {
 
   return (
     <>
-      <Header scope={scope} activity={activity} now={services.now} session={session} announce={!rerunning} />
+      <Header scope={scope} user={user} activity={activity} now={services.now} session={session} announce={!rerunning} />
       <main className="class-dashboard">
         <p className="ownership">
           Your results and counts on this page are your own: another researcher of this class sees their own runs. Class activity is the same for every researcher of this class.

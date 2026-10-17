@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { ClassDashboard } from "./pages/ClassDashboard";
 import { Info } from "./pages/Info";
+import { tokenUser } from "./shell/oauth";
 import { makeServices, type DashboardServices } from "./shell/services";
 import type { Start } from "./shell/start";
 
@@ -16,5 +17,5 @@ export function App({ start, reauthorize, services }: {
 
   if (start.kind === "info") return <Info reason={start.reason} detail={start.detail} />;
   if (start.kind === "redirecting" || !built) return <main className="loading">Signing in…</main>;
-  return <ClassDashboard services={built} onExpired={reauthorize} />;
+  return <ClassDashboard services={built} onExpired={reauthorize} user={ready ? tokenUser(ready.token.accessToken) : null} />;
 }
