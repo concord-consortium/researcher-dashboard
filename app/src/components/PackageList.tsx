@@ -9,8 +9,9 @@ import { useEffect, useId, useRef, useState, type ComponentType, type ReactNode,
 import { plainError } from "../shell/errors";
 import { routeHash } from "../shell/route";
 import { Callout } from "./Callout";
+import { FinishedWhen, Time } from "./Time";
 import {
-  finishedWhen, formatTime, latestFinished, millis, rowState, runOffer, sentence, stageWords, WAITING,
+  formatTime, latestFinished, millis, rowState, runOffer, sentence, stageWords, WAITING,
   type Finished, type Result, type RowState, type Runner, type RunRequest, type SessionMark
 } from "../shell/runs";
 
@@ -123,7 +124,7 @@ export function RowStatus({ model, withFinished = true, withNotRun = true }: {
     <>
       <StateRegion line={line}>{pending && <p>Requesting…</p>}</StateRegion>
       {withFinished && finished && state.kind !== "done" && <p className="summary">{finished.summary ?? "Finished."}</p>}
-      {withFinished && finished && <p className="when finished-at">{finishedNote(model)}</p>}
+      {withFinished && finished && <p className="when finished-at"><FinishedWhen ms={millis(finished.finished_at)} />{model.versionNote && ` · ${model.versionNote}`}</p>}
       {outdated && <p className="notice">Students have saved work since this result.</p>}
     </>
   );
@@ -142,14 +143,14 @@ export function RowProblems({ model }: { model: StatusModel }) {
         <Callout tone="error">
           {line} Run it again; if it keeps failing, <a href={CONTACT_URL} target="_blank" rel="noopener noreferrer">contact Concord</a>.
           {detail && <>{" "}<span className="detail">Details: <code>{detail}</code></span></>}
-          {" "}{state.finishedAt !== null && <span className="when">Failed at {formatTime(state.finishedAt)}</span>}
+          {" "}{state.finishedAt !== null && <span className="when">Failed <Time ms={state.finishedAt} /></span>}
         </Callout>
       )}
       {refusal && (
         <Callout tone="error">
           <span>{sentence(refusal.message)}</span>
           {refusal.retry && <> Run it again; if it keeps happening, <a href={CONTACT_URL} target="_blank" rel="noopener noreferrer">contact Concord</a>.</>}
-          {" "}<span className="when">Refused at {formatTime(refusal.refusedAt)}</span>
+          {" "}<span className="when">Refused <Time ms={refusal.refusedAt} /></span>
         </Callout>
       )}
     </div>
@@ -180,12 +181,6 @@ export function statusPill(model: StatusModel): { status: Status; label: string;
     case "done": return pill("Finished", "ok");
     case "failed": return pill(finished ? "Re-run failed" : "Failed", "error");
   }
-}
-
-// When the result a row keeps finished, and the version it came from when that is not the current one.
-export function finishedNote({ finished, versionNote }: StatusModel): string | null {
-  if (!finished) return null;
-  return `${finishedWhen(millis(finished.finished_at))}${versionNote ? ` · ${versionNote}` : ""}`;
 }
 
 // A package's state in a word or two. When its kept result finished is shown in words beside it.
@@ -439,9 +434,9 @@ export function StatusFilter({ counts, selected, onSelect }: {
   onSelect: (status: Status | "all") => void;
 }) {
   return (
-    <select className="status-filter" aria-label="Filter packages by status" value={selected}
+    <select className="status-filter" aria-label="Filter packages by run status" value={selected}
       onChange={(e) => onSelect(e.target.value as Status | "all")}>
-      <option value="all">All statuses</option>
+      <option value="all">All run statuses</option>
       {STATUSES.filter((s) => counts.get(s) || s === selected).map((s) => <option key={s} value={s}>{s} ({counts.get(s) ?? 0})</option>)}
     </select>
   );

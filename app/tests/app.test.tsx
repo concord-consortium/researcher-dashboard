@@ -19,9 +19,12 @@ describe("App", () => {
   it("says the dashboard runs packages and shows their results and counts", () => {
     render(<App start={{ kind: "info", reason: "no-launch" }} reauthorize={none} />);
     const list = screen.getByRole("heading", { name: "What it can show" }).nextElementSibling!;
-    expect(list.textContent).toMatch(/Running a package for the class, and the result it wrote\./);
-    expect(list.textContent).toMatch(/The counts from your own runs\./);
-    expect(list.textContent).toMatch(/How many of the class's students saved work in the last few minutes\./);
+    expect([...list.querySelectorAll("li")].map((li) => li.textContent!.replace(/\s+/g, " ").trim())).toEqual([
+      "The packages that apply to the class, which you can search and filter by group: Official, Project, Personal and Community.",
+      "Running a package for the class, and reading, copying and downloading its result and its tables.",
+      "Finished results that re-run on their own as students save new work.",
+      "How many of the class's students saved work in the last few minutes, and the counts from your own runs."
+    ]);
   });
 
   it("links to the demo beside it only when there is no launch, and to its own ready state from the demo", () => {
@@ -45,6 +48,12 @@ describe("App", () => {
     expect(screen.getByRole("status")).toBeDefined();
     expect(screen.queryByRole("heading", { name: "How to use it" })).toBeNull();
     expect(screen.queryByRole("heading", { name: "What it can show" })).toBeNull();
+  });
+
+  it("says who to ask when the portal refused research access at sign-in, with no portal to link back to yet", () => {
+    render(<App start={{ kind: "info", reason: "access-denied" }} reauthorize={none} />);
+    expect(screen.getByText(/^Research access to a class comes from/).textContent).toMatch(/ask the project's administrator, or contact Concord\.$/);
+    expect(screen.queryByRole("link", { name: "Back to the portal" })).toBeNull();
   });
 
   it("keeps how to open it where opening it again is the way forward", () => {

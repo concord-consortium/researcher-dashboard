@@ -84,8 +84,8 @@ export function Header({ scope, user, demo, tabs, activity, now, session, runner
         <h3>Groups</h3>
         <p>
           Official packages are made and reviewed by Concord. Project packages are shared with this class's
-          research projects, and Mine are the ones you uploaded. Community packages are shared publicly by
-          other researchers and are not reviewed, so the page asks before running one.
+          research projects. Personal packages are the ones you uploaded. Community packages are shared publicly
+          by other researchers and are not reviewed, so the page asks before running one.
         </p>
         <h3>Who sees what</h3>
         <p>

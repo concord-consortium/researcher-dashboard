@@ -348,7 +348,7 @@ export function ClassDashboard({ services, onExpired, user = null, portal = null
     return () => { document.title = baseTitle; };
   }, [viewTitle, className, info, baseTitle]);
 
-  if (info) return <Info reason={info} demo={demo} user={user} />;
+  if (info) return <Info reason={info} demo={demo} user={user} portal={portal} />;
   if (!scope) {
     return (
       <main className="loading">
@@ -398,7 +398,7 @@ export function ClassDashboard({ services, onExpired, user = null, portal = null
   const confirm = (row: PackageRow) => { setConfirming(null); void run(row, false); };
   const anyListed = grouped.length + unlisted.length > 0;
   const anyRerunnable = rerunnable.some((r) => latestFinished(results.get(packageKey(r.identity))));
-  const emptyList = filter === "search" && searchFound === 0 ? `No packages match “${search}”.` : `No packages here have the status ${statusFilter}.`;
+  const emptyList = filter === "search" && searchFound === 0 ? `No packages match “${search}”.` : `No packages here have the run status ${statusFilter}.`;
   // What the list's pills and menu leave, said when a search or a filter changes it.
   const listNews = filter === "search" && searchFound > 0
     ? `${searchFound} ${searchFound === 1 ? "package matches" : "packages match"} “${search}”.`

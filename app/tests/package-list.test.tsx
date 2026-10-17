@@ -55,9 +55,9 @@ describe("PackageList", () => {
     const stranger = row({ title: "Stranger's", visibility: "public" });
     list([stranger, mine, official]);
     expect([...document.querySelectorAll(".package-rows > li")].map((li) => [li.querySelector(".title")!.textContent, li.querySelector(".tag")!.textContent]))
-      .toEqual([["Ours", "Official"], ["My own", "Mine"], ["Stranger's", "Community"]]);
+      .toEqual([["Ours", "Official"], ["My own", "Personal"], ["Stranger's", "Community"]]);
     expect(screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent))
-      .toEqual(["Ours Version 1.0.0 Group: Official", "My own Version 1.0.0 Group: Mine", "Stranger's Version 1.0.0 Group: Community"]);
+      .toEqual(["Ours Version 1.0.0 Group: Official", "My own Version 1.0.0 Group: Personal", "Stranger's Version 1.0.0 Group: Community"]);
     cleanup();
     list([stranger, mine, official], { filter: "mine" });
     expect([...document.querySelectorAll(".title")].map((e) => e.textContent)).toEqual(["My own"]);
@@ -118,7 +118,7 @@ describe("PackageList", () => {
     expect(failureText("Failed")).toBe(`Failed: The runner stopped before the run finished. ${NEXT_STEP}`);
     expect(failurePanel("Failed")!.querySelector(".detail")).toBeNull();
     expect(failurePanel("Failed")!.querySelector("a")!.getAttribute("href")).toBe("https://concord.org/about/contact/");
-    expect(failurePanel("Failed")!.querySelector(".when")!.textContent).toBe(`Failed at ${formatTime(5000)}`);
+    expect(failurePanel("Failed")!.querySelector(".when")!.textContent).toBe(`Failed ${formatTime(5000)}`);
     expect(failurePanel("Done")).toBeNull();
     expect(stateLine("Stuck")).toBe("Interrupted: its runner stopped partway. This is being checked.");
     expect(within(item("Stuck")).getByText("It can be run again once it is marked failed.")).toBeDefined();
@@ -177,7 +177,7 @@ describe("PackageList", () => {
     expect(failureText("Refailed")).toBe(
       `The latest re-run failed: No runner picked up this run in time. Showing the result from ${formatTime(1000)}. ${NEXT_STEP}`
     );
-    expect(failurePanel("Refailed")!.querySelector(".when")!.textContent).toBe(`Failed at ${formatTime(4000)}`);
+    expect(failurePanel("Refailed")!.querySelector(".when")!.textContent).toBe(`Failed ${formatTime(4000)}`);
     for (const title of ["Requeued", "Rerunning", "Refailed"]) {
       expect(within(item(title)).getByText("Earlier summary")).toBeDefined();
       expect(finishedAt(title)).toBe(`Finished ${formatTime(1000)}`);

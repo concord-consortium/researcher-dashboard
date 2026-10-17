@@ -1,8 +1,9 @@
-import { ArrowTopRightOnSquareIcon, BeakerIcon, CubeIcon, PlayCircleIcon } from "@heroicons/react/16/solid";
+import { ArrowLeftIcon, ArrowTopRightOnSquareIcon, BeakerIcon, CubeIcon, PlayCircleIcon } from "@heroicons/react/16/solid";
 import { BUILD_VERSION } from "../build-info";
 import { Brand, UserInfo } from "../components/Brand";
 import type { TokenUser } from "../shell/oauth";
 import { Callout } from "../components/Callout";
+import { CONTACT_URL } from "../components/PackageList";
 import type { InfoReason } from "../shell/start";
 
 const REASONS: Record<Exclude<InfoReason, "no-launch">, string> = {
@@ -16,6 +17,13 @@ const REASONS: Record<Exclude<InfoReason, "no-launch">, string> = {
   expired: "Your sign-in has expired and could not be renewed. Launch the dashboard again from the portal."
 };
 
+// Why research access to a class can be missing, for the reasons that come from it, before what to do.
+const ACCESS: Partial<Record<InfoReason, string>> = {
+  withdrawn: "Research access ends when your researcher access to the class's project expires or is removed, or when "
+    + "the class leaves the project.",
+  "access-denied": "Research access to a class comes from being a researcher on a project the class belongs to."
+};
+
 // Reasons the way in and what the dashboard can show would not help with, so the page leaves them out.
 const HIDE_PANELS: InfoReason[] = ["withdrawn", "access-denied", "class-gone"];
 
@@ -23,9 +31,11 @@ const HIDE_PANELS: InfoReason[] = ["withdrawn", "access-denied", "class-gone"];
 // dashboard is, why it is showing instead, and how to get in, and never shows class data. With no
 // launch it links to the demo page, which is marked as sample data throughout.
 // `user` is known only once the page has signed in, so it is absent before the token is redeemed.
-export function Info({ reason, detail, demo = false, user = null }: {
-  reason: InfoReason; detail?: string; demo?: boolean; user?: TokenUser | null;
+// `portal` is the origin of the portal the page signed in to, known once it has.
+export function Info({ reason, detail, demo = false, user = null, portal = null }: {
+  reason: InfoReason; detail?: string; demo?: boolean; user?: TokenUser | null; portal?: string | null;
 }) {
+  const access = ACCESS[reason];
   return (
     <div className="info-page">
       <header className="app-header">
@@ -50,6 +60,16 @@ export function Info({ reason, detail, demo = false, user = null }: {
             {REASONS[reason]}
             {detail && <> (<code>{detail}</code>)</>}
           </Callout>
+        )}
+
+        {access && (
+          <p>
+            {access} If you should have access, ask the project's administrator, or{" "}
+            <a href={CONTACT_URL} target="_blank" rel="noopener noreferrer">contact Concord</a>.
+          </p>
+        )}
+        {portal && HIDE_PANELS.includes(reason) && (
+          <p><a className="link-button" href={portal}><ArrowLeftIcon aria-hidden="true" />Back to the portal</a></p>
         )}
 
         {reason === "no-launch" && (
@@ -82,12 +102,15 @@ export function Info({ reason, detail, demo = false, user = null }: {
             <h2 id="shows-heading"><CubeIcon aria-hidden="true" />What it can show</h2>
             <ul>
               <li>
-                The packages that apply to the class, grouped as Official, the class's projects, your
-                own, and Community.
+                The packages that apply to the class, which you can search and filter by group: Official,
+                Project, Personal and Community.
               </li>
-              <li>Running a package for the class, and the result it wrote.</li>
-              <li>The counts from your own runs.</li>
-              <li>How many of the class's students saved work in the last few minutes.</li>
+              <li>Running a package for the class, and reading, copying and downloading its result and its tables.</li>
+              <li>Finished results that re-run on their own as students save new work.</li>
+              <li>
+                How many of the class's students saved work in the last few minutes, and the counts from your
+                own runs.
+              </li>
             </ul>
           </section>
         </div>}

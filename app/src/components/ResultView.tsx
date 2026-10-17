@@ -1,6 +1,7 @@
 import { ArrowDownTrayIcon } from "@heroicons/react/16/solid";
 import { resultFileBase, resultFileName, saveText } from "../shell/download";
-import { finishedWhen, formatTime, millis, type Finished } from "../shell/runs";
+import { fullTime, millis, type Finished } from "../shell/runs";
+import { FinishedWhen } from "./Time";
 import { CopyButton } from "./CopyButton";
 import { ResultMarkdown } from "./ResultMarkdown";
 
@@ -23,10 +24,10 @@ export function ResultActions({ classTitle, finished }: { classTitle: string; fi
 // The read is the line's title, and is said to a screen reader in full.
 export function ResultWhen({ finished }: { finished: Finished }) {
   const started = millis(finished.started_at);
-  const read = started === null ? null : `Includes every save before ${formatTime(started)}, when this run began reading the class's data.`;
+  const read = started === null ? null : `Includes every save before ${fullTime(started)}, when this run began reading the class's data.`;
   return (
     <p className="when result-when" title={read ?? undefined}>
-      Version {finished.package.version} · {finishedWhen(millis(finished.finished_at))}
+      Version {finished.package.version} · <FinishedWhen ms={millis(finished.finished_at)} />
       {read && <span className="visually-hidden"> {read}</span>}
     </p>
   );

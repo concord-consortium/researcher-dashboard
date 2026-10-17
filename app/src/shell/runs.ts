@@ -147,12 +147,26 @@ export type RunRequest =
   | { resuming: true; at: number | null }
   | { requested: true; at: number | null; lapsed?: true };
 
-export const formatTime = (ms: number) => new Date(ms).toLocaleString();
+// The full local date and time, to the second, where the exact moment matters.
+export const fullTime = (ms: number) => new Date(ms).toLocaleString();
+
+const DAY_MS = 24 * 3600 * 1000;
+const dayStart = (ms: number) => new Date(ms).setHours(0, 0, 0, 0);
+
+// A time as short as it reads: "today, 10:11 AM", "yesterday, 4:02 PM", "Oct 14, 9:12 AM", with the
+// year only when it is not this one. The day is told against the clock when it is called.
+export function formatTime(ms: number, now = Date.now()): string {
+  const time = new Date(ms).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  const days = Math.round((dayStart(now) - dayStart(ms)) / DAY_MS);
+  if (days === 0) return `today, ${time}`;
+  if (days === 1) return `yesterday, ${time}`;
+  const sameYear = new Date(ms).getFullYear() === new Date(now).getFullYear();
+  const date = new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric", ...(sameYear ? {} : { year: "numeric" }) });
+  return `${date}, ${time}`;
+}
 
 // A sentence from text that may already end in one.
 export const sentence = (text: string) => (/[.!?…]$/.test(text) ? text : `${text}.`);
-
-export const finishedWhen = (ms: number | null) => `Finished ${ms !== null ? formatTime(ms) : "at an unknown time"}`;
 
 // The lines above the list. `titleOf` names a package of this class by its key, or returns null while
 // the page cannot name it yet;

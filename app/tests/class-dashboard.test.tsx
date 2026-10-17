@@ -5,7 +5,7 @@ import { ClassDashboard } from "../src/pages/ClassDashboard";
 import { packageKey, type Profile } from "../src/shell/packages";
 import { ApiError, SessionExpired, type PackageRow, type Portal, type ReportServer, type Resolved, type Scope } from "../src/shell/portal";
 import type { Activity } from "../src/shell/activity";
-import { formatTime, type Counts, type Result, type Runner } from "../src/shell/runs";
+import { formatTime, fullTime, type Counts, type Result, type Runner } from "../src/shell/runs";
 import type { ClassListeners, DashboardServices } from "../src/shell/services";
 import pkg from "../package.json";
 import { row, SCOPE, stamp } from "./fixtures";
@@ -148,6 +148,21 @@ describe("ClassDashboard", () => {
     expect(await screen.findByText(/access to this class has been withdrawn/)).toBeDefined();
   });
 
+  it("says on the withdrawn page why access ends and who to ask, with the way back to the portal", async () => {
+    render(<ClassDashboard services={services({ scope: async () => { throw new ApiError("No", 403); } }).fake} onExpired={vi.fn()} portal="https://portal.test" />);
+    const why = await screen.findByText(/^Research access ends when/);
+    expect(why.textContent).toMatch(/ask the project's administrator, or contact Concord\.$/);
+    expect(within(why).getByRole("link", { name: "contact Concord" }).getAttribute("href")).toBe("https://concord.org/about/contact/");
+    expect(screen.getByRole("link", { name: "Back to the portal" }).getAttribute("href")).toBe("https://portal.test");
+  });
+
+  it("gives the class-gone page the way back to the portal and no access advice", async () => {
+    render(<ClassDashboard services={services({ scope: async () => { throw new ApiError("Gone", 404); } }).fake} onExpired={vi.fn()} portal="https://portal.test" />);
+    expect(await screen.findByText(/class no longer exists/)).toBeDefined();
+    expect(screen.getByRole("link", { name: "Back to the portal" }).getAttribute("href")).toBe("https://portal.test");
+    expect(screen.queryByText(/Research access/)).toBeNull();
+  });
+
   it("renders the class-gone page on a 404", async () => {
     mount(services({ scope: async () => { throw new ApiError("The class this token was issued for no longer exists", 404); } }));
     expect(await screen.findByText(/class no longer exists/)).toBeDefined();
@@ -276,7 +291,7 @@ describe("ClassDashboard", () => {
     await screen.findByText("Ours");
     const pills = within(screen.getByRole("group", { name: "Filter packages" })).getAllByRole("button");
     expect(pills.map((p) => [p.textContent, p.getAttribute("aria-pressed")])).toEqual([
-      ["All 4", "true"], ["Official 2", "false"], ["Projects 1", "false"], ["Community 1", "false"]
+      ["All 4", "true"], ["Official 2", "false"], ["Project 1", "false"], ["Community 1", "false"]
     ]);
     expect(pills.map((p) => p.title)).toEqual(["Every package that applies to this class", "Packages made and reviewed by Concord",
       "Packages shared with this class's research projects", "Packages other researchers shared publicly, which Concord has not reviewed"]);
@@ -301,7 +316,7 @@ describe("ClassDashboard", () => {
       status: "done", package: { identity, version: "1.0.0", checksum: "c" }, summary: "Done.", finished_at: stamp(1000), updated_at: stamp(1000)
     });
     s.results(new Map([[packageKey(ours.identity), done(ours.identity)], ["projects__20__gone", done("projects/20/gone")]]));
-    const menu = screen.getByRole("combobox", { name: "Filter packages by status" }) as HTMLSelectElement;
+    const menu = screen.getByRole("combobox", { name: "Filter packages by run status" }) as HTMLSelectElement;
     const counts = () => [...menu.options].filter((o) => /\(\d+\)$/.test(o.text) && !o.text.endsWith("(0)")).map((o) => o.text);
     const titles = () => [...document.querySelectorAll(".title")].map((e) => e.textContent);
     expect(menu.value).toBe("all");
@@ -311,12 +326,12 @@ describe("ClassDashboard", () => {
     fireEvent.click(within(screen.getByRole("group", { name: "Filter packages" })).getByRole("button", { name: /^Official/ }));
     expect(titles()).toEqual(["Ours"]);
     expect(counts()).toEqual(["Not run (1)", "Finished (1)"]);
-    expect([...menu.options].map((o) => o.text)).toEqual(["All statuses", "Not run (1)", "Finished (1)"]);
+    expect([...menu.options].map((o) => o.text)).toEqual(["All run statuses", "Not run (1)", "Finished (1)"]);
     fireEvent.click(within(screen.getByRole("group", { name: "Filter packages" })).getByRole("button", { name: /^Community/ }));
     expect(titles()).toEqual([]);
-    expect(screen.getByText("No packages here have the status Finished.", { selector: "p:not([role=status])" })).toBeDefined();
-    expect(document.querySelector(".all-packages [role=status]")!.textContent).toBe("No packages here have the status Finished.");
-    expect([...menu.options].map((o) => o.text)).toEqual(["All statuses", "Not run (1)", "Finished (0)"]);
+    expect(screen.getByText("No packages here have the run status Finished.", { selector: "p:not([role=status])" })).toBeDefined();
+    expect(document.querySelector(".all-packages [role=status]")!.textContent).toBe("No packages here have the run status Finished.");
+    expect([...menu.options].map((o) => o.text)).toEqual(["All run statuses", "Not run (1)", "Finished (0)"]);
     fireEvent.click(within(screen.getByRole("group", { name: "Filter packages" })).getByRole("button", { name: /^Official/ }));
     expect(titles()).toEqual(["Ours"]);
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Run Ours" })); });
@@ -691,7 +706,7 @@ describe("running a package", () => {
     fireEvent.click(runButton());
     const message = await within(wildfireProblems() as HTMLElement).findByText("projects/20/wildfire-responses@1.0.0 cannot be run.");
     expect(message.closest(".callout")!.className).toBe("callout error");
-    expect(message.closest(".callout")!.textContent).toBe(`projects/20/wildfire-responses@1.0.0 cannot be run. Refused at ${formatTime(NOW)}`);
+    expect(message.closest(".callout")!.textContent).toBe(`projects/20/wildfire-responses@1.0.0 cannot be run. Refused ${formatTime(NOW)}`);
     expect(within(wildfireRow()).getAllByText(/cannot be run/)).toHaveLength(1);
     await vi.waitFor(() => expect(announced()).toBe("Wildfire open responses could not be run: projects/20/wildfire-responses@1.0.0 cannot be run."));
     await s.results(new Map([[KEY, wildfire({ status: "done", summary: "Earlier", updated_at: stamp(5) })]]));
@@ -709,7 +724,7 @@ describe("running a package", () => {
     await act(async () => answer.reject(new ApiError("report-service could not start a machine", 502)));
     const message = within(wildfireProblems() as HTMLElement).getByText("report-service could not start a machine.");
     expect(message.closest(".callout")!.textContent)
-      .toBe(`report-service could not start a machine. Run it again; if it keeps happening, contact Concord. Refused at ${formatTime(NOW)}`);
+      .toBe(`report-service could not start a machine. Run it again; if it keeps happening, contact Concord. Refused ${formatTime(NOW)}`);
     expect(within(message.closest(".callout") as HTMLElement).getByRole("link", { name: "contact Concord" }).getAttribute("href")).toBe("https://concord.org/about/contact/");
     await s.results(new Map([[KEY, wildfire({ updated_at: stamp(21) })]]));
     expect(screen.queryByText("report-service could not start a machine.")).toBeNull();
@@ -925,7 +940,7 @@ describe("opening a package", () => {
     await listed(s);
     await s.results(new Map([[KEY, done(WILDFIRE.identity, "Earlier", 1000, { started_at: stamp(900) })]]));
     fireEvent.click(link("Wildfire open responses"));
-    const line = `Includes every save before ${formatTime(900)}, when this run began reading the class's data.`;
+    const line = `Includes every save before ${fullTime(900)}, when this run began reading the class's data.`;
     const when = () => view().querySelector(".result-when")!;
     expect(when().getAttribute("title")).toBe(line);
     expect(when().textContent).toBe(`Version 1.0.0 · Finished ${formatTime(1000)} ${line}`);
@@ -1058,13 +1073,13 @@ describe("opening a package", () => {
     const crumbs = () => [...view().querySelectorAll(".breadcrumb a, .breadcrumb h2")].map((e) => e.textContent);
     const titles = () => [...document.querySelectorAll(".title")].map((e) => e.textContent);
     fireEvent.click(link("My own"));
-    expect(crumbs()).toEqual(["All Packages", "Mine", "My own"]);
+    expect(crumbs()).toEqual(["All Packages", "Personal", "My own"]);
     const nav = within(view()).getByRole("navigation", { name: "Breadcrumb" });
-    expect([...nav.querySelectorAll("ol > li > a")].map((a) => a.textContent)).toEqual(["All Packages", "Mine"]);
+    expect([...nav.querySelectorAll("ol > li > a")].map((a) => a.textContent)).toEqual(["All Packages", "Personal"]);
     expect(nav.querySelector("h2")).toBeNull();
-    fireEvent.click(within(view()).getByRole("link", { name: "Mine" }));
+    fireEvent.click(within(view()).getByRole("link", { name: "Personal" }));
     expect(titles()).toEqual(["My own"]);
-    expect(within(screen.getByRole("group", { name: "Filter packages" })).getByRole("button", { name: /^Mine/ }).getAttribute("aria-pressed")).toBe("true");
+    expect(within(screen.getByRole("group", { name: "Filter packages" })).getByRole("button", { name: /^Personal/ }).getAttribute("aria-pressed")).toBe("true");
     expect(document.activeElement).toBe(link("My own"));
     fireEvent.click(link("My own"));
     allPackages();

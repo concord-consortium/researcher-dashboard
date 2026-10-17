@@ -1,7 +1,8 @@
 import { ChartBarIcon } from "@heroicons/react/16/solid";
 import type { Activity } from "../shell/activity";
 import { ACTIVE_WINDOW_MINUTES } from "../shell/activity";
-import { formatTime, millis, type Counts as CountsDoc } from "../shell/runs";
+import { millis, type Counts as CountsDoc } from "../shell/runs";
+import { Time } from "./Time";
 import { useActiveCount } from "./ClassActivity";
 
 const number = (n: number | undefined) => (n === undefined ? "not reported" : n.toLocaleString());
@@ -27,8 +28,8 @@ export function Counts({ counts, session, activity, now }: {
           <div><dt>Answers</dt><dd>{number(data.answers)}</dd></div>
           <div><dt>Logs</dt><dd>{number(data.logs)}</dd></div>
         </>}
-        {lastPull !== null && <div><dt>Your last run</dt><dd>{formatTime(lastPull)}</dd></div>}
-        {freshness !== null && <div><dt>Logs current to</dt><dd>{formatTime(freshness)}</dd></div>}
+        {lastPull !== null && <div><dt>Your last run</dt><dd><Time ms={lastPull} capitalized /></dd></div>}
+        {freshness !== null && <div><dt>Logs current to</dt><dd><Time ms={freshness} capitalized /></dd></div>}
       </dl>
       {counts === null && <p>No runs yet.</p>}
     </section>

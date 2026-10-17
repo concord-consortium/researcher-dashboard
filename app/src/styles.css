@@ -21,6 +21,7 @@
   --error: #b0101f;
   --ok: #1e6b34;
   --ok-bg: #e6f4ea;
+  --table-head-bg: #f3f3f3;
   /* Every bordered box pads its content the same on all four sides. */
   --box-pad: 1rem;
   /* Gray text on the header's teal, where --muted falls short of 4.5:1. */
@@ -468,7 +469,7 @@ button.copy-ok, button.copy-ok:hover { border-color: var(--ok); background: var(
 .result-markdown h5, .result-markdown h6 { margin: 1.25rem 0 0.5rem; font-size: 1rem; }
 .result-markdown table { width: 100%; border-collapse: collapse; background: #fff; }
 .result-markdown th, .result-markdown td { border: 1px solid var(--line); padding: 0.25rem 0.5rem; }
-.result-markdown th { text-align: left; }
+.result-markdown th { text-align: left; background: var(--table-head-bg); }
 .result-markdown tbody tr:hover { background: var(--cc-teal-light7); }
 .result-markdown img { max-width: 100%; }
 

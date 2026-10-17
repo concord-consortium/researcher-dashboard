@@ -42,8 +42,8 @@ describe("groupPackages", () => {
     ], SCOPE);
     expect(groups.map((g) => [g.heading, titles(g.rows), g.rows.map(g.tag)])).toEqual([
       ["Official", ["Official one"], ["Official"]],
-      ["Projects", ["Project 20's"], ["Project: Wildfire"]],
-      ["Mine", ["Mine"], ["Mine"]],
+      ["Project", ["Project 20's"], ["Project: Wildfire"]],
+      ["Personal", ["Mine"], ["Personal"]],
       ["Community", ["A stranger's"], ["Community"]]
     ]);
   });
@@ -65,7 +65,7 @@ describe("groupPackages", () => {
 
   it("falls back to the name when a version has no title, and drops empty groups", () => {
     const groups = groupPackages([row({ name: "named", title: "", mine: true })], SCOPE);
-    expect(groups.map((g) => g.heading)).toEqual(["Mine"]);
+    expect(groups.map((g) => g.heading)).toEqual(["Personal"]);
     expect(titleOf(groups[0].rows[0])).toBe("named");
   });
 });

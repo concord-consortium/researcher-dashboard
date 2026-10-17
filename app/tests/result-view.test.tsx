@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { COPIED_MS } from "../src/components/CopyButton";
 import { ResultActions, ResultView, ResultWhen } from "../src/components/ResultView";
-import { formatTime } from "../src/shell/runs";
+import { formatTime, fullTime } from "../src/shell/runs";
 import { stamp } from "./fixtures";
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
@@ -19,7 +19,7 @@ describe("ResultView", () => {
   });
 
   it("says the version and finish time, with what the run read as the title and for a screen reader", () => {
-    const read = `Includes every save before ${formatTime(500)}, when this run began reading the class's data.`;
+    const read = `Includes every save before ${fullTime(500)}, when this run began reading the class's data.`;
     render(<ResultWhen finished={{ ...FINISHED, started_at: stamp(500) }} />);
     const line = document.querySelector(".result-when")!;
     expect(line.getAttribute("title")).toBe(read);

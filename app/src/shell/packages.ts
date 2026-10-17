@@ -86,8 +86,8 @@ export function groupPackages(rows: PackageRow[], scope: Scope): Group[] {
     ({ key, heading, rows: groupRows, tag });
   const groups = [
     group("official", "Official", official),
-    group("projects", "Projects", projects, projectName),
-    group("mine", "Mine", mine),
+    group("projects", "Project", projects, projectName),
+    group("mine", "Personal", mine),
     group("community", "Community", community)
   ];
 
