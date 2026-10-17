@@ -112,7 +112,7 @@ While the page is open, a package whose result is done and whose run started bef
 learner's last save is re-run on its own, with the same request Run sends. Both times are the
 server's. The page asks once per finished result, so saves made while a re-run is queued or
 running give one more run after it, not a loop. A failed result, a package never run by hand,
-and a package the page cannot run are not re-run on their own. An automatic request that finds
+a community package, and a package the page cannot run are not re-run on their own. An automatic request that finds
 the sign-in expired stops automatic re-runs for the page's life rather than signing in again.
 
 ## Content-Security-Policy

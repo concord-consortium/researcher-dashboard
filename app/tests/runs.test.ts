@@ -188,9 +188,9 @@ describe("sessionLines", () => {
     expect(lines(runner({ state: "ready" }))).toEqual(["Your runner is available."]);
   });
 
-  it("names the package it runs for this class", () => {
+  it("names the package it runs for this class, or none while it has no title", () => {
     expect(lines(runner({ current_package: { class_hash: H, package_key: K } }))).toEqual(["Running Wildfire responses."]);
-    expect(lines(runner({ current_package: { class_hash: H, package_key: "users__1__gone" } }))).toEqual(["Running users/1/gone."]);
+    expect(lines(runner({ current_package: { class_hash: H, package_key: "users__1__gone" } }))).toEqual(["Running a package."]);
     expect(lines(runner({ current_package: { class_hash: H, package_key: K } }), new Map([[K, result()]]))).toEqual(["Running Wildfire responses."]);
   });
 

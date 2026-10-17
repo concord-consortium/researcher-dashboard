@@ -1,6 +1,6 @@
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ActiveCount, ClassActivity, type Stopped } from "../src/components/ClassActivity";
+import { ActiveCount, ClassActivity, RERUNS, type Stopped } from "../src/components/ClassActivity";
 import type { Activity } from "../src/shell/activity";
 import { stamp } from "./fixtures";
 
@@ -66,7 +66,7 @@ describe("ClassActivity", () => {
     expect(screen.getByRole("heading", { level: 2, name: "Student Saves" })).toBeDefined();
     expect(screen.getByText(/how many students saved an answer/).textContent).toMatch(/in the last 5 minutes\.$/);
     expect(screen.getByText(/not a count of who is logged in/).textContent).toMatch(/same for every researcher of this class/);
-    expect(screen.getByText("Your finished packages re-run on their own as soon as students save new work.")).toBeDefined();
+    expect(screen.getByText(RERUNS)).toBeDefined();
     expect(count()).toBeNull();
   });
 

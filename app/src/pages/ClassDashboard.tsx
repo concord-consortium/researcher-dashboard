@@ -1,7 +1,7 @@
 import { ClipboardDocumentListIcon, CubeIcon, UserGroupIcon } from "@heroicons/react/16/solid";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Callout } from "../components/Callout";
-import { ClassActivity, type Stopped } from "../components/ClassActivity";
+import { ClassActivity, RERUNS, STOPPED, type Stopped } from "../components/ClassActivity";
 import { ClassCard } from "../components/ClassCard";
 import { Counts } from "../components/Counts";
 import { Header } from "../components/Header";
@@ -231,7 +231,8 @@ export function ClassDashboard({ services, onExpired, user = null, portal = null
       }
       // Keyed to the result as the refusal finds it: the queued write lands before a VM step fails.
       const at = millis(latestResults.current.get(key)?.updated_at);
-      refused(error, (message) => setRequests((r) => new Map(r).set(key, { message, at })), "portal");
+      const retry = !(error instanceof ApiError) || error.status >= 500;
+      refused(error, (message) => setRequests((r) => new Map(r).set(key, { message, at, refusedAt: services.now(), retry })), "portal");
       return true;
     }
   }
@@ -252,6 +253,8 @@ export function ClassDashboard({ services, onExpired, user = null, portal = null
   const [confirming, setConfirming] = useState<string | null>(null);
   const community = useMemo(() => new Set(groups.find((g) => g.key === "community")?.rows.map((r) => packageKey(r.identity))), [groups]);
   const listedTitles = useMemo(() => new Map(grouped.map((r) => [packageKey(r.identity), titleOf(r)])), [grouped]);
+  // Every title the list returned, applicable or not, for results the page no longer lists.
+  const allTitles = useMemo(() => new Map((rows ?? []).map((r) => [r.identity, titleOf(r)])), [rows]);
   const projectNames = useMemo(() => new Map((rows ?? []).flatMap((r) => (r.project?.name ? [[r.project.id, r.project.name] as const] : []))), [rows]);
 
   // The page's one announcement of how runs move on: a run starting, finishing or failing, a refused
@@ -260,8 +263,7 @@ export function ClassDashboard({ services, onExpired, user = null, portal = null
   const heard = useRef<{ results: Map<string, Result> | null; requests: Map<string, RunRequest>; runnerState: string | null }>(
     { results: null, requests: new Map(), runnerState: null });
   useEffect(() => {
-    const titleAt = (key: string) => listedTitles.get(key)
-      ?? unlistedTitle(identityOfKey(key), new Map((rows ?? []).map((r) => [r.identity, titleOf(r)])));
+    const titleAt = (key: string) => listedTitles.get(key) ?? unlistedTitle(identityOfKey(key), allTitles);
     const before = heard.current;
     const news = runNews(before.results, results, titleAt);
     for (const [key, request] of requests) {
@@ -274,15 +276,17 @@ export function ClassDashboard({ services, onExpired, user = null, portal = null
     heard.current = { results: listShown ? results : before.results, requests, runnerState };
     // The same words again change by a trailing space, so they are still announced.
     if (news.length > 0) setAnnouncement((was) => (news.join(" ") === was ? `${was}\u00a0` : news.join(" ")));
-  }, [results, requests, runnerDoc, listShown, listedTitles, rows]);
+  }, [results, requests, runnerDoc, listShown, listedTitles, allTitles]);
 
   const newest = activity ? newestActivity(activity) : null;
+  // A community package runs only when pressed, after its warning, so it never re-runs on its own.
+  const rerunnable = useMemo(() => grouped.filter((r) => !community.has(packageKey(r.identity))), [grouped, community]);
   // An info page re-runs nothing: its listeners have stopped, but a list answered late still lands.
   const behind = useMemo(
     () => listShown && scope && !stopped && !info
-      ? behindRows({ listed: grouped, results, runner, mark, classHash: scope.class_hash, newest, requests })
+      ? behindRows({ listed: rerunnable, results, runner, mark, classHash: scope.class_hash, newest, requests })
       : new Map<string, { row: PackageRow; at: number | null }>(),
-    [listShown, stopped, info, grouped, results, runner, mark, scope, newest, requests]
+    [listShown, stopped, info, rerunnable, results, runner, mark, scope, newest, requests]
   );
   useAutoRerun(behind, stopped !== null, (_key, row) => run(row, false, true));
 
@@ -329,13 +333,15 @@ export function ClassDashboard({ services, onExpired, user = null, portal = null
   // The open view keeps the result it read even if a listener is refused later.
   const opened = selectedKey ? latestFinished(received.get(selectedKey)) : null;
 
-  const session = scope ? sessionLines(runnerDoc, scope.class_hash, results, (key) => listedTitles.get(key) ?? null,
+  // Before the list arrives a running package has no title, so the line names none.
+  const session = scope ? sessionLines(runnerDoc, scope.class_hash, results,
+    (key) => (rows ? listedTitles.get(key) ?? unlistedTitle(identityOfKey(key), allTitles) : null),
     [...requests.values()].some((r) => "pending" in r)) : [];
 
   // The browser tab names the view, the open package or the tab, then the class, before the page's own title.
   const baseTitle = pageTitle();
   const viewTitle = route.tab === "info" ? "Info"
-    : selectedKey ? listedTitles.get(selectedKey) ?? unlistedTitle(identityOfKey(selectedKey), new Map()) : "Packages";
+    : selectedKey ? listedTitles.get(selectedKey) ?? unlistedTitle(identityOfKey(selectedKey), allTitles) : "Packages";
   const className = scope?.name ?? null;
   useEffect(() => {
     document.title = className && !info ? `${viewTitle} - ${className} - ${baseTitle}` : baseTitle;
@@ -358,8 +364,6 @@ export function ClassDashboard({ services, onExpired, user = null, portal = null
     request: requests.get(selectedKey!), newest, behind
   });
   const allNotes = new Map([...notes, ...rowNotes]);
-  // Every title the list returned, applicable or not, for results the page no longer lists.
-  const allTitles = new Map((rows ?? []).map((r) => [r.identity, titleOf(r)]));
   const searchGroups = search
     ? groups.map((g) => ({ ...g, rows: g.rows.filter((r) => matchesSearch(search, [titleOf(r), r.current_version.description, r.identity, g.tag(r)])) }))
     : [];
@@ -393,6 +397,7 @@ export function ClassDashboard({ services, onExpired, user = null, portal = null
   };
   const confirm = (row: PackageRow) => { setConfirming(null); void run(row, false); };
   const anyListed = grouped.length + unlisted.length > 0;
+  const anyRerunnable = rerunnable.some((r) => latestFinished(results.get(packageKey(r.identity))));
   const emptyList = filter === "search" && searchFound === 0 ? `No packages match “${search}”.` : `No packages here have the status ${statusFilter}.`;
   // What the list's pills and menu leave, said when a search or a filter changes it.
   const listNews = filter === "search" && searchFound > 0
@@ -423,6 +428,7 @@ export function ClassDashboard({ services, onExpired, user = null, portal = null
       {listProblem && <Callout tone="error">{listProblem}</Callout>}
       {runsProblem && <Callout tone="error">{runsProblem}</Callout>}
       {countsProblem && <Callout tone="error">{countsProblem}</Callout>}
+      {stopped && <Callout tone="error">{STOPPED[stopped]}</Callout>}
       {profile && !rows && !listProblem && !profileProblem && <p>Listing the packages that apply…</p>}
     </div>
   );
@@ -459,6 +465,7 @@ export function ClassDashboard({ services, onExpired, user = null, portal = null
                   <StatusFilter counts={statusCounts} selected={statusFilter} onSelect={setStatus} />
                 </div>
               )}
+              {anyRerunnable && !stopped && <p className="list-note">{RERUNS}</p>}
               {filter !== "unlisted" && groups.length === 0 && <p>No packages apply to this class yet.</p>}
               {anyListed && shownCards.length === 0 && shownUnlisted.length === 0 && (filter === "search" || statusFilter !== "all") && (
                 <p>{emptyList}</p>

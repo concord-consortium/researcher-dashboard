@@ -1,4 +1,3 @@
-import { identityOfKey } from "./packages";
 
 export interface Stamp { toMillis(): number }
 export interface QueueEntry { class_hash: string; package_key: string }
@@ -91,7 +90,7 @@ export type RowState =
   | { kind: "running"; stage: string }
   | { kind: "stuck"; resumable: boolean }
   | { kind: "done"; summary: string | null; finishedAt: number | null }
-  | { kind: "failed"; error: string; finishedAt: number | null };
+  | { kind: "failed"; error: string | null; finishedAt: number | null };
 
 export function rowState(result: Result | undefined, runner: Runner | null, mark: SessionMark | null,
   classHash: string, key: string): RowState {
@@ -106,7 +105,7 @@ export function rowState(result: Result | undefined, runner: Runner | null, mark
     case "done":
       return { kind: "done", summary: result.summary ?? null, finishedAt: millis(result.finished_at) };
     default:
-      return { kind: "failed", error: result.error ?? "No reason was given.", finishedAt: millis(result.finished_at) };
+      return { kind: "failed", error: result.error ?? null, finishedAt: millis(result.finished_at) };
   }
 }
 
@@ -140,10 +139,11 @@ export const WAITING = "Queued, waiting for a runner: run it to start one.";
 // the request was sent, for an accepted Run, or when the answer arrived, for the others; each entry
 // but pending applies only while the result's `updated_at` is still `at`. An accepted Run that
 // waited ACCEPTED_WAIT_MS with no new result is `lapsed`: the row no longer reads as requested, and
-// is still not requested again on its own.
+// is still not requested again on its own. A refusal keeps when it came, and whether Run may fix it:
+// true for no answer or a server error, false for a refusal the portal will give again.
 export type RunRequest =
   | { pending: true }
-  | { message: string; at: number | null }
+  | { message: string; at: number | null; refusedAt: number; retry: boolean }
   | { resuming: true; at: number | null }
   | { requested: true; at: number | null; lapsed?: true };
 
@@ -154,7 +154,8 @@ export const sentence = (text: string) => (/[.!?…]$/.test(text) ? text : `${te
 
 export const finishedWhen = (ms: number | null) => `Finished ${ms !== null ? formatTime(ms) : "at an unknown time"}`;
 
-// The lines above the list. `titleOf` names a package of this class by its key, or returns null;
+// The lines above the list. `titleOf` names a package of this class by its key, or returns null while
+// the page cannot name it yet;
 // `requesting` is whether any run request from the page is in flight.
 // `runner` is null when the researcher has no runner yet, and undefined before it has been read.
 export function sessionLines(runner: Runner | null | undefined, classHash: string, results: Map<string, Result>,
@@ -172,7 +173,7 @@ export function sessionLines(runner: Runner | null | undefined, classHash: strin
       if (current.class_hash !== classHash) return ["Running a package for another of your classes."];
       const status = results.get(current.package_key)?.status;
       if (status && status !== "running") return ["Your runner is starting its next package."];
-      return [`Running ${titleOf(current.package_key) ?? identityOfKey(current.package_key)}.`];
+      return [`Running ${titleOf(current.package_key) ?? "a package"}.`];
     }
     case "suspending":
     case "suspended":

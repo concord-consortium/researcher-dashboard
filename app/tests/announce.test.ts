@@ -19,12 +19,12 @@ describe("runNews", () => {
     expect(news(at("queued"), at("running"))).toEqual(["Package A is running."]);
     expect(news(at("running"), at("done", { summary: "6 responses" }))).toEqual(["Package A finished: 6 responses."]);
     expect(news(at("running"), at("done"))).toEqual(["Package A finished: it wrote no summary."]);
-    expect(news(at("running"), at("failed", { error: "boom" }))).toEqual(["Package A failed: boom."]);
+    expect(news(at("running"), at("failed", { error: "boom" }))).toEqual(["Package A failed: The package stopped with an error."]);
   });
 
   it("says a new finish or failure that arrives with no running seen", () => {
     expect(news(at("done", { finished_at: stamp(1) }), at("done", { summary: "Again", finished_at: stamp(2) }))).toEqual(["Package A finished: Again."]);
-    expect(news(at("failed", { finished_at: stamp(1) }), at("failed", { error: "x", finished_at: stamp(2) }))).toEqual(["Package A failed: x."]);
+    expect(news(at("failed", { finished_at: stamp(1) }), at("failed", { error: "x", finished_at: stamp(2) }))).toEqual(["Package A failed: The package stopped with an error."]);
     expect(news(at("done", { finished_at: stamp(1) }), at("done", { finished_at: stamp(1) }))).toEqual([]);
   });
 });

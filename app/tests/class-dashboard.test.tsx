@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { RERUNS } from "../src/components/ClassActivity";
 import { ClassDashboard } from "../src/pages/ClassDashboard";
 import { packageKey, type Profile } from "../src/shell/packages";
 import { ApiError, SessionExpired, type PackageRow, type Portal, type ReportServer, type Resolved, type Scope } from "../src/shell/portal";
@@ -527,6 +528,26 @@ describe("ClassDashboard", () => {
     expect(countOf("Answers")).toBeNull();
   });
 
+  it("names the running package in the header only once the list gives its title", async () => {
+    const list = deferred<PackageRow[]>();
+    const s = services({ list: () => list.promise });
+    await mounted(s);
+    await s.snapshot(CURRENT);
+    await s.runner({ state: "running", microvm_id: "vm-1", updated_at: stamp(1), current_package: { class_hash: SCOPE.class_hash, package_key: KEY } });
+    const banner = within(screen.getByRole("banner"));
+    expect(banner.getByText("Running a package.")).toBeDefined();
+    await act(async () => list.resolve([WILDFIRE]));
+    expect(banner.getByText("Running Wildfire open responses.")).toBeDefined();
+  });
+
+  it("names a running package the list returned but does not show by the list's title", async () => {
+    const gone = row({ title: "Gone for good", official: true, applies: false, identity: "projects/20/gone" });
+    const s = services({ list: async () => [WILDFIRE, gone] });
+    await listed(s);
+    await s.runner({ state: "running", microvm_id: "vm-1", updated_at: stamp(1), current_package: { class_hash: SCOPE.class_hash, package_key: "projects__20__gone" } });
+    expect(within(screen.getByRole("banner")).getByText("Running Gone for good.")).toBeDefined();
+  });
+
   it("shows no result's state once the session is refused, whatever the results say", async () => {
     const queued = row({ title: "Queued package", official: true, identity: "projects/20/queued" });
     const s = services({ list: async () => [WILDFIRE, queued] });
@@ -668,8 +689,9 @@ describe("running a package", () => {
     await listed(s);
     await s.results(new Map([[KEY, wildfire({ status: "done", summary: "Earlier", updated_at: stamp(5) })]]));
     fireEvent.click(runButton());
-    const message = await within(wildfireProblems() as HTMLElement).findByText("projects/20/wildfire-responses@1.0.0 cannot be run");
+    const message = await within(wildfireProblems() as HTMLElement).findByText("projects/20/wildfire-responses@1.0.0 cannot be run.");
     expect(message.closest(".callout")!.className).toBe("callout error");
+    expect(message.closest(".callout")!.textContent).toBe(`projects/20/wildfire-responses@1.0.0 cannot be run. Refused at ${formatTime(NOW)}`);
     expect(within(wildfireRow()).getAllByText(/cannot be run/)).toHaveLength(1);
     await vi.waitFor(() => expect(announced()).toBe("Wildfire open responses could not be run: projects/20/wildfire-responses@1.0.0 cannot be run."));
     await s.results(new Map([[KEY, wildfire({ status: "done", summary: "Earlier", updated_at: stamp(5) })]]));
@@ -685,9 +707,12 @@ describe("running a package", () => {
     fireEvent.click(runButton());
     await s.results(new Map([[KEY, wildfire({ updated_at: stamp(20) })]]));
     await act(async () => answer.reject(new ApiError("report-service could not start a machine", 502)));
-    expect(within(wildfireProblems() as HTMLElement).getByText("report-service could not start a machine")).toBeDefined();
+    const message = within(wildfireProblems() as HTMLElement).getByText("report-service could not start a machine.");
+    expect(message.closest(".callout")!.textContent)
+      .toBe(`report-service could not start a machine. Run it again; if it keeps happening, contact Concord. Refused at ${formatTime(NOW)}`);
+    expect(within(message.closest(".callout") as HTMLElement).getByRole("link", { name: "contact Concord" }).getAttribute("href")).toBe("https://concord.org/about/contact/");
     await s.results(new Map([[KEY, wildfire({ updated_at: stamp(21) })]]));
-    expect(screen.queryByText("report-service could not start a machine")).toBeNull();
+    expect(screen.queryByText("report-service could not start a machine.")).toBeNull();
   });
 
   it("says the portal could not be reached when its refusal carries no message", async () => {
@@ -816,7 +841,7 @@ describe("what the page says of the researcher's own runs", () => {
   it("says nothing of the runner until it is read, then that there is none yet", async () => {
     const s = services();
     await listed(s);
-    expect(within(screen.getByRole("banner")).queryByText(/runner/i)).toBeNull();
+    expect(within(screen.getByRole("banner").querySelector(".status-bar") as HTMLElement).queryByText(/runner/i)).toBeNull();
     await s.runner(null);
     expect(within(screen.getByRole("banner")).getByText("No runner yet; one starts when you run a package.")).toBeDefined();
   });
@@ -869,10 +894,14 @@ describe("what the page says of the researcher's own runs", () => {
     expect(dialog.open).toBe(false);
     fireEvent.click(within(screen.getByRole("banner")).getByRole("button", { name: "About this page" }));
     expect(within(dialog).getByRole("heading", { level: 2 }).textContent).toBe(`Researcher Dashboard v${pkg.version}`);
+    expect(within(dialog).getByRole("heading", { level: 2 }).previousElementSibling!.getAttribute("alt")).toBe("Concord Consortium");
     expect(showModal).toHaveBeenCalledTimes(1);
     expect(dialog.open).toBe(true);
     expect(within(dialog).getByText(/^Your runs are your own\./).closest("p")!.textContent).toMatch(/Another researcher of this class sees only their own runs\.$/);
     expect(within(dialog).getByText(/^Class activity is shared\./).closest("p")!.textContent).toMatch(/the same for every\s+researcher of this class\.$/);
+    expect(within(dialog).getAllByRole("heading", { level: 3 }).map((h) => h.textContent))
+      .toEqual(["Packages and results", "Automatic re-runs", "Groups", "Who sees what"]);
+    expect(within(dialog).getByRole("link", { name: "Contact Concord" }).getAttribute("href")).toBe("https://concord.org/about/contact/");
   });
 });
 
@@ -1179,6 +1208,18 @@ describe("the automatic re-run", () => {
     expect(s.runPackage).toHaveBeenCalledTimes(1);
   });
 
+  it("never re-runs a community package on its own, and says its result is behind", async () => {
+    const stranger = row({ title: "Stranger's", visibility: "public", identity: "users/311/word-cloud" });
+    const strangerPackage = { identity: stranger.identity, version: "1.0.0", checksum: "c" };
+    const s = services({ list: async () => [WILDFIRE, stranger] });
+    await listed(s);
+    await s.results(new Map([["users__311__word-cloud", { ...doneAt(1000), package: strangerPackage }]]));
+    await s.activity(learner(2000));
+    const strangerRow = screen.getByText("Stranger's", { selector: ".title" }).closest("li")!;
+    expect(await within(strangerRow).findByText(OUT_OF_DATE)).toBeDefined();
+    expect(s.runPackage).not.toHaveBeenCalled();
+  });
+
   it("requests nothing more once the re-run's result has no save after its start", async () => {
     const s = services();
     await listed(s);
@@ -1233,14 +1274,26 @@ describe("the automatic re-run", () => {
     expect(within(wildfireRow()).getByText(OUT_OF_DATE)).toBeDefined();
   });
 
+  it("says above the list that finished results re-run, only once one has finished", async () => {
+    const s = services();
+    await listed(s);
+    const note = () => screen.queryByText(RERUNS, { selector: ".list-note" });
+    expect(note()).toBeNull();
+    await s.results(new Map([[KEY, wildfire({ status: "running", updated_at: stamp(5) })]]));
+    expect(note()).toBeNull();
+    await s.results(new Map([[KEY, doneAt(1000)]]));
+    expect(note()).not.toBeNull();
+  });
+
   it("stops on an expired sign-in without signing in again, and says so", async () => {
     const s = services({ run: async () => { throw new SessionExpired(false); } });
     const onExpired = await listed(s);
     await s.results(new Map([[KEY, doneAt(1000)]]));
     await s.activity(learner(2000));
-    expect(await screen.findByText(/Automatic re-runs have stopped/)).toBeDefined();
+    expect(await within(screen.getByRole("tabpanel")).findByText(/Automatic re-runs have stopped/)).toBeDefined();
     expect(onExpired).not.toHaveBeenCalled();
     expect(within(wildfireRow()).getByText(OUT_OF_DATE)).toBeDefined();
+    expect(screen.queryByText(RERUNS, { selector: ".list-note" })).toBeNull();
     await s.results(new Map([[KEY, doneAt(1000, { updated_at: stamp(9000) })]]));
     await s.activity(learner(5000));
     expect(s.runPackage).toHaveBeenCalledTimes(1);
@@ -1324,7 +1377,7 @@ describe("the automatic re-run", () => {
     const onExpired = await listed(s);
     await s.results(new Map([[KEY, doneAt(1000)]]));
     await s.activity(learner(2000));
-    expect(await screen.findByText(/sign-in could not be renewed\. Launch the dashboard again from the portal\./)).toBeDefined();
+    expect(await within(screen.getByRole("tabpanel")).findByText(/sign-in could not be renewed\. Launch the dashboard again from the portal\./)).toBeDefined();
     expect(screen.queryByText(/Run any package to sign in again/)).toBeNull();
     fireEvent.click(runButton());
     expect(await screen.findByText(/Launch the dashboard again from the portal/, { selector: "main p" })).toBeDefined();
@@ -1341,10 +1394,10 @@ describe("the automatic re-run", () => {
     await listed(s);
     await s.results(new Map([[KEY, doneAt(1000)]]));
     await s.activity(learner(2000));
-    expect(await screen.findByText(/Automatic re-runs have stopped/)).toBeDefined();
+    expect(await within(screen.getByRole("tabpanel")).findByText(/Automatic re-runs have stopped/)).toBeDefined();
     fireEvent.click(runButton());
     await vi.waitFor(() => expect(screen.queryByText(/Automatic re-runs have stopped/)).toBeNull());
-    expect(screen.getByText("Your finished packages re-run on their own as soon as students save new work.")).toBeDefined();
+    expect(within(screen.getByRole("tabpanel")).getByText(RERUNS)).toBeDefined();
     await s.results(new Map([[KEY, doneAt(4000)]]));
     await s.activity(learner(5000));
     await vi.waitFor(() => expect(s.runPackage).toHaveBeenCalledTimes(3));
@@ -1367,7 +1420,7 @@ describe("the automatic re-run", () => {
       ["projects__20__other", { ...doneAt(1000), package: otherPackage }]
     ]));
     await s.activity(learner(2000));
-    expect(await screen.findByText(/Automatic re-runs have stopped/)).toBeDefined();
+    expect(await within(screen.getByRole("tabpanel")).findByText(/Automatic re-runs have stopped/)).toBeDefined();
     expect(s.runPackage).toHaveBeenCalledTimes(2);
     const otherRow = screen.getByText("Other package", { selector: ".title" }).closest("li")!;
     fireEvent.click(within(otherRow).getByRole("button", { name: "Run Other package" }));

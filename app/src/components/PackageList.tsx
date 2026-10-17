@@ -6,6 +6,7 @@ import { outOfDate } from "../shell/activity";
 import { packageKey, searchWords, titleOf, type Group } from "../shell/packages";
 import type { PackageRow } from "../shell/portal";
 import { useEffect, useId, useRef, useState, type ComponentType, type ReactNode, type SVGProps } from "react";
+import { plainError } from "../shell/errors";
 import { routeHash } from "../shell/route";
 import { Callout } from "./Callout";
 import {
@@ -30,7 +31,7 @@ export function stateText(state: RowState, title: string, listed: boolean): stri
     case "done":
       return state.summary ?? "Finished.";
     case "failed":
-      return `Failed: ${sentence(state.error)}`;
+      return `Failed: ${plainError(state.error).plain}`;
   }
 }
 
@@ -42,7 +43,7 @@ export function rowLine(state: RowState, title: string, listed: boolean, finishe
   const text = stateText(state, title, listed);
   if (finishedAt === undefined || state.kind === "done" || state.kind === "not-run") return text;
   if (state.kind === "failed") {
-    return `The latest re-run failed: ${sentence(state.error)} Showing the result from ${finishedAt === null ? "an earlier run" : formatTime(finishedAt)}.`;
+    return `The latest re-run failed: ${plainError(state.error).plain} Showing the result from ${finishedAt === null ? "an earlier run" : formatTime(finishedAt)}.`;
   }
   return updating(state.kind === "running" ? `${stageWords(state.stage)}.` : text);
 }
@@ -62,11 +63,13 @@ export function StateRegion({ line, children }: { line: string; children?: React
 
 // What a row knows of its package's state, shared by its card in the list and the open package's
 // subheader. `outdated` and `versionNote` are false and null where they cannot apply.
+export interface Refusal { message: string; refusedAt: number; retry: boolean }
+
 export interface StatusModel {
   state: RowState;
   line: string;
   pending: boolean;
-  refusal: string | null;
+  refusal: Refusal | null;
   finished: Finished | null;
   outdated: boolean;
   versionNote: string | null;
@@ -91,7 +94,7 @@ export function rowModel({ row, result, runner, mark, classHash, request, newest
   const finishedAt = finished ? millis(finished.finished_at) : undefined;
   const resultAt = millis(result?.updated_at);
   const pending = request !== undefined && "pending" in request;
-  const refusal = request && "message" in request && request.at === resultAt ? request.message : null;
+  const refusal = request && "message" in request && request.at === resultAt ? request : null;
   const resume = state.kind === "stuck" && state.resumable;
   const resuming = resume && request !== undefined && "resuming" in request && request.at === resultAt;
   const requested = request !== undefined && "requested" in request && !request.lapsed && request.at === resultAt;
@@ -128,19 +131,27 @@ export function RowStatus({ model, withFinished = true, withNotRun = true }: {
 
 export const CONTACT_URL = "https://concord.org/about/contact/";
 
-// A failed run, with what to do next and when it failed, and a refused Run, as error panels the full
-// width of what holds them.
+// A failed run, with what to do next and when it failed, and a refused Run, with when it was refused and,
+// where pressing Run again may help, what to do next, as error panels the full width of what holds them.
 export function RowProblems({ model }: { model: StatusModel }) {
   const { state, line, refusal } = model;
+  const detail = state.kind === "failed" ? plainError(state.error).detail : null;
   return (
     <div className="row-problems">
       {state.kind === "failed" && (
         <Callout tone="error">
           {line} Run it again; if it keeps failing, <a href={CONTACT_URL} target="_blank" rel="noopener noreferrer">contact Concord</a>.
+          {detail && <>{" "}<span className="detail">Details: <code>{detail}</code></span></>}
           {" "}{state.finishedAt !== null && <span className="when">Failed at {formatTime(state.finishedAt)}</span>}
         </Callout>
       )}
-      {refusal && <Callout tone="error">{refusal}</Callout>}
+      {refusal && (
+        <Callout tone="error">
+          <span>{sentence(refusal.message)}</span>
+          {refusal.retry && <> Run it again; if it keeps happening, <a href={CONTACT_URL} target="_blank" rel="noopener noreferrer">contact Concord</a>.</>}
+          {" "}<span className="when">Refused at {formatTime(refusal.refusedAt)}</span>
+        </Callout>
+      )}
     </div>
   );
 }

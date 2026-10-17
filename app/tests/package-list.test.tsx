@@ -115,7 +115,8 @@ describe("PackageList", () => {
     expect(item("Done").querySelector(".status-pill")!.textContent).toBe("Finished");
     expect(finishedAt("Not")).toBeNull();
     expect(stateLine("Failed")).toBeNull();
-    expect(failureText("Failed")).toBe(`Failed: The machine running it stopped before the run finished; run it again. ${NEXT_STEP}`);
+    expect(failureText("Failed")).toBe(`Failed: The runner stopped before the run finished. ${NEXT_STEP}`);
+    expect(failurePanel("Failed")!.querySelector(".detail")).toBeNull();
     expect(failurePanel("Failed")!.querySelector("a")!.getAttribute("href")).toBe("https://concord.org/about/contact/");
     expect(failurePanel("Failed")!.querySelector(".when")!.textContent).toBe(`Failed at ${formatTime(5000)}`);
     expect(failurePanel("Done")).toBeNull();
@@ -174,7 +175,7 @@ describe("PackageList", () => {
     expect(stateLine("Requeued")).toBe("Re-run: queued, number 1 in line.");
     expect(stateLine("Rerunning")).toBe("Re-run: running the package.");
     expect(failureText("Refailed")).toBe(
-      `The latest re-run failed: No VM took this package before its VM's life ended; run it again. Showing the result from ${formatTime(1000)}. ${NEXT_STEP}`
+      `The latest re-run failed: No runner picked up this run in time. Showing the result from ${formatTime(1000)}. ${NEXT_STEP}`
     );
     expect(failurePanel("Refailed")!.querySelector(".when")!.textContent).toBe(`Failed at ${formatTime(4000)}`);
     for (const title of ["Requeued", "Rerunning", "Refailed"]) {
@@ -279,6 +280,13 @@ describe("PackageList", () => {
     expect(onOpen).toHaveBeenCalledTimes(2);
   });
 
+  it("shows an error the page has no words for as the package failing, with the error as its detail", () => {
+    const r = row({ title: "Broke", official: true });
+    list([r], { results: new Map([[packageKey(r.identity), result(r, { status: "failed", error: "cc-data reports exited 3: NOT_AUTHENTICATED", finished_at: stamp(5000) })]]) });
+    expect(failureText("Broke")).toBe(`Failed: The package stopped with an error. ${NEXT_STEP} Details: cc-data reports exited 3: NOT_AUTHENTICATED`);
+    expect(failurePanel("Broke")!.querySelector(".detail code")!.textContent).toBe("cc-data reports exited 3: NOT_AUTHENTICATED");
+  });
+
   it("leaves out the instruction to press a control on a row that has none", () => {
     expect(stateText({ kind: "queued", position: null, waiting: true }, "T", false)).toBe("Queued, waiting for a runner.");
     expect(stateText({ kind: "stuck", resumable: true }, "T", false)).toBe("Paused partway through.");
@@ -291,7 +299,7 @@ describe("PackageList", () => {
     const pkg = { identity: r.identity, version: "1.0.0", checksum: "c" };
     list([r], {
       results: new Map([[packageKey(r.identity), { status: "failed", error: "x", package: pkg }]]),
-      requests: new Map([[packageKey(r.identity), { message: "No.", at: null }]])
+      requests: new Map([[packageKey(r.identity), { message: "No.", at: null, refusedAt: 0, retry: false }]])
     });
     expect(item("Live").querySelector(".row-problems .callout")).not.toBeNull();
     expect(item("Live").querySelector("[aria-live], [role=status]")).toBeNull();

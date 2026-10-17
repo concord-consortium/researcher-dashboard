@@ -1,11 +1,13 @@
 import { CloudIcon, QuestionMarkCircleIcon, XCircleIcon } from "@heroicons/react/16/solid";
 import { useEffect, useRef, type ReactNode } from "react";
+import logo from "../assets/cc-logo.png";
 import { APP_VERSION } from "../build-info";
 import type { Activity } from "../shell/activity";
 import type { TokenUser } from "../shell/oauth";
 import type { Scope } from "../shell/portal";
 import { Brand, UserInfo } from "./Brand";
 import { ActiveCount } from "./ClassActivity";
+import { CONTACT_URL } from "./PackageList";
 
 // The bar that stays at the top of the page: the class, the page's tabs, how many of the class's
 // students are active, and what the researcher's runner and runs are doing; the page announces those,
@@ -64,7 +66,28 @@ export function Header({ scope, user, demo, tabs, activity, now, session, runner
         </div>
       </div>
       <dialog ref={about} className="about" aria-labelledby="about-title">
-        <h2 id="about-title"><span>Researcher Dashboard</span> <span className="version">v{APP_VERSION}</span></h2>
+        <div className="about-head">
+          <img className="about-logo" src={logo} alt="Concord Consortium" />
+          <h2 id="about-title"><span>Researcher Dashboard</span> <span className="version">v{APP_VERSION}</span></h2>
+        </div>
+        <h3>Packages and results</h3>
+        <p>
+          Each card is a package: an analysis of the class's student work. Run starts your runner, which
+          reads the class's current data, runs the package and writes its result. Open a package to read
+          its result, copy or download it, and copy or download each of its tables.
+        </p>
+        <h3>Automatic re-runs</h3>
+        <p>
+          While this page is open, a finished result re-runs on its own when students save new work.
+          Community packages wait for you to run them.
+        </p>
+        <h3>Groups</h3>
+        <p>
+          Official packages are made and reviewed by Concord. Project packages are shared with this class's
+          research projects, and Mine are the ones you uploaded. Community packages are shared publicly by
+          other researchers and are not reviewed, so the page asks before running one.
+        </p>
+        <h3>Who sees what</h3>
         <p>
           <strong>Your runs are your own.</strong> The packages you run, their results and your counts are
           yours alone. Another researcher of this class sees only their own runs.
@@ -72,6 +95,10 @@ export function Header({ scope, user, demo, tabs, activity, now, session, runner
         <p>
           <strong>Class activity is shared.</strong> The count of active students is the same for every
           researcher of this class.
+        </p>
+        <p>
+          The class's teachers, assignments and your counts are on the Info tab. Questions or problems?{" "}
+          <a href={CONTACT_URL} target="_blank" rel="noopener noreferrer">Contact Concord</a>.
         </p>
         <form method="dialog">
           <button type="submit" className="icon-button"><XCircleIcon aria-hidden="true" />Close</button>

@@ -208,7 +208,7 @@ a { color: var(--cc-teal-dark2); }
 .about-button { padding: 0; border: 0; cursor: pointer; }
 .about-button:hover .badge-icon { background: var(--cc-teal); }
 .about {
-  max-width: min(32rem, calc(100vw - 2rem));
+  max-width: min(36rem, calc(100vw - 2rem));
   padding: var(--box-pad);
   border: 0;
   border-radius: 6px;
@@ -216,9 +216,12 @@ a { color: var(--cc-teal-dark2); }
   color: var(--ink);
 }
 .about::backdrop { background: rgba(0, 0, 0, 0.35); }
-.about h2 { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; margin-top: 0; }
+.about-head { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.75rem; }
+.about h2 { flex: 1; display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; margin: 0; }
 .about h2 .version { font-size: 0.9rem; font-weight: 400; }
-.about p { line-height: 1.45; }
+.about .about-logo { display: block; height: 36px; }
+.about h3 { margin: 1rem 0 0.25rem; font-size: 1rem; }
+.about p { margin-top: 0; line-height: 1.45; }
 .about form { display: flex; justify-content: flex-end; margin-top: 1rem; }
 
 section { border-top: 1px solid var(--line); padding-top: 0.5rem; }
@@ -353,7 +356,9 @@ button.danger:focus-visible { outline-color: var(--error); }
 .facts dd { margin: 0; font-weight: 700; }
 .facts dd .when { font-weight: 400; }
 .state p, .finished p, .reason { margin: 0.2rem 0; }
-.callout .when { display: block; }
+.callout .when, .callout .detail { display: block; }
+.callout .detail { font-size: 0.85rem; }
+.callout .detail code { overflow-wrap: anywhere; }
 .when, .reason { color: var(--muted); }
 .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-top: 0.3rem; }
 .result-view, .all-packages, .unlisted { border-top: 0; padding-top: 0; }
@@ -398,6 +403,7 @@ mark.match { background: #fff1b8; color: inherit; border-radius: 2px; }
   color: var(--ink);
 }
 .list-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 1rem; margin: 0 0 1rem; }
+.list-note { margin: -0.4rem 0 1rem; color: var(--muted); font-size: 0.9rem; }
 .filters { display: flex; flex-wrap: wrap; gap: 0.4rem; }
 .status-filter {
   margin-left: auto;

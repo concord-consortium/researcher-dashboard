@@ -1,3 +1,4 @@
+import { plainError } from "./errors";
 import { millis, sentence, type Result } from "./runs";
 
 // What a screen reader is told as runs move on: a run starting, finishing with what it found, or
@@ -13,7 +14,7 @@ export function runNews(before: Map<string, Result> | null, after: Map<string, R
     const title = titleOf(key);
     if (result.status === "running" && moved) news.push(`${title} is running.`);
     else if (result.status === "done" && ended) news.push(`${title} finished: ${sentence(result.summary ?? "it wrote no summary")}`);
-    else if (result.status === "failed" && ended) news.push(`${title} failed: ${sentence(result.error ?? "no reason was given")}`);
+    else if (result.status === "failed" && ended) news.push(`${title} failed: ${plainError(result.error ?? null).plain}`);
   }
   return news;
 }
