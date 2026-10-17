@@ -5,21 +5,14 @@ export const WILDFIRE_RESPONSES = `# Wildfire open responses
 
 6 open responses to 2 questions from 3 learners.
 
-## Activity 1, page 2: Where do wildfires start?
+Questions with an open response, by assignment, in question-id order rather than page order.
 
-| Learner | Response |
+## Researcher Dashboard Wildfire Fixture
+
+| Question | Learners |
 |---|---|
-| Learner 1 | Wildfires start where there is dry grass and something to light it, like lightning or a campfire. |
-| Learner 2 | Mostly in dry places. The model showed the fire spreading faster uphill. |
-| Learner 3 | When it is hot and windy. |
-
-## Activity 1, page 4: Explain what the wind did to the fire.
-
-| Learner | Response |
-|---|---|
-| Learner 1 | The wind pushed the fire to the east so it burned that side first. |
-| Learner 2 | It made it go faster in the direction the wind was blowing. |
-| Learner 3 | It spread the fire more. |
+| Where do wildfires start\\? | 3 |
+| Explain what the wind did to the fire. | 3 |
 `;
 
 // wildfire-simulation-use's report in the layout and wording of a real run, with every number made
