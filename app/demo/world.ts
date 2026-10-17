@@ -1,7 +1,7 @@
 import type { Activity } from "../src/shell/activity";
 import { packageKey, type Profile } from "../src/shell/packages";
 import { ApiError, type PackageRow, type Scope } from "../src/shell/portal";
-import { latestFinished, type Counts, type QueueEntry, type Result, type Runner } from "../src/shell/runs";
+import { latestFinished, millis, type Counts, type QueueEntry, type Result, type Runner } from "../src/shell/runs";
 import type { ClassListeners, DashboardServices } from "../src/shell/services";
 
 // A Firestore Timestamp, as the page reads it.
@@ -33,6 +33,8 @@ export interface WorldState {
 }
 
 const FAILED_ERROR = "cc-data reports filter-options exited 3: NOT_AUTHENTICATED";
+const STAGES = ["starting", "pull", "prepare_package", "run_package"];
+const TAKING = ["starting", "ready", "running"];
 
 // The page's services backed by an in-memory copy of everything it reads, with a runner that walks
 // a requested package through the states the real one writes.
@@ -75,6 +77,10 @@ export class World {
         world.on = listeners;
         await delay(150);
         world.emitAll();
+        // A scenario can open with a run partway through or packages queued, which the runner carries on with.
+        if (TAKING.includes(world.state.runner?.state ?? "") && (world.unfinished().length > 0 || world.state.runner?.queue?.length)) {
+          void world.work();
+        }
         return () => { world.on = null; world.stop(); };
       },
       now: Date.now
@@ -120,21 +126,25 @@ export class World {
     return { class_hash: this.state.scope.class_hash, package_key: key };
   }
 
-  // What the function does with a run request: queue the result, keeping the last finished run,
-  // and start a machine if none is taking work.
+  // What the function does with a run request: queue the result, keeping the last finished run, and
+  // start a machine if none is taking work. A package already queued or running is not queued again,
+  // but a request for it still wakes the machine, which is how a paused run resumes.
   private enqueue(key: string, version: string) {
     const prior = this.state.results.get(key);
-    if (prior?.status === "queued" || prior?.status === "running") return;
-    const identity = this.state.rows.find((r) => packageKey(r.identity) === key)?.identity ?? key;
-    this.setResult(key, {
-      status: "queued",
-      package: { identity, version, checksum: "sha256:demo" },
-      previous: latestFinished(prior),
-      updated_at: stamp(Date.now())
-    });
+    const pending = prior?.status === "queued" || prior?.status === "running";
+    if (!pending) {
+      const identity = this.state.rows.find((r) => packageKey(r.identity) === key)?.identity ?? key;
+      this.setResult(key, {
+        status: "queued",
+        package: { identity, version, checksum: "sha256:demo" },
+        previous: latestFinished(prior),
+        updated_at: stamp(Date.now())
+      });
+    }
     const runner = this.state.runner ?? {};
-    const queue = [...(runner.queue ?? []), this.entry(key)];
-    const taking = ["starting", "ready", "running"].includes(runner.state ?? "");
+    const inQueue = (runner.queue ?? []).some((e) => e.package_key === key);
+    const queue = prior?.status === "running" || inQueue ? runner.queue ?? [] : [...(runner.queue ?? []), this.entry(key)];
+    const taking = TAKING.includes(runner.state ?? "");
     this.setRunner({ ...runner, queue, state: taking ? runner.state : "starting",
       microvm_id: runner.microvm_id ?? "vm-demo-1", error: null, updated_at: stamp(Date.now()) });
     void this.work();
@@ -145,7 +155,12 @@ export class World {
     if (this.stopped) throw new Error("stopped");
   }
 
-  private async work() {
+  // The packages left running partway through, which the machine finishes before its queue.
+  unfinished(): string[] {
+    return [...this.state.results].filter(([, r]) => r.status === "running").map(([key]) => key);
+  }
+
+  async work() {
     if (this.working) return;
     this.working = true;
     if (this.idle) clearTimeout(this.idle);
@@ -154,6 +169,7 @@ export class World {
         await this.step();
         this.setRunner({ ...this.state.runner, state: "ready", updated_at: stamp(Date.now()) });
       }
+      for (const key of this.unfinished()) await this.resume(key);
       while ((this.state.runner?.queue ?? []).length > 0) await this.runNext();
       this.idle = setTimeout(() => {
         if (this.state.runner?.state !== "ready") return;
@@ -169,12 +185,21 @@ export class World {
   private async runNext() {
     const runner = this.state.runner!;
     const [current, ...queue] = runner.queue!;
-    const key = current.package_key;
-    const vm = runner.microvm_id ?? "vm-demo-1";
     this.setRunner({ ...runner, state: "running", current_package: current, queue, updated_at: stamp(Date.now()) });
+    await this.carryOut(current.package_key, 0, Date.now());
+  }
+
+  // A run left partway through carries on from the stage it reached.
+  private async resume(key: string) {
+    this.setRunner({ ...this.state.runner!, state: "running", current_package: this.entry(key), updated_at: stamp(Date.now()) });
+    const result = this.state.results.get(key)!;
+    await this.carryOut(key, Math.max(0, STAGES.indexOf(result.stage ?? "")), millis(result.started_at) ?? Date.now());
+  }
+
+  private async carryOut(key: string, from: number, startedAt: number) {
+    const vm = this.state.runner?.microvm_id ?? "vm-demo-1";
     const queued = this.state.results.get(key)!;
-    const startedAt = Date.now();
-    for (const stage of ["starting", "pull", "prepare_package", "run_package"]) {
+    for (const stage of STAGES.slice(from)) {
       this.setResult(key, { ...queued, status: "running", stage, microvm_id: vm, updated_at: stamp(Date.now()) });
       await this.step();
     }
