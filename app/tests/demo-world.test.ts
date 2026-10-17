@@ -33,6 +33,22 @@ describe("the demo's runner", () => {
     expect([status(MODEL), status(RESPONSES)]).toEqual(["done", "done"]);
   });
 
+  it("says when it clears a knob it has used up", async () => {
+    vi.useFakeTimers();
+    const state = SCENARIOS.find((s) => s.key === "ready")!.world!(Date.now());
+    const changed = vi.fn();
+    const world = new World(state, { stepMs: STEP, failNext: true, refuseNext: true }, changed);
+    const services = world.services();
+    const refused = services.portal.runPackage("official/isolation-probe", "1.0.0").catch(() => "refused");
+    await vi.advanceTimersByTimeAsync(400);
+    expect(await refused).toBe("refused");
+    expect([world.knobs.refuseNext, changed.mock.calls.length]).toEqual([false, 1]);
+    const ran = services.portal.runPackage("official/isolation-probe", "1.0.0");
+    await vi.advanceTimersByTimeAsync(20 * STEP);
+    await ran;
+    expect([world.knobs.failNext, changed.mock.calls.length]).toEqual([false, 2]);
+  });
+
   it("leaves a run its machine paused until the package is requested again, then finishes it", async () => {
     const { services, status } = await watched("running", (s) => ({ ...s, runner: { ...s.runner!, state: "suspended", queue: [] } }));
     await vi.advanceTimersByTimeAsync(20 * STEP);

@@ -52,7 +52,9 @@ export function ClassDashboard({ services, onExpired, user = null, demo = false 
   const [profile, setProfile] = useState<Profile | null | undefined>(undefined);
   const [profileProblem, setProfileProblem] = useState<string | null>(null);
   const [refreshProblem, setRefreshProblem] = useState<string | null>(null);
-  const [runner, setRunner] = useState<Runner | null>(null);
+  // undefined until the first snapshot or after the listener is refused; null while the researcher has no runner.
+  const [runnerDoc, setRunner] = useState<Runner | null | undefined>(undefined);
+  const runner = runnerDoc ?? null;
   const [mark, setMark] = useState<SessionMark | null>(null);
   // undefined until the first snapshot; null while the document does not exist.
   const [counts, setCounts] = useState<CountsDoc | null | undefined>(undefined);
@@ -140,7 +142,7 @@ export function ClassDashboard({ services, onExpired, user = null, demo = false 
           setCounts(undefined);
           return setCountsProblem("Your current status could not be read.");
         }
-        if (which === "runner") setRunner(null);
+        if (which === "runner") setRunner(undefined);
         setRunsProblem("Your runs could not be read.");
       }
     })
@@ -234,6 +236,12 @@ export function ClassDashboard({ services, onExpired, user = null, demo = false 
   // The list's filter pill, by group key; "all" when the group it named has gone.
   const [filterKey, setFilter] = useState(() => (search ? "search" : "all"));
   const [statusFilter, setStatus] = useState<Status | "all">("all");
+  // A search that arrives in the URL, as on Back, presses Search Results.
+  const [seenSearch, setSeenSearch] = useState(search);
+  if (search !== seenSearch) {
+    setSeenSearch(search);
+    if (search) setFilter("search");
+  }
   // The community package whose warning is showing, which runs only on Confirm.
   const [confirming, setConfirming] = useState<string | null>(null);
   const community = useMemo(() => new Set(groups.find((g) => g.key === "community")?.rows.map((r) => packageKey(r.identity))), [groups]);
@@ -298,7 +306,7 @@ export function ClassDashboard({ services, onExpired, user = null, demo = false 
   const openedAt = millis(opened?.finished_at);
   const updated = opening && openedAt !== null && opening.shownAt !== null && openedAt > opening.shownAt ? openedAt : null;
 
-  const session = scope ? sessionLines(runner, scope.class_hash, results, (key) => listedTitles.get(key) ?? null,
+  const session = scope ? sessionLines(runnerDoc, scope.class_hash, results, (key) => listedTitles.get(key) ?? null,
     [...requests.values()].some((r) => "pending" in r)) : [];
   // While the machine runs a package that already has a finished result, the session lines are not
   // announced; the package's row announces the outcome.
@@ -330,8 +338,9 @@ export function ClassDashboard({ services, onExpired, user = null, demo = false 
   const searchUnlisted = search
     ? unlisted.filter((r) => matchesSearch(search, [unlistedTitle(r.package.identity, allTitles), r.package.identity]))
     : [];
+  const searchFound = searchGroups.reduce((n, g) => n + g.rows.length, 0) + searchUnlisted.length;
   const filters: FilterOption[] = [
-    ...(search ? [{ key: "search", label: "Search Results", count: searchGroups.reduce((n, g) => n + g.rows.length, 0) + searchUnlisted.length }] : []),
+    ...(search ? [{ key: "search", label: "Search Results", count: searchFound }] : []),
     { key: "all", label: "All", count: grouped.length + unlisted.length },
     ...groups.map((g) => ({ key: g.key, label: g.heading, count: g.rows.length })),
     ...(unlisted.length > 0 ? [{ key: "unlisted", label: "No longer listed", count: unlisted.length }] : [])
@@ -347,8 +356,10 @@ export function ClassDashboard({ services, onExpired, user = null, demo = false 
   const keeps = (s: Status) => statusFilter === "all" || s === statusFilter;
   const shownCards = cards.filter((c) => keeps(statusPill(c.model).status));
   const shownUnlisted = pillUnlisted.filter((r) => keeps(unlistedStatus.get(r)!));
-  // A pressed Run of a community package asks first; Resume finishes a run already confirmed.
+  // A pressed Run of a community package asks first; Resume finishes a run already confirmed. Either
+  // lifts a status filter, which the run's new status would hide the card from.
   const press = (row: PackageRow, resume: boolean) => {
+    setStatus("all");
     if (!resume && community.has(packageKey(row.identity))) setConfirming(packageKey(row.identity));
     else void run(row, resume);
   };
@@ -392,13 +403,13 @@ export function ClassDashboard({ services, onExpired, user = null, demo = false 
         <div role="tabpanel" id={panelId("packages")} aria-labelledby={tabId("packages")} hidden={tab !== "packages"}>
           {!inView && messages(true)}
           {selectedRow && selectedModel ? (
-            <PackageView key={selectedKey} title={selectedModel.title} status={selectedModel} note={null}
+            <PackageView key={selectedKey} title={selectedModel.title} description={selectedRow.current_version.description} status={selectedModel} note={null}
               run={<RunButton row={selectedRow} model={selectedModel} onRun={press} held={confirming === selectedKey} before={<StatusPill model={selectedModel} />} />}
               warning={confirming === selectedKey && <CommunityConfirm onConfirm={() => confirm(selectedRow)} onCancel={() => setConfirming(null)} />}
               classTitle={scope.name} finished={opened} updated={updated} filter={filterCrumb} onAll={allPackages}
               messages={messages(false)} />
           ) : selectedUnlisted ? (
-            <PackageView key={selectedKey} title={unlistedTitle(selectedUnlisted.package.identity, allTitles)}
+            <PackageView key={selectedKey} title={unlistedTitle(selectedUnlisted.package.identity, allTitles)} description={null}
               status={unlistedModel(selectedUnlisted, runner, mark, scope.class_hash)}
               note={allNotes.get(selectedUnlisted.package.identity) ?? null}
               run={<StatusPill model={unlistedModel(selectedUnlisted, runner, mark, scope.class_hash)} />}
@@ -416,7 +427,7 @@ export function ClassDashboard({ services, onExpired, user = null, demo = false 
               )}
               {filter !== "unlisted" && groups.length === 0 && <p>No packages apply to this class yet.</p>}
               {anyListed && shownCards.length === 0 && shownUnlisted.length === 0 && (filter === "search" || statusFilter !== "all") && (
-                <p>{statusFilter === "all" ? `No packages match “${search}”.` : `No packages here have the status ${statusFilter}.`}</p>
+                <p>{filter === "search" && searchFound === 0 ? `No packages match “${search}”.` : `No packages here have the status ${statusFilter}.`}</p>
               )}
               {shownCards.length > 0 && (
                 <PackageList cards={shownCards} search={filter === "search" ? search : null} onRun={press} onOpen={openPackage} linkRef={linkRef}
@@ -438,7 +449,7 @@ export function ClassDashboard({ services, onExpired, user = null, demo = false 
                 {scope.assignments.map((a) => (
                   <li key={a.offering_id}>
                     {a.name ?? "Untitled"}
-                    {a.tool && <span className="tool"> · {a.tool}</span>}
+                    {a.tool && <span className="tool"> · {a.tool === "ActivityPlayer" ? "Activity Player" : a.tool}</span>}
                   </li>
                 ))}
               </ul>

@@ -27,7 +27,7 @@ describe("ActiveCount", () => {
   it("counts the learners in the window, outside any live region", () => {
     showCount(docs(START - MIN, START - 2 * MIN, START - 6 * MIN));
     expect(count()).toBe("2 students active in the last 5 minutes");
-    expect(document.querySelector(".active-count .badge-info")!.textContent).toBe("2");
+    expect(document.querySelector(".active-count .badge-info")!.textContent).toBe("2 active");
     expect(document.querySelector(".active-count .visually-hidden")!.textContent).toBe("2 students active in the last 5 minutes");
     expect(document.querySelector(".active-count")!.closest('[aria-live], [role="status"]')).toBeNull();
   });

@@ -3,7 +3,7 @@ import { useEffect, useRef, type ReactNode } from "react";
 import { ALL_PACKAGES, routeHash } from "../shell/route";
 import { formatTime, millis, type Finished } from "../shell/runs";
 import { Callout } from "./Callout";
-import { RowStatus, statusPill, type Status, type StatusModel } from "./PackageList";
+import { RowProblems, RowStatus, statusPill, type Status, type StatusModel } from "./PackageList";
 import { ResultActions, ResultView, ResultWhen } from "./ResultView";
 
 // What a newer run is doing while the view shows an earlier run's result. A failed re-run is left out:
@@ -26,10 +26,12 @@ export function olderResult(status: StatusModel, finished: Finished | null): str
 }
 
 // One package, opened from the list: a subheader that stays under the page header, holding the way
-// back, the package's title and state, its Run and its result's Copy and Download, then the result. Each
-// opening mounts it afresh, so its title takes focus.
-export function PackageView({ title, status, note, run, warning, messages, classTitle, finished, updated, filter, onAll }: {
+// back, the package's title, description and state, its Run and its result's Copy and Download; then
+// any failure or refusal, which scroll away with the result. Each opening mounts it afresh, at the top
+// of the page with its title focused.
+export function PackageView({ title, description, status, note, run, warning, messages, classTitle, finished, updated, filter, onAll }: {
   title: string;
+  description: string | null;
   status: StatusModel;
   note: string | null;
   // Run, after the status pill, or the pill alone for a package that cannot be run from here.
@@ -47,7 +49,10 @@ export function PackageView({ title, status, note, run, warning, messages, class
 }) {
   const heading = useRef<HTMLHeadingElement>(null);
   const older = olderResult(status, finished);
-  useEffect(() => { heading.current?.focus(); }, []);
+  useEffect(() => {
+    document.scrollingElement?.scrollTo?.({ top: 0 });
+    heading.current?.focus({ preventScroll: true });
+  }, []);
   return (
     <div className="package-view">
       <div className="package-subheader">
@@ -62,6 +67,7 @@ export function PackageView({ title, status, note, run, warning, messages, class
               </>}
               <h2 id="package-title" ref={heading} tabIndex={-1} aria-current="page">{title}</h2>
             </nav>
+            {description && <p className="description">{description}</p>}
             {note && <p className="notice">{note}</p>}
             <RowStatus model={status} withFinished={false} withNotRun={false} />
           </div>
@@ -77,6 +83,7 @@ export function PackageView({ title, status, note, run, warning, messages, class
         </div>
         {warning}
       </div>
+      <RowProblems model={status} />
       {messages}
       {older && <Callout tone="notice">{older}</Callout>}
       {finished

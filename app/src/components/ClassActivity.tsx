@@ -38,7 +38,7 @@ export function ActiveCount({ activity, now }: { activity: Map<string, Activity>
   return (
     <p className="badge active-count" title={text}>
       <span className="badge-icon" aria-hidden="true"><AcademicCapIcon /></span>
-      <span className="badge-info" aria-hidden="true">{n}</span>
+      <span className="badge-info" aria-hidden="true">{n} active</span>
       <span className="visually-hidden">{text}</span>
     </p>
   );

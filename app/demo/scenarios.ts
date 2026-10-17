@@ -106,7 +106,7 @@ export const SCENARIOS: Scenario[] = [
   {
     key: "ready",
     label: "Signed in, several packages",
-    about: "Four official packages (two finished, two never run), a project package, one of your own and two community ones (every package runs here, so each kind can be tried; the real catalog runs official packages alone). The runner is paused; nobody has saved in the last 5 minutes. Press Run or Student saves to watch a run go through.",
+    about: "Four official packages (two finished, two never run), a project package, one of your own and two community ones (every package runs here, so each kind can be tried; the real catalog runs official packages alone). The runner is idle; nobody has saved in the last 5 minutes. Press Run or Student saves to watch a run go through.",
     world: (now) => ({
       ...base(now),
       results: new Map([done("official/wildfire-responses", 40, now), done("official/runner-smoke", 38, now)])

@@ -56,14 +56,14 @@ function Demo() {
     });
   };
   const drop = () => { drag.current = null; };
+  const [, rerender] = useState(0);
   const world = useMemo(
-    () => (scenario.world ? new World(scenario.world(Date.now()), { stepMs, failNext: false, refuseNext: false }) : null),
+    () => (scenario.world ? new World(scenario.world(Date.now()), { stepMs, failNext: false, refuseNext: false }, () => rerender((n) => n + 1)) : null),
     // A new world only when the scenario is chosen or reset; the step time is set on it in place.
     [scenario, generation]
   );
   if (world) world.knobs.stepMs = stepMs;
   const services = useMemo(() => world?.services(), [world]);
-  const [, rerender] = useState(0);
 
   useEffect(() => {
     const url = new URL(window.location.href);

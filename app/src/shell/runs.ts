@@ -154,9 +154,11 @@ export const finishedWhen = (ms: number | null) => `Finished ${ms !== null ? for
 
 // The lines above the list. `titleOf` names a package of this class by its key, or returns null;
 // `requesting` is whether any run request from the page is in flight.
-export function sessionLines(runner: Runner | null, classHash: string, results: Map<string, Result>,
+// `runner` is null when the researcher has no runner yet, and undefined before it has been read.
+export function sessionLines(runner: Runner | null | undefined, classHash: string, results: Map<string, Result>,
   titleOf: (key: string) => string | null, requesting: boolean): string[] {
   const waiting = () => ([...results.values()].some((r) => r.status === "queued") && !requesting ? [WAITING] : []);
+  if (runner === null) return ["No runner yet; one starts when you run a package.", ...waiting()];
   switch (runner?.state) {
     case "starting":
       return ["Starting a runner for your runs…"];
@@ -172,7 +174,7 @@ export function sessionLines(runner: Runner | null, classHash: string, results: 
     }
     case "suspending":
     case "suspended":
-      return ["Your runner is paused.",
+      return ["Your runner is idle; it starts when you run a package.",
         ...((runner.queue ?? []).length > 0 ? ["Queued packages will start within a couple of minutes."] : [])];
     case "terminated":
       return ["Your runner has stopped.", ...waiting()];

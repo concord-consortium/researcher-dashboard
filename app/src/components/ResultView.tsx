@@ -37,7 +37,7 @@ export function ResultWhen({ finished }: { finished: Finished }) {
 export function ResultView({ classTitle, finished, updated }: { classTitle: string; finished: Finished; updated: number | null }) {
   return (
     <section className="result-view" aria-label="Result">
-      <p role="status">{updated !== null && `Updated ${formatTime(updated)}`}</p>
+      <p role="status" className="visually-hidden">{updated !== null && `Updated ${formatTime(updated)}`}</p>
       <ResultMarkdown markdown={finished.display ?? ""}
         fileBase={resultFileBase(finished.package.identity, classTitle, millis(finished.finished_at))} />
     </section>

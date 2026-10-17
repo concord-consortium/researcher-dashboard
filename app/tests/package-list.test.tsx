@@ -36,12 +36,14 @@ function list(rows: PackageRow[], over: {
 
 const item = (title: string) => screen.getByText(title, { selector: ".title" }).closest("li")!;
 // The state line's words, leaving out the time a failure's panel adds under them.
-const stateLine = (title: string) => {
-  const line = item(title).querySelector(".state p")?.cloneNode(true) as Element | undefined;
-  line?.querySelector(".when")?.remove();
-  return line?.textContent ?? null;
+const stateLine = (title: string) => item(title).querySelector(".state p")?.textContent ?? null;
+const failurePanel = (title: string) => item(title).querySelector(".row-problems .callout.error");
+// A failure panel's words, leaving out the time under them.
+const failureText = (title: string) => {
+  const words = failurePanel(title)!.querySelector("span")!.cloneNode(true) as Element;
+  words.querySelector(".when")?.remove();
+  return words.textContent;
 };
-const failurePanel = (title: string) => item(title).querySelector(".state .callout.error");
 const pill = (title: string) => item(title).querySelector(".status-pill .label")!.textContent;
 const pillTitle = (title: string) => item(title).querySelector(".status-pill")!.getAttribute("title");
 const runButton = (title: string) => within(item(title)).getByRole("button", { name: new RegExp(`^(Run|Resume) ${title}$`) });
@@ -111,8 +113,9 @@ describe("PackageList", () => {
     expect(pillTitle("Done")).toBe(`Finished ${formatTime(1000)}`);
     expect(item("Done").querySelector(".status-pill .visually-hidden")!.textContent).toBe(`, Finished ${formatTime(1000)}`);
     expect(pillTitle("Not")).toBeNull();
-    expect(stateLine("Failed")).toBe("Failed: The machine running it stopped before the run finished; run it again.");
-    expect(failurePanel("Failed")!.querySelector(".when")!.textContent).toBe(formatTime(5000));
+    expect(stateLine("Failed")).toBeNull();
+    expect(failureText("Failed")).toBe("Failed: The machine running it stopped before the run finished; run it again.");
+    expect(failurePanel("Failed")!.querySelector(".when")!.textContent).toBe(`Failed at ${formatTime(5000)}`);
     expect(failurePanel("Done")).toBeNull();
     expect(stateLine("Stuck")).toBe("Interrupted: its runner stopped partway. This is being checked.");
     expect(within(item("Stuck")).getByText("It can be run again once it is marked failed.")).toBeDefined();
@@ -166,12 +169,12 @@ describe("PackageList", () => {
         [packageKey(f.identity), result(f, { status: "failed", error: "No VM took this package before its VM's life ended; run it again", summary: null, previous, finished_at: stamp(4000) })]
       ])
     });
-    expect(stateLine("Requeued")).toBe("Updating: queued, number 1 in line.");
-    expect(stateLine("Rerunning")).toBe("Updating: running Rerunning: running the package.");
-    expect(stateLine("Refailed")).toBe(
+    expect(stateLine("Requeued")).toBe("Re-run: queued, number 1 in line.");
+    expect(stateLine("Rerunning")).toBe("Re-run: running the package.");
+    expect(failureText("Refailed")).toBe(
       `The latest re-run failed: No VM took this package before its VM's life ended; run it again. Showing the result from ${formatTime(1000)}.`
     );
-    expect(failurePanel("Refailed")!.querySelector(".when")!.textContent).toBe(formatTime(4000));
+    expect(failurePanel("Refailed")!.querySelector(".when")!.textContent).toBe(`Failed at ${formatTime(4000)}`);
     for (const title of ["Requeued", "Rerunning", "Refailed"]) {
       expect(within(item(title)).getByText("Earlier summary")).toBeDefined();
       expect(pillTitle(title)).toBe(`Finished ${formatTime(1000)}`);
@@ -228,7 +231,7 @@ describe("PackageList", () => {
       results: new Map([[packageKey(r.identity), result(r, { status: "running", summary: null, previous, updated_at: stamp(1500) })]]),
       requests: new Map([[packageKey(r.identity), { resuming: true, at: 1500 }]])
     });
-    expect(stateLine("Resumed")).toBe("Updating: resuming: it will continue within a minute or two.");
+    expect(stateLine("Resumed")).toBe("Re-run: resuming: it will continue within a minute or two.");
     expect(runButton("Resumed").getAttribute("aria-disabled")).toBe("true");
   });
 

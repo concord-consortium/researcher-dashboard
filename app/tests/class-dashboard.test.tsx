@@ -74,7 +74,7 @@ describe("ClassDashboard", () => {
     expect(within(banner).getByText(/T\. Teacher · Spike cohort/)).toBeDefined();
     expect(within(banner).getByRole("img", { name: "Concord Consortium" })).toBeDefined();
     infoTab();
-    expect(screen.getByRole("listitem").textContent).toBe("Wildfire · ActivityPlayer");
+    expect(screen.getByRole("listitem").textContent).toBe("Wildfire · Activity Player");
   });
 
   it("names the signed-in user on the info page it turns into", async () => {
@@ -255,6 +255,8 @@ describe("ClassDashboard", () => {
     expect(pills.map((p) => [p.textContent, p.getAttribute("aria-pressed")])).toEqual([
       ["All 4", "true"], ["Official 2", "false"], ["Projects 1", "false"], ["Community 1", "false"]
     ]);
+    expect(pills.map((p) => p.title)).toEqual(["Every package that applies to this class", "Packages made and reviewed by Concord",
+      "Packages shared with this class's research projects", "Packages other researchers shared publicly, which Concord has not reviewed"]);
     fireEvent.click(pills[1]);
     expect(pills[1].getAttribute("aria-pressed")).toBe("true");
     expect([...document.querySelectorAll(".title")].map((e) => e.textContent)).toEqual(["Ours", "Theirs"]);
@@ -286,9 +288,16 @@ describe("ClassDashboard", () => {
     fireEvent.click(within(screen.getByRole("group", { name: "Filter packages" })).getByRole("button", { name: /^Official/ }));
     expect(titles()).toEqual(["Ours"]);
     expect(counts()).toEqual(["Not run (1)", "Finished (1)"]);
-    fireEvent.change(menu, { target: { value: "Failed" } });
+    expect([...menu.options].map((o) => o.text)).toEqual(["All statuses", "Not run (1)", "Finished (1)"]);
+    fireEvent.click(within(screen.getByRole("group", { name: "Filter packages" })).getByRole("button", { name: /^Community/ }));
     expect(titles()).toEqual([]);
-    expect(screen.getByText("No packages here have the status Failed.")).toBeDefined();
+    expect(screen.getByText("No packages here have the status Finished.")).toBeDefined();
+    expect([...menu.options].map((o) => o.text)).toEqual(["All statuses", "Not run (1)", "Finished (0)"]);
+    fireEvent.click(within(screen.getByRole("group", { name: "Filter packages" })).getByRole("button", { name: /^Official/ }));
+    expect(titles()).toEqual(["Ours"]);
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Run Ours" })); });
+    expect(menu.value).toBe("all");
+    expect(titles()).toEqual(["Ours", "Theirs"]);
   });
 
   it("searches from the field into a Search Results pill before All, at #packages?q=, and another pill or an empty search clears it", async () => {
@@ -315,6 +324,14 @@ describe("ClassDashboard", () => {
     expect(window.location.hash).toBe("#packages");
     expect(pills()[0]).toEqual(["All 3", "true"]);
     expect(field().value).toBe("");
+    // Back to the search, which presses Search Results again.
+    act(() => {
+      window.history.replaceState(null, "", "#packages?q=our");
+      window.dispatchEvent(new HashChangeEvent("hashchange"));
+    });
+    expect(field().value).toBe("our");
+    expect(pills().slice(0, 2)).toEqual([["Search Results 2", "true"], ["All 3", "false"]]);
+    expect(titles()).toEqual(["Ours", "Stranger's"]);
     fireEvent.change(field(), { target: { value: "nothing like it" } });
     fireEvent.submit(field().form!);
     expect(pills()[0]).toEqual(["Search Results 0", "true"]);
@@ -323,6 +340,25 @@ describe("ClassDashboard", () => {
     fireEvent.submit(field().form!);
     expect(window.location.hash).toBe("#packages");
     expect(pills()[0]).toEqual(["All 3", "true"]);
+  });
+
+  it("cancels a community warning on Escape, and gives focus back to the Run that asked, with two warnings open", async () => {
+    const one = row({ title: "One", visibility: "public", runnable: true, identity: "users/9/one" });
+    const two = row({ title: "Two", visibility: "public", runnable: true, identity: "users/9/two" });
+    const s = services({ list: async () => [WILDFIRE, one, two] });
+    await listed(s);
+    const card = (t: string) => screen.getByText(t, { selector: ".title" }).closest("li")!;
+    const run = (t: string) => within(card(t)).getByRole("button", { name: `Run ${t}` });
+    const ask = (t: string) => within(card(t)).queryByRole("group", { name: "Run a community package?" });
+    run("One").focus();
+    fireEvent.click(run("One"));
+    run("Two").focus();
+    fireEvent.click(run("Two"));
+    expect(ask("One")).toBeNull();
+    fireEvent.keyDown(within(ask("Two")!).getByRole("button", { name: "Cancel" }), { key: "Escape" });
+    expect(ask("Two")).toBeNull();
+    expect(document.activeElement).toBe(run("Two"));
+    expect(s.runPackage).not.toHaveBeenCalled();
   });
 
   it("asks before running a community package, from its card, with Run held until Confirm or Cancel", async () => {
@@ -336,7 +372,7 @@ describe("ClassDashboard", () => {
     fireEvent.click(run());
     const ask = within(card()).getByRole("group", { name: "Run a community package?" });
     expect(within(ask).getByText(/stranger's code with your access to student data/)).toBeDefined();
-    expect(document.activeElement).toBe(within(ask).getByRole("button", { name: "Confirm" }));
+    expect(document.activeElement).toBe(within(ask).getByRole("button", { name: "Cancel" }));
     expect(run().getAttribute("aria-disabled")).toBe("true");
     fireEvent.click(run());
     expect(s.runPackage).not.toHaveBeenCalled();
@@ -545,6 +581,7 @@ async function listed(s: ReturnType<typeof services>, onExpired = vi.fn()) {
 
 const wildfireRow = () => screen.getByText("Wildfire open responses", { selector: ".title" }).closest("li")!;
 const wildfireLine = () => wildfireRow().querySelector(".state")!;
+const wildfireProblems = () => wildfireRow().querySelector(".row-problems")!;
 const runButton = () => within(wildfireRow()).getByRole("button", { name: /^(Run|Resume) Wildfire open responses$/ });
 
 describe("running a package", () => {
@@ -602,7 +639,7 @@ describe("running a package", () => {
     await listed(s);
     await s.results(new Map([[KEY, wildfire({ status: "done", summary: "Earlier", updated_at: stamp(5) })]]));
     fireEvent.click(runButton());
-    const message = await within(wildfireLine() as HTMLElement).findByText("projects/20/wildfire-responses@1.0.0 cannot be run");
+    const message = await within(wildfireProblems() as HTMLElement).findByText("projects/20/wildfire-responses@1.0.0 cannot be run");
     expect(message.closest(".callout")!.className).toBe("callout error");
     expect(screen.getAllByText(/cannot be run/)).toHaveLength(1);
     await s.results(new Map([[KEY, wildfire({ status: "done", summary: "Earlier", updated_at: stamp(5) })]]));
@@ -618,7 +655,7 @@ describe("running a package", () => {
     fireEvent.click(runButton());
     await s.results(new Map([[KEY, wildfire({ updated_at: stamp(20) })]]));
     await act(async () => answer.reject(new ApiError("report-service could not start a machine", 502)));
-    expect(within(wildfireLine() as HTMLElement).getByText("report-service could not start a machine")).toBeDefined();
+    expect(within(wildfireProblems() as HTMLElement).getByText("report-service could not start a machine")).toBeDefined();
     await s.results(new Map([[KEY, wildfire({ updated_at: stamp(21) })]]));
     expect(screen.queryByText("report-service could not start a machine")).toBeNull();
   });
@@ -627,7 +664,7 @@ describe("running a package", () => {
     const s = services({ run: async () => { throw new ApiError(null, 502, "/api/v1/researcher_dashboard/run_package"); } });
     await listed(s);
     fireEvent.click(runButton());
-    expect(await within(wildfireLine() as HTMLElement).findByText("The portal could not be reached.")).toBeDefined();
+    expect(await within(wildfireProblems() as HTMLElement).findByText("The portal could not be reached.")).toBeDefined();
     expect(screen.queryByText(/run_package failed/)).toBeNull();
   });
 
@@ -635,7 +672,7 @@ describe("running a package", () => {
     const s = services({ run: async () => { throw new TypeError("Failed to fetch"); } });
     await listed(s);
     fireEvent.click(runButton());
-    expect(await within(wildfireLine() as HTMLElement).findByText("The portal could not be reached.")).toBeDefined();
+    expect(await within(wildfireProblems() as HTMLElement).findByText("The portal could not be reached.")).toBeDefined();
   });
 
   it("re-authorizes on a 401, and renders the withdrawn and class-gone pages", async () => {
@@ -746,6 +783,14 @@ describe("what the page says of the researcher's own runs", () => {
     expect(badge().classList.contains("error")).toBe(false);
   });
 
+  it("says nothing of the runner until it is read, then that there is none yet", async () => {
+    const s = services();
+    await listed(s);
+    expect(within(screen.getByRole("banner")).queryByText(/runner/i)).toBeNull();
+    await s.runner(null);
+    expect(within(screen.getByRole("banner")).getByText("No runner yet; one starts when you run a package.")).toBeDefined();
+  });
+
   it("says what the researcher's runner is doing", async () => {
     const s = services();
     await listed(s);
@@ -781,7 +826,7 @@ describe("what the page says of the researcher's own runs", () => {
     expect(countOf("Runner")).toBeNull();
     await s.runner({ state: "suspended", queue: [{ class_hash: SCOPE.class_hash, package_key: KEY }] });
     await s.activity(new Map([["301", { lastActivityAt: stamp(NOW) }], ["302", { lastActivityAt: stamp(NOW - 3600_000) }]]));
-    expect(countOf("Runner")).toBe("Your runner is paused. Queued packages will start within a couple of minutes.");
+    expect(countOf("Runner")).toBe("Your runner is idle; it starts when you run a package. Queued packages will start within a couple of minutes.");
     expect(countOf("Active students")).toBe("1 (last 5 minutes)");
     expect(document.querySelector(".counts")!.closest("[aria-live]")).toBeNull();
   });
@@ -802,7 +847,8 @@ describe("what the page says of the researcher's own runs", () => {
 });
 
 describe("opening a package", () => {
-  const SECOND = row({ title: "Second package", official: true, identity: "projects/20/second" });
+  const SECOND = row({ official: true, identity: "projects/20/second",
+    current_version: { version: "1.0.0", title: "Second package", description: "Every open response, by question." } });
   const SECOND_KEY = "projects__20__second";
   const done = (identity: string, summary: string, finishedAt: number, over: Partial<Result> = {}): Result => ({
     status: "done", package: { identity, version: "1.0.0", checksum: "c" }, summary, display: `# ${summary}`,
@@ -844,6 +890,7 @@ describe("opening a package", () => {
     expect(window.location.hash).toBe(`#packages/${SECOND_KEY}`);
     expect(within(result()).getByRole("heading", { level: 3, name: "Second summary" })).toBeDefined();
     expect(within(view()).getByText("Second summary", { selector: ".state p" })).toBeDefined();
+    expect(view().querySelector(".package-subheader .description")!.textContent).toBe("Every open response, by question.");
     expect(screen.queryByRole("heading", { name: "All Packages" })).toBeNull();
     expect(screen.queryByText("Wildfire open responses")).toBeNull();
   });
@@ -1059,7 +1106,7 @@ describe("opening a package", () => {
     await s.results(new Map([["users__7__hidden", wildfire({
       package: pkg, status: "running", previous: { package: pkg, summary: "Hidden summary", finished_at: stamp(500) }
     })]]));
-    expect(within(unlistedRow("users/7/hidden")).getByText(/^Updating: running/).closest("[aria-live]")).toBeNull();
+    expect(within(unlistedRow("users/7/hidden")).getByText(/^Re-run: /).closest("[aria-live]")).toBeNull();
     await s.results(new Map([["users__7__hidden", done("users/7/hidden", "Newer hidden summary", 2000)]]));
     expect(within(unlistedRow("users/7/hidden")).getByText("Newer hidden summary").closest("[aria-live]")).not.toBeNull();
   });

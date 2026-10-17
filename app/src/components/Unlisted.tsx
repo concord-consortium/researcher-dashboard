@@ -1,6 +1,6 @@
 import { packageKey } from "../shell/packages";
 import { latestFinished, millis, rowState, type Result, type Runner, type SessionMark } from "../shell/runs";
-import { GroupTag, Highlight, OpenLink, quietUpdate, rowLine, RowStatus, StatusPill, ViewResult, type StatusModel } from "./PackageList";
+import { GroupTag, Highlight, OpenLink, quietUpdate, rowLine, RowProblems, RowStatus, StatusPill, ViewResult, type StatusModel } from "./PackageList";
 
 // A result whose package the page does not list any more. It has no Run control, so its state is
 // worded without the instruction to press one.
@@ -59,6 +59,7 @@ export function Unlisted({ results, search, titles, notes, runner, mark, classHa
                   <ViewResult model={model} title={title} onOpen={() => onOpen(key)} />
                 </div>
               </div>
+              <RowProblems model={model} />
             </li>
           );
         })}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  isStuck, latestFinished, nextMark, queuePosition, rowState, runOffer, sessionLines, sessionTakes, stageWords,
+  isStuck, latestFinished, nextMark, queuePosition, rowState, runOffer, sessionLines, sessionTakes, stageWords, WAITING,
   type Result, type Runner, type SessionMark
 } from "../src/shell/runs";
 import { stamp } from "./fixtures";
@@ -171,9 +171,15 @@ describe("sessionLines", () => {
   const none = new Map<string, Result>();
   const lines = (r: Runner | null, results = none, requesting = false) => sessionLines(r, H, results, titles, requesting);
 
-  it("says nothing without a session", () => {
-    expect(lines(null)).toEqual([]);
+  it("says nothing before the runner is read, or of a runner with no state", () => {
+    expect(sessionLines(undefined, H, none, titles, false)).toEqual([]);
     expect(lines({ queue: [{ class_hash: H, package_key: K }] })).toEqual([]);
+  });
+
+  it("says there is no runner yet, and that queued work waits for one", () => {
+    expect(lines(null)).toEqual(["No runner yet; one starts when you run a package."]);
+    expect(lines(null, new Map([[K, { status: "queued", package: { identity: "x", version: "1", checksum: "c" } }]])))
+      .toEqual(["No runner yet; one starts when you run a package.", WAITING]);
   });
 
   it("says the runner is starting, or ready", () => {
@@ -202,10 +208,10 @@ describe("sessionLines", () => {
     expect(lines(runner({ current_package: { class_hash: "other", package_key: K } }))).toEqual(["Running a package for another of your classes."]);
   });
 
-  it("says the runner is paused, and when queued work will start", () => {
-    expect(lines(runner({ state: "suspended", queue: [] }))).toEqual(["Your runner is paused."]);
+  it("says the runner is idle, and when queued work will start", () => {
+    expect(lines(runner({ state: "suspended", queue: [] }))).toEqual(["Your runner is idle; it starts when you run a package."]);
     expect(lines(runner({ state: "suspending", queue: [{ class_hash: "other", package_key: K }] })))
-      .toEqual(["Your runner is paused.", "Queued packages will start within a couple of minutes."]);
+      .toEqual(["Your runner is idle; it starts when you run a package.", "Queued packages will start within a couple of minutes."]);
   });
 
   it("says the runner stopped, and how to start queued work", () => {

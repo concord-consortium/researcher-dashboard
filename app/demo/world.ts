@@ -45,7 +45,8 @@ export class World {
   private stopped = false;
   readonly calls: string[] = [];
 
-  constructor(private state: WorldState, readonly knobs: Knobs) {}
+  // `changed` hears when the world clears a knob it has used up, so the panel can show it.
+  constructor(private state: WorldState, readonly knobs: Knobs, private changed: () => void = () => {}) {}
 
   services(): DashboardServices {
     const world = this;
@@ -63,6 +64,7 @@ export class World {
           await delay(300);
           if (world.knobs.refuseNext) {
             world.knobs.refuseNext = false;
+            world.changed();
             throw new ApiError("This package's current version cannot be run for this class.", 409);
           }
           world.enqueue(packageKey(identity), version);
@@ -204,7 +206,10 @@ export class World {
       await this.step();
     }
     const failure = this.state.failing.get(key) ?? (this.knobs.failNext ? FAILED_ERROR : null);
-    if (this.knobs.failNext && !this.state.failing.has(key)) this.knobs.failNext = false;
+    if (this.knobs.failNext && !this.state.failing.has(key)) {
+      this.knobs.failNext = false;
+      this.changed();
+    }
     this.state.failing.delete(key);
     const finished = { started_at: stamp(startedAt), finished_at: stamp(Date.now()) };
     if (failure) {

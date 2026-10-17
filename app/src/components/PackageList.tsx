@@ -5,7 +5,7 @@ import {
 import { outOfDate } from "../shell/activity";
 import { packageKey, searchWords, titleOf, type Group } from "../shell/packages";
 import type { PackageRow } from "../shell/portal";
-import { useEffect, useRef, type ComponentType, type ReactNode, type SVGProps } from "react";
+import { useEffect, useRef, useState, type ComponentType, type ReactNode, type SVGProps } from "react";
 import { routeHash } from "../shell/route";
 import { Callout } from "./Callout";
 import {
@@ -44,23 +44,22 @@ export function rowLine(state: RowState, title: string, listed: boolean, finishe
   if (state.kind === "failed") {
     return `The latest re-run failed: ${sentence(state.error)} Showing the result from ${finishedAt === null ? "an earlier run" : formatTime(finishedAt)}.`;
   }
-  return updating(text);
+  return updating(state.kind === "running" ? `${stageWords(state.stage)}.` : text);
 }
 
-const updating = (text: string) => `Updating: ${text[0].toLowerCase()}${text.slice(1)}`;
+// A re-run's line, which leaves out the title the row already shows.
+export const updating = (text: string) => `Re-run: ${text[0].toLowerCase()}${text.slice(1)}`;
 
 // A re-run of a row that has a finished result announces only its outcome.
 export const quietUpdate = (state: RowState, hasFinished: boolean, inFlight: boolean) =>
   hasFinished && (inFlight || state.kind === "queued" || state.kind === "running");
 
 // A quiet line and its aside sit outside the polite region, so changes to them are not announced,
-// and the outcome is announced when it is added inside. A failure is an error panel, with when it failed.
-export function StateRegion({ state, line, quiet = false, aside, children }: {
-  state: RowState; line: string; quiet?: boolean; aside?: ReactNode; children?: ReactNode;
+// and the outcome is announced when it is added inside.
+export function StateRegion({ line, quiet = false, aside, children }: {
+  line: string; quiet?: boolean; aside?: ReactNode; children?: ReactNode;
 }) {
-  const shown = line && (state.kind === "failed"
-    ? <Callout tone="error">{line}{state.finishedAt !== null && <span className="when">{formatTime(state.finishedAt)}</span>}</Callout>
-    : <p>{line}</p>);
+  const shown = line && <p>{line}</p>;
   return (
     <div className="state">
       {quiet && shown}
@@ -122,23 +121,36 @@ export function rowModel({ row, result, runner, mark, classHash, request, newest
   };
 }
 
-// The state line, Requesting and any refusal; with `withFinished`, the summary of the finished result
-// a row keeps through a re-run (a done row's state line already holds its summary).
-// `withNotRun` false leaves out the line of a package never run, where a status pill says it.
+// The state line and Requesting; with `withFinished`, the summary of the finished result a row keeps
+// through a re-run (a done row's state line already holds its summary). A failure and a refusal are
+// RowProblems'. `withNotRun` false leaves out the line of a package never run, where a status pill says it.
 export function RowStatus({ model, withFinished = true, withNotRun = true }: {
   model: StatusModel; withFinished?: boolean; withNotRun?: boolean;
 }) {
-  const { state, quiet, pending, refusal, finished, outdated } = model;
-  const line = !withNotRun && state.kind === "not-run" ? "" : model.line;
+  const { state, quiet, pending, finished, outdated } = model;
+  const line = state.kind === "failed" || (!withNotRun && state.kind === "not-run") ? "" : model.line;
   return (
     <>
-      <StateRegion state={state} line={line} quiet={quiet} aside={pending && <p>Requesting…</p>}>
+      <StateRegion line={line} quiet={quiet} aside={pending && <p>Requesting…</p>}>
         {!quiet && pending && <p>Requesting…</p>}
-        {refusal && <Callout tone="error">{refusal}</Callout>}
       </StateRegion>
       {withFinished && finished && state.kind !== "done" && <p className="summary">{finished.summary ?? "Finished."}</p>}
       {outdated && <p className="notice">Students have saved work since this result.</p>}
     </>
+  );
+}
+
+// A failed run, with when it failed, and a refused Run, as error panels the full width of what holds
+// them, announced when they appear.
+export function RowProblems({ model }: { model: StatusModel }) {
+  const { state, line, refusal } = model;
+  return (
+    <div className="row-problems" aria-live="polite">
+      {state.kind === "failed" && (
+        <Callout tone="error">{line}{state.finishedAt !== null && <span className="when">Failed at {formatTime(state.finishedAt)}</span>}</Callout>
+      )}
+      {refusal && <Callout tone="error">{refusal}</Callout>}
+    </div>
   );
 }
 
@@ -218,21 +230,24 @@ export function RunButton({ row, model, onRun, before, held = false }: {
 export const COMMUNITY_WARNING = "Community packages are not reviewed by Concord. Running one runs a stranger's code with "
   + "your access to student data, and nothing stops it sending that data elsewhere.";
 
-// Asked before a community package runs. Confirm takes focus, and focus goes back to where it was,
-// the Run that asked, when either answer removes the warning.
+// Asked before a community package runs. Cancel takes focus, so pressing Enter twice does not run a
+// stranger's code, and Escape cancels. Focus goes back to where it was when the warning first showed,
+// the Run that asked, when either answer removes it; that is read as it renders, before another
+// warning's removal moves focus.
 export function CommunityConfirm({ onConfirm, onCancel }: { onConfirm: () => void; onCancel: () => void }) {
-  const confirm = useRef<HTMLButtonElement>(null);
+  const cancel = useRef<HTMLButtonElement>(null);
+  const [before] = useState(() => document.activeElement as HTMLElement | null);
   useEffect(() => {
-    const before = document.activeElement as HTMLElement | null;
-    confirm.current?.focus();
+    cancel.current?.focus();
     return () => before?.focus();
-  }, []);
+  }, [before]);
   return (
-    <div className="community-confirm" role="group" aria-label="Run a community package?">
+    <div className="community-confirm" role="group" aria-label="Run a community package?"
+      onKeyDown={(e) => { if (e.key === "Escape") onCancel(); }}>
       <p>{COMMUNITY_WARNING}</p>
       <div className="confirm-buttons">
-        <button type="button" ref={confirm} className="icon-button danger" onClick={onConfirm}><CheckIcon aria-hidden="true" />Confirm</button>
-        <button type="button" className="icon-button" onClick={onCancel}><XMarkIcon aria-hidden="true" />Cancel</button>
+        <button type="button" className="icon-button danger" onClick={onConfirm}><CheckIcon aria-hidden="true" />Confirm</button>
+        <button type="button" ref={cancel} className="icon-button" onClick={onCancel}><XMarkIcon aria-hidden="true" />Cancel</button>
       </div>
     </div>
   );
@@ -262,14 +277,19 @@ export function OpenLink({ resultKey, children, onOpen, linkRef }: {
   );
 }
 
-// Each filter pill's icon, by its key, which a card's tag repeats for the group it is in.
-const GROUP_ICONS: Record<string, ComponentType<SVGProps<SVGSVGElement>>> = {
-  search: MagnifyingGlassIcon, all: Squares2X2Icon, official: CheckBadgeIcon, projects: FolderIcon, mine: UserIcon,
-  community: GlobeAltIcon, unlisted: ArchiveBoxIcon
+// Each filter pill's icon, which a card's tag repeats for the group it is in, and the pill's title, by key.
+const GROUPS: Record<string, { icon: ComponentType<SVGProps<SVGSVGElement>>; title: string }> = {
+  search: { icon: MagnifyingGlassIcon, title: "Packages that match your search" },
+  all: { icon: Squares2X2Icon, title: "Every package that applies to this class" },
+  official: { icon: CheckBadgeIcon, title: "Packages made and reviewed by Concord" },
+  projects: { icon: FolderIcon, title: "Packages shared with this class's research projects" },
+  mine: { icon: UserIcon, title: "Packages you uploaded" },
+  community: { icon: GlobeAltIcon, title: "Packages other researchers shared publicly, which Concord has not reviewed" },
+  unlisted: { icon: ArchiveBoxIcon, title: "Results of packages this class's list no longer offers" }
 };
 
 const GroupIcon = ({ group }: { group: string }) => {
-  const Icon = GROUP_ICONS[group];
+  const Icon = GROUPS[group]?.icon;
   return Icon ? <Icon aria-hidden="true" /> : null;
 };
 
@@ -310,6 +330,7 @@ function Row({ row, group, tag, model, search, onRun, onOpen, linkRef, confirmin
         <RunButton row={row} model={model} onRun={onRun} held={asking}
           before={<><StatusPill model={model} /><ViewResult model={model} title={model.title} onOpen={() => onOpen(model.key)} /></>} />
       </div>
+      <RowProblems model={model} />
       {asking && <CommunityConfirm onConfirm={() => onConfirm(row)} onCancel={onCancel} />}
     </li>
   );
@@ -366,7 +387,7 @@ export function PackageFilters({ options, selected, onSelect }: {
   return (
     <div role="group" aria-label="Filter packages" className="filters">
       {options.map((o) => (
-        <button key={o.key} type="button" aria-pressed={o.key === selected} onClick={() => onSelect(o.key)}>
+        <button key={o.key} type="button" aria-pressed={o.key === selected} title={GROUPS[o.key]?.title} onClick={() => onSelect(o.key)}>
           <GroupIcon group={o.key} />{o.label} <span className="count">{o.count}</span>
         </button>
       ))}
@@ -398,7 +419,8 @@ export function PackageSearch({ search, onSearch }: { search: string | null; onS
   );
 }
 
-// The menu beside the pills that narrows the list to one status, with how many cards the pills keep in each.
+// The menu beside the pills that narrows the list to one status, with how many cards the pills keep in
+// each. It offers only the statuses some card has, and the one chosen.
 export function StatusFilter({ counts, selected, onSelect }: {
   counts: Map<Status, number>;
   selected: Status | "all";
@@ -408,7 +430,7 @@ export function StatusFilter({ counts, selected, onSelect }: {
     <select className="status-filter" aria-label="Filter packages by status" value={selected}
       onChange={(e) => onSelect(e.target.value as Status | "all")}>
       <option value="all">All statuses</option>
-      {STATUSES.map((s) => <option key={s} value={s}>{s} ({counts.get(s) ?? 0})</option>)}
+      {STATUSES.filter((s) => counts.get(s) || s === selected).map((s) => <option key={s} value={s}>{s} ({counts.get(s) ?? 0})</option>)}
     </select>
   );
 }
