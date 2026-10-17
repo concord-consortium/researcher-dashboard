@@ -190,7 +190,8 @@ export const SCENARIOS: Scenario[] = [
       const gone: Result = {
         ...finished("official/wildfire-responses", 400, now), status: "done",
         package: { identity: "official/legacy-responses", version: "0.9.0", checksum: "sha256:demo" },
-        summary: "4 open responses from 2 learners.", updated_at: stamp(now - 399 * MIN)
+        summary: "4 open responses from 2 learners.", updated_at: stamp(now - 399 * MIN),
+        display: WILDFIRE_RESPONSES.replace("6 open responses to 2 questions from 3 learners.", "4 open responses from 2 learners.")
       };
       return {
         ...s,

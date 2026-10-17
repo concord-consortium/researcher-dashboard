@@ -8,7 +8,7 @@ import { ResultActions, ResultView, ResultWhen } from "./ResultView";
 // One package, opened from the list: a subheader that stays under the page header, holding the way
 // back, the package's title and state, its Run and its result's Copy and Download, then the result. Each
 // opening mounts it afresh, so its title takes focus.
-export function PackageView({ title, status, note, run, warning, classTitle, finished, updated, filter, onAll }: {
+export function PackageView({ title, status, note, run, warning, messages, classTitle, finished, updated, filter, onAll }: {
   title: string;
   status: StatusModel;
   note: string | null;
@@ -16,6 +16,8 @@ export function PackageView({ title, status, note, run, warning, classTitle, fin
   run: ReactNode;
   // The community warning, while it waits for an answer.
   warning?: ReactNode;
+  // What the page could not read, under the subheader.
+  messages: ReactNode;
   classTitle: string;
   finished: Finished | null;
   updated: number | null;
@@ -54,6 +56,7 @@ export function PackageView({ title, status, note, run, warning, classTitle, fin
         </div>
         {warning}
       </div>
+      {messages}
       {finished
         ? <ResultView finished={finished} updated={updated} />
         : <p className="no-result">No result yet.</p>}

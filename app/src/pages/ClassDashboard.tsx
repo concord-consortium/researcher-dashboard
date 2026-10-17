@@ -1,12 +1,13 @@
 import { ClipboardDocumentListIcon, CubeIcon, UserGroupIcon } from "@heroicons/react/16/solid";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Callout } from "../components/Callout";
 import { ClassActivity, type Stopped } from "../components/ClassActivity";
 import { Counts } from "../components/Counts";
 import { Header } from "../components/Header";
 import { CommunityConfirm, PackageFilters, PackageList, rowModel, RunButton, StatusPill, type FilterOption } from "../components/PackageList";
 import { PackageView } from "../components/PackageView";
 import { panelId, tabId, Tabs } from "../components/Tabs";
-import { Unlisted, unlistedModel } from "../components/Unlisted";
+import { Unlisted, unlistedModel, unlistedTitle } from "../components/Unlisted";
 import { groupPackages, needsRefresh, packageKey, scopeUrls, titleOf, type Profile } from "../shell/packages";
 import { ApiError, SessionExpired, type PackageRow, type Scope } from "../shell/portal";
 import { PROFILE_MAX_AGE_MS } from "../shell/portals";
@@ -316,6 +317,8 @@ export function ClassDashboard({ services, onExpired, user = null, demo = false 
     request: requests.get(selectedKey!), newest, behind
   });
   const allNotes = new Map([...notes, ...rowNotes]);
+  // Every title the list returned, applicable or not, for results the page no longer lists.
+  const allTitles = new Map((rows ?? []).map((r) => [r.identity, titleOf(r)]));
   const filters: FilterOption[] = [
     { key: "all", label: "All", count: grouped.length + unlisted.length },
     ...groups.map((g) => ({ key: g.key, label: g.heading, count: g.rows.length })),
@@ -334,6 +337,25 @@ export function ClassDashboard({ services, onExpired, user = null, demo = false 
   const crumbOption = filters.find((f) => f.key === crumbKey);
   const filterCrumb = crumbOption ? { label: crumbOption.label, onSelect: () => { setFilter(crumbOption.key); navigate(ALL_PACKAGES); } } : null;
   const tab = route.tab;
+  // What the page could not read, and in the list what may be missing from it. A package's view shows
+  // these under its subheader, leaving out the list's own warning.
+  const inView = Boolean((selectedRow && selectedModel) || selectedUnlisted);
+  const messages = (inList: boolean) => (
+    <div className="status" aria-live="polite">
+      {profileProblem && <Callout tone="error">{profileProblem}</Callout>}
+      {!profileProblem && !profile && !refreshProblem && <p>Reading this class's activities…</p>}
+      {refreshProblem && <Callout tone="error">{refreshProblem}</Callout>}
+      {inList && profile?.truncated && (
+        <Callout tone="notice">
+          This class's content was too large to read completely, so a package may be missing from this list.
+        </Callout>
+      )}
+      {listProblem && <Callout tone="error">{listProblem}</Callout>}
+      {runsProblem && <Callout tone="error">{runsProblem}</Callout>}
+      {countsProblem && <Callout tone="error">{countsProblem}</Callout>}
+      {profile && !rows && !listProblem && !profileProblem && <p>Listing the packages that apply…</p>}
+    </div>
+  );
 
   return (
     <>
@@ -342,31 +364,20 @@ export function ClassDashboard({ services, onExpired, user = null, demo = false 
           onSelect={(key) => navigate(key === "info" ? { tab: "info" } : ALL_PACKAGES)} />} />
       <main className="class-dashboard">
         <div role="tabpanel" id={panelId("packages")} aria-labelledby={tabId("packages")} hidden={tab !== "packages"}>
-          <div className="status" aria-live="polite">
-            {profileProblem && <p className="error">{profileProblem}</p>}
-            {!profileProblem && !profile && !refreshProblem && <p>Reading this class's activities…</p>}
-            {refreshProblem && <p className="error">{refreshProblem}</p>}
-            {profile?.truncated && (
-              <p className="notice">
-                This class's content was too large to read completely, so a package may be missing from this list.
-              </p>
-            )}
-            {listProblem && <p className="error">{listProblem}</p>}
-            {runsProblem && <p className="error">{runsProblem}</p>}
-            {countsProblem && <p className="error">{countsProblem}</p>}
-            {profile && !rows && !listProblem && !profileProblem && <p>Listing the packages that apply…</p>}
-          </div>
+          {!inView && messages(true)}
           {selectedRow && selectedModel ? (
             <PackageView key={selectedKey} title={selectedModel.title} status={selectedModel} note={null}
               run={<RunButton row={selectedRow} model={selectedModel} onRun={press} held={confirming === selectedKey} before={<StatusPill model={selectedModel} />} />}
               warning={confirming === selectedKey && <CommunityConfirm onConfirm={() => confirm(selectedRow)} onCancel={() => setConfirming(null)} />}
-              classTitle={scope.name} finished={opened} updated={updated} filter={filterCrumb} onAll={allPackages} />
+              classTitle={scope.name} finished={opened} updated={updated} filter={filterCrumb} onAll={allPackages}
+              messages={messages(false)} />
           ) : selectedUnlisted ? (
-            <PackageView key={selectedKey} title={selectedUnlisted.package.identity}
+            <PackageView key={selectedKey} title={unlistedTitle(selectedUnlisted.package.identity, allTitles)}
               status={unlistedModel(selectedUnlisted, runner, mark, scope.class_hash)}
               note={allNotes.get(selectedUnlisted.package.identity) ?? null}
               run={<StatusPill model={unlistedModel(selectedUnlisted, runner, mark, scope.class_hash)} />}
-              classTitle={scope.name} finished={opened} updated={updated} filter={filterCrumb} onAll={allPackages} />
+              classTitle={scope.name} finished={opened} updated={updated} filter={filterCrumb} onAll={allPackages}
+              messages={messages(false)} />
           ) : listShown && rows && (
             <section className="all-packages" aria-labelledby="packages-heading">
               <h2 id="packages-heading" className="visually-hidden">All Packages</h2>
@@ -377,7 +388,7 @@ export function ClassDashboard({ services, onExpired, user = null, demo = false 
                   confirming={confirming} onConfirm={confirm} onCancel={() => setConfirming(null)} />
               )}
               {unlisted.length > 0 && (filter === "all" || filter === "unlisted") && (
-                <Unlisted results={unlisted} notes={allNotes} runner={runner} mark={mark}
+                <Unlisted results={unlisted} titles={allTitles} notes={allNotes} runner={runner} mark={mark}
                   classHash={scope.class_hash} onOpen={openPackage} linkRef={linkRef} />
               )}
             </section>

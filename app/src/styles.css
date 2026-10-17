@@ -163,6 +163,18 @@ section { border-top: 1px solid var(--line); padding-top: 0.5rem; }
 .assignments li:first-child { border-top: 0; }
 
 .notice { color: var(--warn); }
+.callout {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin: 0 0 1rem;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid;
+  border-radius: 6px;
+}
+.callout svg { flex: none; width: 16px; height: 16px; margin-top: 0.15rem; }
+.callout.notice { border-color: #f3c58a; background: #fff4e5; }
+.callout.error { border-color: #e08a8a; background: #fdecec; }
 .error { color: var(--error); }
 .tool { color: var(--muted); }
 
@@ -256,7 +268,7 @@ button.danger:focus-visible { outline-color: var(--error); }
 .state p, .finished p, .reason { margin: 0.2rem 0; }
 .when, .reason { color: var(--muted); }
 .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-top: 0.3rem; }
-.result-view, .all-packages { border-top: 0; padding-top: 0; }
+.result-view, .all-packages, .unlisted { border-top: 0; padding-top: 0; }
 .result-view [role="status"] { margin: 0; }
 .card .identity { display: block; }
 .card-main { flex: 1; min-width: 0; }

@@ -15,8 +15,18 @@ export function unlistedModel(result: Result, runner: Runner | null, mark: Sessi
   };
 }
 
-export function Unlisted({ results, notes, runner, mark, classHash, onOpen, linkRef }: {
+// The title the list last gave a package, or one made from its identity's last segment when the list
+// no longer returns it.
+export function unlistedTitle(identity: string, titles: Map<string, string>): string {
+  const known = titles.get(identity);
+  if (known) return known;
+  const words = (identity.split("/").pop() ?? identity).replace(/[-_.]+/g, " ").trim();
+  return words ? words[0].toUpperCase() + words.slice(1) : identity;
+}
+
+export function Unlisted({ results, titles, notes, runner, mark, classHash, onOpen, linkRef }: {
   results: Result[];
+  titles: Map<string, string>;
   notes: Map<string, string | null>;
   runner: Runner | null;
   mark: SessionMark | null;
@@ -25,27 +35,27 @@ export function Unlisted({ results, notes, runner, mark, classHash, onOpen, link
   linkRef: (key: string, link: HTMLAnchorElement | null) => void;
 }) {
   return (
-    <section aria-label="Packages no longer listed">
+    <section className="unlisted" aria-label="Packages no longer listed">
       <ul className="package-rows">
         {results.map((result) => {
           const identity = result.package.identity;
           const key = packageKey(identity);
           const note = notes.get(identity);
           const model = unlistedModel(result, runner, mark, classHash);
+          const title = unlistedTitle(identity, titles);
           return (
             <li key={key} className="card">
               <div className="card-main">
-                <OpenLink resultKey={key} onOpen={onOpen} linkRef={linkRef}>
-                  <code className="identity">{identity}</code>
-                </OpenLink>{" "}
+                <OpenLink resultKey={key} onOpen={onOpen} linkRef={linkRef}>{title}</OpenLink>{" "}
                 <span className="version">{result.package.version}</span> <span className="tag">No longer listed</span>
+                <code className="identity">{identity}</code>
                 {note && <p className="notice">{note}</p>}
                 <RowStatus model={model} />
               </div>
               <div className="controls">
                 <div className="run-row">
                   <StatusPill model={model} />
-                  <ViewResult model={model} title={identity} onOpen={() => onOpen(key)} />
+                  <ViewResult model={model} title={title} onOpen={() => onOpen(key)} />
                 </div>
               </div>
             </li>

@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PackageList, quietUpdate, stateText, statusPill, type StatusModel } from "../src/components/PackageList";
+import { unlistedTitle } from "../src/components/Unlisted";
 import { groupPackages, packageKey } from "../src/shell/packages";
 import type { PackageRow } from "../src/shell/portal";
 import { formatTime, type Result, type Runner, type RunRequest } from "../src/shell/runs";
@@ -327,5 +328,13 @@ describe("statusPill", () => {
     ["a failed first run", model({ state: { kind: "failed", error: "x", finishedAt: 1 } }), "Failed", "error"]
   ] as const)("says %s", (_name, m, label, tone) => {
     expect(statusPill(m)).toEqual({ label, tone });
+  });
+});
+
+describe("unlistedTitle", () => {
+  it("uses the title the list gave, else one made from the identity's last segment", () => {
+    expect(unlistedTitle("projects/20/gone", new Map([["projects/20/gone", "Gone for good"]]))).toBe("Gone for good");
+    expect(unlistedTitle("official/legacy-responses", new Map())).toBe("Legacy responses");
+    expect(unlistedTitle("users/7/hidden", new Map())).toBe("Hidden");
   });
 });

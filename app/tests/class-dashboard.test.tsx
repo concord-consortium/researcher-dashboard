@@ -297,7 +297,9 @@ describe("ClassDashboard", () => {
     await mounted(s);
     await s.snapshot({ ...CURRENT, truncated: true });
     expect(await screen.findByText(/no packages apply to this class yet/i)).toBeDefined();
-    expect(screen.getByText(/too large to read completely/i)).toBeDefined();
+    const callout = screen.getByText(/too large to read completely/i).closest(".callout")!;
+    expect(callout.classList.contains("notice")).toBe(true);
+    expect(callout.querySelector("svg[aria-hidden='true']")).not.toBeNull();
   });
 
   it("names a catalog it could not reach", async () => {
@@ -843,6 +845,20 @@ describe("opening a package", () => {
     expect(document.activeElement).toBe(heading);
   });
 
+  it("shows what the page could not read under the subheader, and not the list's warning", async () => {
+    const s = services();
+    await mounted(s);
+    await s.snapshot({ ...CURRENT, truncated: true });
+    await screen.findByText("Wildfire open responses");
+    expect(screen.getByText(/too large to read completely/)).toBeDefined();
+    fireEvent.click(link("Wildfire open responses"));
+    await s.refuseRuns("results");
+    expect(screen.queryByText(/too large to read completely/)).toBeNull();
+    const error = within(view()).getByText("Your runs could not be read.");
+    expect(view().querySelector(".package-subheader")!.compareDocumentPosition(error) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(view().querySelector(".package-subheader")!.contains(error)).toBe(false);
+  });
+
   it("stays open, focus unmoved, when the session and results listeners are refused", async () => {
     const s = services();
     await listed(s);
@@ -897,6 +913,7 @@ describe("opening a package", () => {
     const section = screen.getByRole("region", { name: "Packages no longer listed" });
     expect(within(unlistedRow(gone.identity)).getByText("This package no longer applies to this class.")).toBeDefined();
     expect(within(unlistedRow(elsewhere.identity)).getByText("This package is not offered in any of this class's groups.")).toBeDefined();
+    expect(within(unlistedRow(gone.identity)).getByRole("link").textContent).toBe("Gone");
     expect(within(section).getAllByRole("listitem")).toHaveLength(2);
     expect(s.resolve).not.toHaveBeenCalled();
   });
@@ -940,13 +957,13 @@ describe("opening a package", () => {
     await listed(s);
     await s.results(new Map([["users__7__hidden", done("users/7/hidden", "Hidden summary", 1000)]]));
     await within(unlistedRow("users/7/hidden")).findByText("This package is no longer available to you.");
-    fireEvent.click(link("users/7/hidden"));
-    expect(document.activeElement).toBe(title("users/7/hidden"));
+    fireEvent.click(link("Hidden"));
+    expect(document.activeElement).toBe(title("Hidden"));
     expect(within(view()).getByText("This package is no longer available to you.")).toBeDefined();
     expect(view().querySelector(".package-bar .status-pill .label")!.textContent).toBe("Finished");
     expect(within(view()).queryByRole("button", { name: /^(Run|Resume) / })).toBeNull();
     allPackages();
-    expect(document.activeElement).toBe(link("users/7/hidden"));
+    expect(document.activeElement).toBe(link("Hidden"));
   });
 
   it("offers no Run on an unlisted result, and words a waiting one without asking for a run", async () => {
