@@ -6,7 +6,7 @@ import path from "node:path";
 import { EventEmitter } from "node:events";
 import test from "node:test";
 import { portalHost } from "../server/config.js";
-import { ccDataLogin, makeSteps } from "../server/steps.js";
+import { PackageProcessesSurvived, ccDataLogin, makeSteps } from "../server/steps.js";
 import { captureLog } from "./helpers/capture-log.js";
 
 // Stands in for the cc-data process: records how it was invoked and what was
@@ -164,7 +164,8 @@ test("processes that will not die after the package failed keep the package's ow
       run: async () => { throw Object.assign(new Error("run.py exited 2"), { stdout: "", stderr: "" }); },
       left: ["4242", "4242", "4242", "4242", "4242"]
     });
-    await assert.rejects(makeSteps().runPackage(runArgs(dir, outputDir, { exec })), /could not be stopped \(.*5 kills did not stop.*\), after the package failed: run\.py exited 2$/);
+    await assert.rejects(makeSteps().runPackage(runArgs(dir, outputDir, { exec })), (err) =>
+      err instanceof PackageProcessesSurvived && /could not be stopped \(.*5 kills did not stop.*\), after the package failed: run\.py exited 2$/.test(err.message));
   });
 });
 

@@ -5,8 +5,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test, { afterEach, beforeEach } from "node:test";
 import { PACKAGE_MAX_DURATION_DEFAULT, disableDefaultCredentialChain, loadEnv } from "../server/config.js";
-import { makeSteps } from "../server/steps.js";
-import { FREEZE_TIMEOUT_MS, HEARTBEAT_SECONDS, HookError, LOST_RUN_REASON, PACKAGE_END_TIMEOUT_MS, PACKAGE_TIMEOUT_MARGIN_MS, REVOKE_TIMEOUT_MS, Runner, TOKEN_TIMEOUT_MS } from "../server/runner.js";
+import { PackageProcessesSurvived, makeSteps } from "../server/steps.js";
+import { FREEZE_TIMEOUT_MS, HEARTBEAT_SECONDS, HookError, LOST_RUN_REASON, PROCESSES_SURVIVED_REASON, PACKAGE_END_TIMEOUT_MS, PACKAGE_TIMEOUT_MARGIN_MS, REVOKE_TIMEOUT_MS, Runner, TOKEN_TIMEOUT_MS } from "../server/runner.js";
 import { buildRunner } from "../server/index.js";
 import { PackageFetchFailed, packageDocId, packageKey } from "../server/package-fetch.js";
 import { MemoryStore, SERVER_TIME, STATUS_WRITE_TIMEOUT_MS, classPath, resultPath, runnerPath, scopePath } from "../server/status.js";
@@ -893,6 +893,45 @@ function killable(events) {
     runPackage: () => new Promise((_, reject) => { die = reject; }),
     killPackageProcesses: async () => { events.push("kill"); die?.(new Error("killed")); }
   };
+}
+
+// A survivor shares the next package's uid, so nothing more is claimed until a kill clears it;
+// the queued packages are refused meanwhile, so the VM can still suspend.
+for (const { name, stuck, kills: expected } of [
+  // Ends when its bound aborts it; the kill that follows fails. Kills: the bound's, the
+  // blocked plan's, and the one that clears the uid.
+  { name: "a package past its bound whose kill fails", kills: 3, stuck: ({ signal }) => new Promise((_, reject) => signal.addEventListener("abort", () => reject(new Error("killed")))) },
+  { name: "a package whose processes outlive the step's own kills", kills: 2, stuck: async () => {
+    throw new PackageProcessesSurvived("the package's processes could not be stopped (5 kills did not stop them), after the package finished");
+  } }
+]) {
+  test(`after ${name}, the next package is refused until a kill succeeds, then runs`, async () => {
+    let clear = false;
+    let kills = 0;
+    const killPackageProcesses = async () => { kills += 1; if (!clear) throw new Error("5 kills did not stop the package uid's processes"); };
+    const built = build({
+      envOverrides: { packageTimeoutMs: 20 },
+      stepOverrides: { killPackageProcesses, runPackage: (args) => (args.paths.outputDir.endsWith("users__1__stuck") ? stuck(args) : { display: "# ok", summary: "ok" }) }
+    });
+    built.fn.queue({ identity: "users/1/stuck" });
+    built.fn.queue({ identity: "users/1/next" });
+    onceWhen(built, () => result(built.docs, "users/1/next").status === "failed", () => {
+      clear = true;
+      requeue(built, "users/1/next");
+      built.fn.queue({ identity: "users/1/later" });
+    });
+    stopAfter(built, 60);
+    await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+    await built.runner.loop;
+    assert.equal(result(built.docs, "users/1/stuck").status, "failed");
+    const nextWrites = writesTo(built.record, resultPath(PORTAL, CLASS, USER, "users__1__next"));
+    const refusal = nextWrites.findIndex((w) => w.status === "failed");
+    assert.equal(nextWrites[refusal].error, PROCESSES_SURVIVED_REASON);
+    assert.ok(!nextWrites.slice(0, refusal).some((w) => w.status === "running"), "never claimed while the survivor lived");
+    assert.equal(result(built.docs, "users/1/next").status, "done", "it runs once a kill clears the uid");
+    assert.equal(result(built.docs, "users/1/later").status, "done");
+    assert.equal(kills, expected, "once cleared, a plan kills nothing more");
+  });
 }
 
 // A hung package started under mocked timers, with the signal its bound aborts.

@@ -4,6 +4,7 @@ import { verifySandbox } from "./sandbox.js";
 import { STATES, VmState, canTransition } from "./state.js";
 import { ClassDocuments, RunnerStatus, bounded } from "./status.js";
 import { askApplies, revokeOwnToken } from "./report-server.js";
+import { PackageProcessesSurvived } from "./steps.js";
 import { CHECKSUM, declaresPatterns, IDENTITY, PACKAGE_DOC_ID, PackageFetchFailed, VERSION, packageDocId } from "./package-fetch.js";
 
 const EIGHT_HOURS_MS = VM_LIFE_SECONDS * 1000;
@@ -27,6 +28,8 @@ export const PACKAGE_END_TIMEOUT_MS = 10_000;
 // A claim's heartbeat_seconds and the interval its beats are written at, which the
 // watchdog's lease is five of. report-service's rules allow 30 to 120.
 export const HEARTBEAT_SECONDS = 60;
+// What a queued package is refused with while an earlier package's processes outlive every kill.
+export const PROCESSES_SURVIVED_REASON = "The machine's last package could not be stopped, so nothing more runs on it; run it again.";
 // The reason every lost run is failed with, by this runner and by the watchdog alike.
 export const LOST_RUN_REASON = "The machine running it stopped before the run finished; run it again.";
 
@@ -127,6 +130,9 @@ export class Runner {
   #skippedLast = new Set();
   // report-server's yes for a class, identity and version, for this awake period.
   #applies = new Set();
+  // Set when a package's processes outlive every kill, and cleared only by a kill that
+  // succeeds: until then no package is claimed, since a survivor shares the next one's uid.
+  #processesSurvived = false;
   // The last state the loop wrote, with the drained ready's queue, so an idle poll does not
   // rewrite an unchanged document.
   #lastWritten = null;
@@ -508,6 +514,8 @@ export class Runner {
     // Entries this plan wrote `failed`, which are no longer queued.
     const resolved = new Set();
     const skipped = new Set();
+    const blocked = request.packages.length > 0 && this.#processesSurvived && !(await this.#killSurvivors());
+    if (!this.#current(epoch)) return null;
     const skip = (entry, error) => {
       const key = `${entry.class_hash}/${entry.identity}/${entry.package_key}`;
       if (!this.#skippedLast.has(key)) log.error("package.skipped", { scope: entry.class_hash, package: entry.identity, error });
@@ -535,6 +543,10 @@ export class Runner {
       const docId = packageDocId(entry.identity);
       if (entry.package_key !== undefined && entry.package_key !== docId) {
         await refuse(`/work named this package ${entry.package_key}, but its identity is ${docId}`);
+        continue;
+      }
+      if (blocked) {
+        await refuse(PROCESSES_SURVIVED_REASON);
         continue;
       }
       const scope = request.scopes[entry.class_hash]?.scope;
@@ -770,6 +782,7 @@ export class Runner {
         await docs.done(docId, { pkg, imageVersion: this.env.imageVersion, summary: result.summary, display: result.display });
       } catch (err) {
         log.error("package.failed", { error: err.message });
+        if (err instanceof PackageProcessesSurvived) this.#processesSurvived = true;
         if (timedOut) await this.#endTimedOutPackage(running);
         await heartbeat?.settled();
         if (this.#terminating) return true;
@@ -796,10 +809,24 @@ export class Runner {
     try {
       await this.steps.killPackageProcesses({ uid: this.env.packageUid });
     } catch (err) {
+      this.#processesSurvived = true;
       log.error("package.kill_failed", { error: err.message });
     }
     await bounded(running.catch(() => {}), PACKAGE_END_TIMEOUT_MS, "the timed-out package's end")
       .catch((err) => log.error("package.kill_failed", { error: err.message }));
+  }
+
+  // Tries the kill again before a plan; answers whether the uid is now clear.
+  async #killSurvivors() {
+    try {
+      await this.steps.killPackageProcesses({ uid: this.env.packageUid });
+    } catch (err) {
+      log.error("package.kill_failed", { error: err.message });
+      return false;
+    }
+    this.#processesSurvived = false;
+    log.info("package.processes_stopped", {});
+    return true;
   }
 
   async #steps({ entry, docId, docs, scope, manifest, signal, cancelled }) {

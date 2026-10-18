@@ -59,6 +59,10 @@ function logPackageOutput(result, level) {
   });
 }
 
+// The package uid's processes outlived every kill, so one could still change the files the
+// next package runs with.
+export class PackageProcessesSurvived extends Error {}
+
 export function makeSteps({ login = ccDataLogin } = {}) {
   return {
     installCredential: async ({ token, portal }) => {
@@ -142,7 +146,7 @@ export function makeSteps({ login = ccDataLogin } = {}) {
       try {
         await killPackageProcesses({ uid, ...(exec ? { exec } : {}) });
       } catch (err) {
-        throw new Error(`the package's processes could not be stopped (${err.message}), after ${failure ? `the package failed: ${failure.message}` : "the package finished"}`);
+        throw new PackageProcessesSurvived(`the package's processes could not be stopped (${err.message}), after ${failure ? `the package failed: ${failure.message}` : "the package finished"}`);
       }
       if (failure) throw failure;
       return readPackageResult(paths.outputDir);

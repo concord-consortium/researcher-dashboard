@@ -25,7 +25,7 @@ const ref = refAt === -1 ? "master" : rest[refAt + 1] ?? fail("--ref needs a val
 const url = `${process.env.CONTRACT_SOURCE ?? SOURCE}/${ref}/fixtures/package-contract.json`;
 
 if (command !== "sync" && command !== "check") fail("usage: contract.mjs sync | check [--ref <ref>]");
-const response = await fetch(url).catch((err) => fail(`could not fetch ${url}: ${err.message}`));
+const response = await fetch(url, { signal: AbortSignal.timeout(30_000) }).catch((err) => fail(`could not fetch ${url}: ${err.message}`));
 if (!response.ok) fail(`${url} answered ${response.status}`);
 const upstream = Buffer.from(await response.arrayBuffer());
 try {
