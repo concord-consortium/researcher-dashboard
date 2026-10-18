@@ -182,6 +182,7 @@ Released by a runner artifact and a `CodeArtifactKey`-only change set to `resear
 - **0.2.4** (2026-10-16, after the PR's automated review): the gate passed on a new VM on image 6.0, with no warning in the VM's log.
 - **0.2.5** (2026-10-18, after the first human review): the gate passed on a new VM on image 7.0, with no warning in the VM's log; its runner-document writes, now conditional on no suspend having begun, committed `running` and `ready` on Firestore.
 - **0.2.6** (2026-10-18, after the approving review): the gate passed on a new VM on image 8.0, with no warning in the VM's log.
+- **0.2.7** (2026-10-18, after the automated review of the approved PR): the gate passed on a new VM on image 9.0, with no warning in the VM's log.
 
 **Production** has no stack until RD-1 production. Before its first launch, production rigse needs `RESEARCHER_DASHBOARD_FIREBASE_APP=report-service-pro`, which R56's entry serves, and `report-service-pro` needs the IAM change `report-service-dev` has (the Service Account Credentials API and `researcher-dashboard@` holding `roles/iam.serviceAccountTokenCreator` on itself).
 
