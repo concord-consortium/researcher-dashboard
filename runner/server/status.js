@@ -169,8 +169,8 @@ export class ClassDocuments {
     }));
   }
 
-  // A package refused before any claim: it never ran, so nothing of the last run's is left
-  // beside the refusal. started_at stays, since the rules refuse clearing it.
+  // A package refused before any claim never ran, so none of the last run's fields survive;
+  // started_at stays, since the rules refuse clearing it.
   async refused(docId, { pkg, error }) {
     await this.store.merge(this.#result(docId), this.#stamped({
       status: "failed",
@@ -179,6 +179,10 @@ export class ClassDocuments {
       package: pkg,
       summary: null,
       display: null,
+      image_version: null,
+      microvm_id: null,
+      expected_duration_seconds: null,
+      heartbeat_seconds: null,
       finished_at: this.store.serverTimestamp()
     }));
   }

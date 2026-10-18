@@ -8,7 +8,7 @@
   },
   "scripts": {
     "start": "node server/index.js",
-    "test": "node --test --test-force-exit --test-timeout=60000 \"test/**/*.test.js\"",
+    "test": "node --test --test-timeout=60000 \"test/**/*.test.js\"",
     "contract:sync": "node scripts/contract.mjs sync",
     "contract:check": "node scripts/contract.mjs check"
   },

@@ -323,3 +323,24 @@ test("a file skipped for another hard link is logged once and named by the verif
   assert.equal(result.ok, true);
   assert.deepEqual(result.skipped, ["linked.txt"]);
 });
+
+test("the directory backend writes a Buffer body whole", async () => {
+  await new DirBackend(remote).put("b.txt", { body: Buffer.from("abc"), size: 3 });
+  assert.equal(fs.readFileSync(path.join(remote, "b.txt"), "utf8"), "abc");
+});
+
+// The empty file's body is a Buffer, not a stream that would close the descriptor itself.
+test("an empty file's descriptor is closed once its upload is sent", async () => {
+  await write("empty.txt", "");
+  const closed = [];
+  const closeSync = fs.closeSync;
+  fs.closeSync = (fd) => { closed.push(fd); return closeSync(fd); };
+  let closedDuringPut;
+  try {
+    await syncer({ backend: { list: async () => [], put: async () => { closedDuringPut = closed.length; } } }).flush();
+  } finally {
+    fs.closeSync = closeSync;
+  }
+  assert.equal(closedDuringPut, 0, "still open while the upload is sent");
+  assert.equal(closed.length, 1);
+});

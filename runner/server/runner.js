@@ -122,6 +122,9 @@ export class Runner {
   // Verified manifests, or the fetch under way, by identity, version and checksum, which
   // never change for the VM's life, so a re-plan does not fetch and unpack the archive again.
   #manifests = new Map();
+  // The entries the last plan skipped, so each is logged once while it stays skipped, not on
+  // every poll.
+  #skippedLast = new Set();
   // report-server's yes for a class, identity and version, for this awake period.
   #applies = new Set();
   // The last state the loop wrote, with the drained ready's queue, so an idle poll does not
@@ -332,6 +335,12 @@ export class Runner {
     // period counts both, so a failure that keeps repeating still reaches /idle. Answers
     // whether the loop ends.
     const idleTurn = async () => {
+      // A run held across a suspend is not idle: the failure only waits, since /idle would
+      // decline and a flush would race the package still writing.
+      if (this.#run) {
+        await this.sleep(this.env.idlePollMs);
+        return false;
+      }
       idleSince ??= this.now();
       if (this.now() - idleSince < this.env.idlePeriodMs) {
         await this.sleep(this.env.idlePollMs);
@@ -498,12 +507,18 @@ export class Runner {
     const candidates = [];
     // Entries this plan wrote `failed`, which are no longer queued.
     const resolved = new Set();
+    const skipped = new Set();
+    const skip = (entry, error) => {
+      const key = `${entry.class_hash}/${entry.identity}/${entry.package_key}`;
+      if (!this.#skippedLast.has(key)) log.error("package.skipped", { scope: entry.class_hash, package: entry.identity, error });
+      skipped.add(key);
+    };
     for (const entry of request.packages) {
       // A resume stands this plan down: the new loop's plan decides, with its own stores.
       if (!this.#current(epoch)) return null;
       const store = request.classStores.get(entry.class_hash);
       if (!store) {
-        log.error("package.skipped", { scope: entry.class_hash, package: entry.identity, error: "no class store for this class" });
+        skip(entry, "no class store for this class");
         continue;
       }
       if ((this.#claimFailures.get(this.#claimKey(entry)) ?? 0) >= CLAIM_ATTEMPTS) continue;
@@ -514,7 +529,7 @@ export class Runner {
       if (!IDENTITY.test(entry.identity ?? "") || !VERSION.test(entry.version ?? "") || !CHECKSUM.test(entry.checksum ?? "")
           || !Number.isInteger(entry.catalog_id) || entry.catalog_id < 1) {
         if (PACKAGE_DOC_ID.test(docIdOf(entry) ?? "")) await refuse("the queued package does not match the catalog's grammar");
-        else log.error("package.skipped", { scope: entry.class_hash, error: `unusable identity ${entry.identity} and package key ${entry.package_key}` });
+        else skip(entry, `unusable identity ${entry.identity} and package key ${entry.package_key}`);
         continue;
       }
       const docId = packageDocId(entry.identity);
@@ -611,6 +626,7 @@ export class Runner {
       runnable ??= candidate;
     }
     if (!this.#current(epoch)) return null;
+    this.#skippedLast = skipped;
     // Still queued, as the runner document lists it: every entry this plan did not write refused.
     const queue = request.packages
       .filter((p) => !resolved.has(this.#claimKey(p)) && PACKAGE_DOC_ID.test(docIdOf(p) ?? ""))

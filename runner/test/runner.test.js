@@ -1166,7 +1166,7 @@ test("a class token that names another class leaves that class's packages unclai
   });
   assert.equal(result(built.docs, "users/1/counts").status, "queued");
   assert.equal(built.record.resolved.length, 0, "nothing is fetched for a class with no store");
-  assert.ok(lines.some((l) => l.event === "package.skipped" && l.scope === CLASS));
+  assert.equal(lines.filter((l) => l.event === "package.skipped" && l.scope === CLASS).length, 1, "logged once while it stays skipped, not on every poll");
 });
 
 test("a class with no scope entry is refused like a missing token, and no store is left open", async () => {
@@ -1303,6 +1303,27 @@ for (const { name, setup } of [
     assert.equal(built.fn.routes().filter((r) => r === "work").length, built.env.idlePeriodMs / built.env.idlePollMs + 1);
   });
 }
+
+test("a /work that keeps failing while a run is held across a suspend never flushes for /idle", async () => {
+  const { built, finish } = await holding();
+  await built.runner.suspend();
+  // The client /run built, since the VM is already running.
+  let workFailures = 0;
+  const call = built.runner.callFunction;
+  built.runner.callFunction = (route, args) => {
+    if (route !== "work") return call(route, args);
+    workFailures += 1;
+    return Promise.reject(Object.assign(new Error("/work answered 502"), { status: 502 }));
+  };
+  const flushes = [];
+  const flush = built.runner.syncer.flushAndVerify.bind(built.runner.syncer);
+  built.runner.syncer.flushAndVerify = (why) => { flushes.push(why); return flush(why); };
+  built.runner.resume();
+  await until(() => workFailures > built.env.idlePeriodMs / built.env.idlePollMs + 2, "an idle period of failed polls");
+  assert.deepEqual(flushes, []);
+  assert.ok(!built.fn.routes().includes("idle"));
+  finish();
+});
 
 // An entry that arrives unwritable changes what the drained ready lists, so ready is written again.
 test("a drained VM writes ready again when only its leftover queue changes", async () => {
@@ -2380,45 +2401,93 @@ test("a ready write in flight across a suspend and resume leaves the new loop to
   assert.equal(runnerDoc(built.docs).state, "ready", "the new loop wrote ready over suspended");
 });
 
-// Firestore tests the condition when the transaction commits, so the hold comes before it.
 test("a loop's ready write sent before /suspend does not land over the hook's suspended", async () => {
-  let held = null;
-  const built = build({
-    wrapStore: (store) => {
-      const mergeIf = store.mergeIf.bind(store);
-      store.mergeIf = async (p, onlyIf, fields) => {
-        if (!held && p.includes("/runners/") && fields.state === "ready") await new Promise((r) => { held = r; });
-        return mergeIf(p, onlyIf, fields);
-      };
-      return store;
-    }
-  });
+  const { held, wrap } = holdingLoopWrite((fields) => fields.state === "ready");
+  const built = build({ wrapStore: wrap });
   await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
-  await until(() => held, "the loop's drained ready write");
+  await until(() => held.release, "the loop's drained ready write");
   await built.runner.suspend();
-  held();
+  held.release();
   await built.runner.loop;
   assert.equal(runnerDoc(built.docs).state, "suspended");
   assert.deepEqual(writesTo(built.record, runnerPath(PORTAL, USER)).map((w) => w.state).slice(-2), ["suspending", "suspended"]);
 });
 
-test("a package refused after an earlier run leaves none of that run's output beside the refusal", async () => {
-  const built = build();
-  built.fn.queue({ identity: "users/1/counts" });
-  onceWhen(built, () => result(built.docs, "users/1/counts").status === "done", () => {
-    built.fn.state.entries[0].version = "1.0.1";
-    built.record.manifests["users/1/counts"] = manifestFor("users/1/counts", { expected_duration_seconds: 36_000 });
-    requeue(built, "users/1/counts");
-  });
-  stopAfter(built, 60);
+// Holds the first runner-document write `matches` picks before its transaction tests its
+// condition: Firestore tests it when the transaction commits, so a commit landing after the
+// hook's writes is held here.
+function holdingLoopWrite(matches) {
+  const held = { release: null };
+  const wrap = (store) => {
+    const mergeIf = store.mergeIf.bind(store);
+    store.mergeIf = async (p, onlyIf, fields) => {
+      if (!held.release && p.includes("/runners/") && matches(fields)) await new Promise((r) => { held.release = r; });
+      return mergeIf(p, onlyIf, fields);
+    };
+    return store;
+  };
+  return { held, wrap };
+}
+
+test("a claim's running write sent before /suspend does not land over the hook's suspended", async () => {
+  const { held, wrap } = holdingLoopWrite((fields) => fields.state === "running");
+  const built = build({ wrapStore: wrap });
+  built.fn.queue({ identity: SLOW });
   await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
-  await built.runner.loop;
-  const doc = result(built.docs, "users/1/counts");
-  assert.equal(doc.status, "failed");
-  assert.match(doc.error, /over the runner's ceiling/);
-  assert.equal(doc.package.version, "1.0.1");
-  assert.deepEqual({ summary: doc.summary, display: doc.display, stage: doc.stage }, { summary: null, display: null, stage: null });
+  await until(() => held.release, "the claim's runner-document write");
+  await built.runner.suspend();
+  held.release();
+  await settle(20);
+  assert.equal(runnerDoc(built.docs).state, "suspended");
+  assert.deepEqual(runnerDoc(built.docs).current_package, { class_hash: CLASS, package_key: SLOW_KEY }, "the hook's writes name the run");
+  assert.equal(built.record.prepared.length, 0, "the package waits for the resume");
 });
+
+test("the post-resume running write sent before a second /suspend does not land over it", async () => {
+  let armed = false;
+  const { held, wrap } = holdingLoopWrite((fields) => armed && fields.state === "running");
+  const { built, finish } = await holding({ wrapStore: wrap });
+  await built.runner.suspend();
+  armed = true;
+  built.runner.resume();
+  await until(() => held.release, "the post-resume running write");
+  await built.runner.suspend();
+  held.release();
+  await settle(20);
+  assert.equal(runnerDoc(built.docs).state, "suspended");
+  finish();
+});
+
+// report-service's re-queue replaces the result with the last finished run as `previous`;
+// the second row keeps that run's fields on the document, which the refusal must clear.
+const RUN_FIELDS = ["summary", "display", "stage", "image_version", "microvm_id", "expected_duration_seconds", "heartbeat_seconds"];
+for (const { name, requeueAs } of [
+  { name: "as report-service re-queues it", requeueAs: (done) => ({ status: "queued", platform_id: PLATFORM_ID, package: done.package, previous: { ...done } }) },
+  { name: "with the last run's fields still on the document", requeueAs: (done) => ({ ...done, status: "queued" }) }
+]) {
+  test(`a package refused after an earlier run, ${name}, leaves none of that run beside the refusal`, async () => {
+    const built = build();
+    built.fn.queue({ identity: "users/1/counts" });
+    let done;
+    onceWhen(built, () => result(built.docs, "users/1/counts").status === "done", () => {
+      done = structuredClone(result(built.docs, "users/1/counts"));
+      built.fn.state.entries[0].version = "1.0.1";
+      built.record.manifests["users/1/counts"] = manifestFor("users/1/counts", { expected_duration_seconds: 36_000 });
+      built.docs.set(resultPath(PORTAL, CLASS, USER, "users__1__counts"), structuredClone(requeueAs(done)));
+    });
+    stopAfter(built, 60);
+    await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+    await built.runner.loop;
+    assert.equal(done.summary, "12 documents", "the earlier run finished with output");
+    assert.equal(done.microvm_id, "mvm-1");
+    const doc = result(built.docs, "users/1/counts");
+    assert.equal(doc.status, "failed");
+    assert.match(doc.error, /over the runner's ceiling/);
+    assert.equal(doc.package.version, "1.0.1");
+    assert.deepEqual(Object.fromEntries(RUN_FIELDS.map((f) => [f, doc[f]])), Object.fromEntries(RUN_FIELDS.map((f) => [f, null])));
+    assert.deepEqual(doc.previous, requeueAs(done).previous, "previous is the function's and survives the refusal");
+  });
+}
 
 test("report-server's yes is asked again after a resume", async () => {
   const built = build();
@@ -2600,8 +2669,9 @@ test("/terminate during a run fails the result first, revokes, flushes and termi
 
 test("/terminate's failure write is bounded, so a hung write does not keep the hook from revoking and flushing", async (t) => {
   const g = gate((p, fields) => p.includes("/results/") && fields.error === LOST_RUN_REASON);
-  const { built, finish } = await holding({ wrapStore: g.wrap });
+  // Before the run starts, so its bound's timer is a mocked one /terminate can end.
   t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { built, finish } = await holding({ wrapStore: g.wrap });
   let ended = false;
   try {
     const terminating = built.runner.terminate().then(() => { ended = true; });

@@ -4,7 +4,7 @@ The MicroVM image that runs a researcher's packages. It answers Lambda's lifecyc
 
 ## Configuration
 
-Everything per VM arrives in `runHookPayload` at `/run`. The image's environment carries only what every VM shares, and these have code defaults, so none is a stack parameter; changing one is a runner release.
+The per-VM configuration arrives in `runHookPayload` at `/run`; each `/work` answer brings fresh session and class tokens, and `/storage-credentials` the S3 credentials. The image's environment carries only what every VM shares, and these have code defaults, so none is a stack parameter; changing one is a runner release.
 
 | Variable | Default | What it bounds |
 |---|---|---|
@@ -16,7 +16,7 @@ Everything per VM arrives in `runHookPayload` at `/run`. The image's environment
 
 ## Tests
 
-`npm test` on Node 24 or later, which `.github/workflows/runner.yml` runs on every push touching `runner/` or `fixtures/`. `test/firestore.emulator.test.js` is skipped unless `FIRESTORE_EMULATOR_HOST` is set; `make test-emulator` runs the whole `npm test` with it enabled, against the Firestore and Auth emulators, and CI's `emulator` job runs that file against them. No security rules are loaded, so the emulator accepts every read and write: the suite checks the writes' shape, real server timestamps and the conditional write's transaction, not that report-service's rules accept them.
+`npm test` on Node 24 or later, which `.github/workflows/runner.yml` runs on every push touching `runner/` or `fixtures/`. `test/firestore.emulator.test.js` is skipped unless both `FIRESTORE_EMULATOR_HOST` and `FIREBASE_AUTH_EMULATOR_HOST` are set; `make test-emulator` runs the whole `npm test` with it enabled, against the Firestore and Auth emulators, and CI's `emulator` job runs that file against them. No security rules are loaded, so the emulator accepts every read and write: the suite checks the writes' shape, real server timestamps and the conditional write's transaction, not that report-service's rules accept them.
 
 `fixtures/package-contract.json` is a copy of report-service's package contract (the catalog's identity and version grammar, the package key, and `limits`), which the runner's grammar and duration ceiling are tested against. `npm run contract:check` fetches report-service's file from GitHub (`master`, or `--ref <ref>` through `node scripts/contract.mjs check --ref <ref>`) and fails if the copy differs; `npm run contract:sync` rewrites the copy, to be committed with whatever the change breaks in the runner's tests.
 

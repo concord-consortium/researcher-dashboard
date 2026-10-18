@@ -1,4 +1,5 @@
 import { createWriteStream } from "node:fs";
+import { Readable } from "node:stream";
 import { copyFile, mkdir, readdir, rm, stat } from "node:fs/promises";
 import { pipeline } from "node:stream/promises";
 import path from "node:path";
@@ -15,11 +16,12 @@ export class DirBackend {
     return path.join(this.root, relPath);
   }
 
-  // `body` reads the file the syncer opened and checked; the syncer closes it.
+  // `body` is a stream of the file the syncer opened and checked, which the syncer closes, or
+  // a Buffer, which pipeline cannot take as a source.
   async put(relPath, { body }) {
     const dest = this.#abs(relPath);
     await mkdir(path.dirname(dest), { recursive: true });
-    await pipeline(body, createWriteStream(dest));
+    await pipeline(Buffer.isBuffer(body) ? Readable.from([body]) : body, createWriteStream(dest));
   }
 
   async get(relPath, destPath) {
