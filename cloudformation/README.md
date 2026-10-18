@@ -87,7 +87,14 @@ A `MicrovmImage` change starts an image build. VMs already running keep their ve
 
 A runner change reaches a stack only through a new image: publish the artifact, then update the stack with `CodeArtifactKey` pointing at it and every other parameter unchanged. A new package version needs no release; a change to the runner's own code does. "Updating a stack" cannot do this, since it carries `CodeArtifactKey` over with its previous value. Each release takes a `VERSION` never published before, so each has its own key: `publish-artifact` refuses one already in the bucket.
 
-Publish the artifact first, and stop if it fails or refuses the version, since everything after it would release whatever is already at that key. The bucket is the one "Before a stack is created in an account" names: `concordqa-devops` for staging, `concord-devops` for production.
+Before publishing, gate the image (`runner/README.md`, "The smoke gate"): check the contract copy and run the smoke package inside the image, and stop if either fails.
+
+```sh
+cd ../runner && npm run contract:check
+make smoke-image SMOKE_CLASS_ID=<id> SMOKE_CLASS_HASH=<hash>
+```
+
+Then publish the artifact, and stop if it fails or refuses the version, since everything after it would release whatever is already at that key. The bucket is the one "Before a stack is created in an account" names: `concordqa-devops` for staging, `concord-devops` for production.
 
 ```sh
 cd ../runner && make publish-artifact VERSION=<x.y.z> ARTIFACT_BUCKET=<bucket in the stack's account>
@@ -108,7 +115,14 @@ aws cloudformation create-change-set --stack-name "$STACK" --change-set-name "gi
   --parameters $PARAMS ParameterKey=CodeArtifactKey,ParameterValue="$KEY"
 ```
 
-Review, diff and execute the change set as in "Updating a stack"; the update builds the new image. With report-service's function at Functions 1.9.0 or later (REPORT-170), nothing else is needed: the function replaces a suspended VM on an older version at its researcher's next run request, and the watchdog terminates one that has work queued behind its suspend; that work waits for the researcher's next request, which launches on the new version. A VM already on the new version is left alone, and so is a running one on an older version, which may be in the middle of a researcher's run: it suspends once it is idle and is replaced at the next wake. A VM suspended partway through a run is resumed so the run can finish. The loop below is optional cleanup for suspended old VMs whose researchers do not come back before the VMs' 8-hour life ends, and is required only below Functions 1.9.0. Unlike the function, it also terminates an old VM suspended partway through a run, whose run then fails, so skip it if you do not want to fail those runs. Both loops in this section run with your own credentials, since the launcher cannot list VMs, and need the image and its active version, read once the update is complete:
+Review, diff and execute the change set as in "Updating a stack"; the update builds the new image. Once the new image version is active, run the smoke package on the stack, and if it fails, roll back by deactivating that image version, since launches take the latest active one:
+
+```sh
+cd ../runner && RD_SMOKE_ACCESS_TOKEN=<token> node smoke/smoke.mjs stack \
+  --identity <origin>/runner-smoke --version <v> --class-hash <hash> --terminate
+```
+
+Then, with report-service's function at Functions 1.9.0 or later (REPORT-170), nothing else is needed: the function replaces a suspended VM on an older version at its researcher's next run request, and the watchdog terminates one that has work queued behind its suspend; that work waits for the researcher's next request, which launches on the new version. A VM already on the new version is left alone, and so is a running one on an older version, which may be in the middle of a researcher's run: it suspends once it is idle and is replaced at the next wake. A VM suspended partway through a run is resumed so the run can finish. The loop below is optional cleanup for suspended old VMs whose researchers do not come back before the VMs' 8-hour life ends, and is required only below Functions 1.9.0. Unlike the function, it also terminates an old VM suspended partway through a run, whose run then fails, so skip it if you do not want to fail those runs. Both loops in this section run with your own credentials, since the launcher cannot list VMs, and need the image and its active version, read once the update is complete:
 
 ```sh
 IMAGE=$(aws cloudformation describe-stacks --stack-name "$STACK" \

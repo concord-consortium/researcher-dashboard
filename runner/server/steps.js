@@ -1,25 +1,17 @@
 import { spawn } from "node:child_process";
-import { readClue } from "./clue-reader.js";
 import { portalHost } from "./config.js";
 import fs from "node:fs";
 import path from "node:path";
-import { preparePackage, readPackageCounts } from "./package-env.js";
+import { preparePackage, readPackageCounts, readPackageResult } from "./package-env.js";
 import { fetchPackage } from "./package-fetch.js";
-import { runSandboxed } from "./sandbox.js";
+import { freezePackageProcesses, killPackageProcesses, runSandboxed, thawPackageProcesses } from "./sandbox.js";
 import { log } from "./log.js";
 
-// The three things an analysis does, kept behind one interface so the lifecycle,
-// the state machine and the sync contract could be built and tested before any of
-// them exist.
-
-function notYet(what) {
-  return () => {
-    throw new Error(`${what} is not implemented yet`);
-  };
-}
+// The things a package run does, kept behind one interface so the lifecycle, the pull
+// loop and the sync contract can be tested without cc-data or a sandbox.
 
 // `--token -` reads from stdin. The bare `--token <value>` form would put the
-// report-service token in the process list, where the analysis user could read it.
+// report-service token in the process list, where the package user could read it.
 export function ccDataLogin({ token, portal, home, uid, spawnFn = spawn }) {
   return new Promise((resolve, reject) => {
     const host = portalHost(portal);
@@ -50,10 +42,6 @@ export function ccDataLogin({ token, portal, home, uid, spawnFn = spawn }) {
   });
 }
 
-// The Firebase project holding CLUE's documents. It is not the project the status
-// documents live in, so the reader signs in separately with its own class token.
-export const CLUE_PROJECT = "collaborative-learning-staging";
-
 // Enough of a package's output to read a failure from, and bounded because it reaches
 // CloudWatch: a package that prints its whole corpus should cost a truncated log line
 // rather than the log group.
@@ -64,30 +52,23 @@ function tail(text) {
   return value.length > PACKAGE_OUTPUT_LIMIT ? `...${value.slice(-PACKAGE_OUTPUT_LIMIT)}` : value;
 }
 
-function logPackageOutput(name, result, level) {
+function logPackageOutput(result, level) {
   log[level]("package.output", {
-    package: name,
     stdout: tail(result?.stdout),
     stderr: tail(result?.stderr)
   });
 }
 
-export function makeSteps({ login = ccDataLogin, readClueFn = readClue } = {}) {
-  return {
-    // Two credentials, both arriving at /run and neither stored in the image: the
-    // report-service token goes to cc-data's credential store under $HOME, and the
-    // session token signs the Firebase client in. $HOME is outside the synced data
-    // root, so neither credential is ever written to S3.
-    // The Firebase session the status documents are written through. Separate from the
-    // cc-data credential below: they are unrelated credentials on unrelated schedules,
-    // and this one has to be in place before anything is written.
-    signIn: async ({ store, sessionToken }) => {
-      if (sessionToken && store?.signIn) await store.signIn(sessionToken);
-    },
+// The package uid's processes outlived every kill, so one could still change the files the
+// next package runs with.
+export class PackageProcessesSurvived extends Error {}
 
+export function makeSteps({ login = ccDataLogin } = {}) {
+  return {
     installCredential: async ({ token, portal }) => {
       if (token && portal) await login({ token, portal });
     },
+
     // Fetched and verified before anything is unpacked: the package is code the runner
     // did not write, and the checksum is what stands between the catalog's claim and
     // whatever happens to be at that key.
@@ -96,31 +77,11 @@ export function makeSteps({ login = ccDataLogin, readClueFn = readClue } = {}) {
       return { ...manifest, dir };
     },
 
-    // Everything the package needs before it runs: its own HOME outside the synced data
-    // root with the researcher's cc-data credential in it, the class's data directory,
-    // and an output directory. The package makes the AP and log pulls itself, so this
-    // is what makes that possible; CLUE stays in the runner because its credential must
-    // not reach package code.
-    preparePackage: async ({ workRoot, dataRoot, classHash, classId, packageName, portal, reportServerToken, reportServerUrl, bucket, storagePrefix, uid, proxyUrl }) =>
-      preparePackage({
-        login,
-        workRoot,
-        dataRoot,
-        classHash,
-        classId,
-        packageName,
-        portalHost: portalHost(portal),
-        token: reportServerToken,
-        reportServerUrl,
-        bucket,
-        storagePrefix,
-        uid,
-        proxyUrl
-      }),
+    preparePackage: async (args) =>
+      preparePackage({ ...args, login, portalHost: portalHost(args.portal) }),
 
-    // Run as the analysis uid, through the sandbox, so what it reports is what the
-    // package will see rather than what the runner sees. A package that cannot write
-    // its own data directory fails deep inside its own code with an errno.
+    // Run as the package uid, through the sandbox, so what it reports is what the
+    // package will see rather than what the runner sees.
     probeWritable: async ({ uid, dir, exec }) =>
       runSandboxed({
         uid,
@@ -129,15 +90,17 @@ export function makeSteps({ login = ccDataLogin, readClueFn = readClue } = {}) {
         ...(exec ? { exec } : {})
       }),
 
-    // The package pulled the data, so it knows the answer and log counts, and it cannot
-    // write Firestore. It leaves them in counts.json and the runner merges them with
-    // its own clue_documents count into the class document's data block.
     readPackageCounts: async ({ outputDir }) => readPackageCounts(outputDir),
+
+    killPackageProcesses: async ({ uid }) => killPackageProcesses({ uid }),
+
+    freezePackageProcesses: async ({ uid }) => freezePackageProcesses({ uid }),
+
+    thawPackageProcesses: async ({ uid }) => thawPackageProcesses({ uid }),
 
     // The classes this VM holds pulled data for, read from the synced tree rather than
     // remembered: the tree is what `/run` syncs down from the researcher's prefix, so it
-    // already carries every class an earlier VM of theirs opened, which a list built in
-    // memory would lose at each launch.
+    // already carries every class an earlier VM of theirs opened.
     heldClasses: async ({ dataRoot }) => {
       try {
         return fs.readdirSync(path.join(dataRoot, "classes"), { withFileTypes: true })
@@ -145,54 +108,22 @@ export function makeSteps({ login = ccDataLogin, readClueFn = readClue } = {}) {
           .map((entry) => entry.name)
           .sort();
       } catch {
-        // No classes directory yet is the first launch of a researcher's first VM, which
-        // holds no classes: that is an answer, not a failure.
         return [];
       }
     },
 
-    // One sign-in per class per project, kept for the VM's life: the class token is
-    // good for an hour but the Firebase session it is exchanged for outlives it.
-    pullData: async ({ classHash, classTokens, manifest, portal, dataRoot, makeStore }) => {
-      const counts = {};
-      const required = manifest?.required_inputs ?? [];
-
-      if (required.includes("clue_documents")) {
-        const token = classTokens?.[CLUE_PROJECT];
-        if (!token) {
-          throw new Error(`the package requires clue_documents but no class token for ${CLUE_PROJECT} was sent`);
-        }
-        const store = makeStore({ projectId: CLUE_PROJECT });
-        await store.signIn(token);
-        const read = await readClueFn({ store, portal, classHash, dataRoot });
-        // Only the contracted key reaches the class document, whose `data` block is
-        // {answers, logs, clue_documents, last_pull_at, log_freshness_at}. The richer
-        // counts the reader gathers are in its log line, and the package reads the
-        // corpus itself for anything it wants to display.
-        counts.clue_documents = read.clue_documents;
-      } else {
-        // Criterion 5: an AP class declares no clue_documents input, and the skip is
-        // visible rather than silent so a missing count can be told from a skipped pull.
-        log.info("clue.skipped", { class_hash: classHash, reason: "clue_documents not in required_inputs" });
-      }
-
-      return counts;
-    },
-
-    // The entrypoint runs as the analysis uid in the sandbox, with the environment
-    // package-env named and nothing inherited from the runner's own process. Its
-    // display.json is the result; counts.json is read separately by the caller.
-    runPackage: async ({ manifest, paths, env, uid, timeoutMs, proxyUrl, exec }) => {
+    // The entrypoint runs as the package uid in the sandbox, with the environment
+    // package-env named and nothing inherited from the runner's own process.
+    runPackage: async ({ manifest, paths, env, uid, signal, proxyUrl, exec }) => {
       const entrypoint = path.resolve(manifest.dir, manifest.entrypoint);
       const interpreter = entrypoint.endsWith(".py") ? "python3.11" : entrypoint;
       const args = entrypoint.endsWith(".py") ? [entrypoint] : [];
 
       // A package's own output is the only account of what it did, and the runner is
       // the only thing positioned to keep it: the sandbox has no route to CloudWatch
-      // and the VM's disk dies with it. Logged on the way through whether the package
-      // succeeded or failed, because a package that succeeds while counting nothing
-      // says so here and nowhere else.
+      // and the VM's disk dies with it.
       let result;
+      let failure = null;
       try {
         result = await runSandboxed({
           uid,
@@ -200,24 +131,25 @@ export function makeSteps({ login = ccDataLogin, readClueFn = readClue } = {}) {
           args,
           env,
           cwd: manifest.dir,
-          timeout: timeoutMs,
+          signal,
           proxyUrl,
           ...(exec ? { exec } : {})
         });
+        logPackageOutput(result, "info");
       } catch (err) {
-        logPackageOutput(manifest.name, err, "error");
-        throw err;
+        logPackageOutput(err, "error");
+        failure = err;
       }
-      logPackageOutput(manifest.name, result, "info");
-
-      const displayFile = path.join(paths.outputDir, "display.json");
-      let display;
+      // Before the output is read, so nothing of the package's is left to change it. A
+      // process that cannot be stopped could change the next package's files, so the run
+      // fails, and the reason keeps how the package itself ended.
       try {
-        display = JSON.parse(fs.readFileSync(displayFile, "utf8"));
+        await killPackageProcesses({ uid, ...(exec ? { exec } : {}) });
       } catch (err) {
-        throw new Error(`package wrote no readable display.json: ${err.message}`);
+        throw new PackageProcessesSurvived(`the package's processes could not be stopped (${err.message}), after ${failure ? `the package failed: ${failure.message}` : "the package finished"}`);
       }
-      return display;
+      if (failure) throw failure;
+      return readPackageResult(paths.outputDir);
     }
   };
 }

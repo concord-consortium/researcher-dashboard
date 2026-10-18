@@ -1,0 +1,65 @@
+# Runs the runner's tests, its emulator suite and the package-contract check. Releasing
+# the runner is by hand (runner/README.md), so this needs no AWS credentials.
+
+name: Runner
+
+on:
+  push:
+    paths:
+      - "runner/**"
+      - "fixtures/**"
+      - ".github/workflows/runner.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test the runner
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: runner
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: runner/package-lock.json
+      - run: npm ci
+      - run: npm test
+      # report-service's contract fixture, fetched from its master: a change there fails here.
+      - run: npm run contract:check
+
+  emulator:
+    name: Test the runner's writes against the Firebase emulators
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: runner
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: runner/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - run: npm ci
+      # emulators:exec sets FIRESTORE_EMULATOR_HOST and FIREBASE_AUTH_EMULATOR_HOST for the
+      # script; RD_REQUIRE_EMULATOR makes the suite fail rather than skip without them.
+      - run: >-
+          npx --yes firebase-tools@15.32.1 emulators:exec --only firestore,auth
+          --project demo-researcher-dashboard
+          "node --test --test-force-exit test/firestore.emulator.test.js"
+        env:
+          RD_REQUIRE_EMULATOR: "1"
+          GCLOUD_PROJECT: demo-researcher-dashboard

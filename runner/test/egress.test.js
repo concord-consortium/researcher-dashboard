@@ -53,7 +53,7 @@ test("IPv6 is disabled in the namespace", () => {
 });
 
 // The runner's own server binds every interface, so the host end of the veth would
-// expose /run-package and /refresh-token to the package.
+// expose the lifecycle hooks and the status page to the package.
 test("only the proxy port is reachable on the host end", () => {
   const flat = setupCommands().map(([c, a]) => [c, ...a].join(" "));
   const accept = flat.find((c) => c.includes("ACCEPT"));
@@ -66,7 +66,7 @@ test("only the proxy port is reachable on the host end", () => {
 
 // A resumed VM starts from a namespace its previous life left behind.
 test("setup tears down a leftover namespace first", () => {
-  assert.deepEqual(teardownCommands()[0], ["ip", ["netns", "del", "analysis"]]);
+  assert.deepEqual(teardownCommands()[0], ["ip", ["netns", "del", "package"]]);
 });
 
 // One list, in one place, is the property that makes this reviewable for an outside

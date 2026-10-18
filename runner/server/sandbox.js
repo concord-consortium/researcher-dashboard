@@ -6,7 +6,7 @@ import { NETNS } from "./netns.js";
 const run = promisify(execFile);
 
 // Execution-role credentials reach the VM through IMDSv2 at this address rather
-// than through the environment, so an analysis package can read them with an
+// than through the environment, so a package can read them with an
 // ordinary HTTP request unless it is given no network at all.
 export const IMDS_ADDRESS = "169.254.169.254";
 
@@ -32,6 +32,14 @@ export const IMDS_ADDRESS = "169.254.169.254";
 // than anything the package is entitled to resolve for itself.
 const IP = "/usr/sbin/ip";
 const SETPRIV = "/usr/bin/setpriv";
+// setpriv's arguments that drop to the package uid with no groups, capabilities or way back.
+const dropTo = (uid) => [`--reuid=${uid}`, `--regid=${uid}`, "--clear-groups", "--no-new-privs", "--bounding-set", "-all"];
+const KILL = "/usr/bin/kill";
+const PGREP = "/usr/bin/pgrep";
+// Every state but a zombie's. A killed process stays a zombie until its parent reaps it,
+// and an orphan's parent is PID 1, which the image's CMD makes the runner's own node, so
+// it never is; a zombie runs nothing and writes nothing.
+const LIVE_STATES = "R,S,D,T,t";
 
 export function sandboxCommand({ uid, command, args = [], netns = NETNS }) {
   return {
@@ -41,12 +49,7 @@ export function sandboxCommand({ uid, command, args = [], netns = NETNS }) {
       "exec",
       netns,
       SETPRIV,
-      `--reuid=${uid}`,
-      `--regid=${uid}`,
-      "--clear-groups",
-      "--no-new-privs",
-      "--bounding-set",
-      "-all",
+      ...dropTo(uid),
       command,
       ...args
     ]
@@ -58,9 +61,6 @@ async function execSandboxed({ uid, netns, command, args, exec, timeout = 15_000
   return exec(spec.command, spec.args, { timeout });
 }
 
-// Run at /run, and fatal if it does not hold. Two checks, because a sandbox that
-// is simply broken would fail the reachability test for the wrong reason and look
-// like success.
 // Run at /run, and fatal if it does not hold. Three checks, not one.
 //
 // A negative check alone was not enough once the namespace gained a network: "IMDS
@@ -122,18 +122,67 @@ async function reachable({ uid, netns, exec, url, acceptRefusal = false }) {
   }
 }
 
-// Runs an analysis package's entrypoint in the sandbox, as the analysis uid.
+// Sends `signal` to every process the package uid owns, again until pgrep finds none of
+// them in `runstates`, since a process forked while the signal was being sent can miss it.
+// kill(-1) from a process with no capabilities reaches only its own uid, never the runner,
+// which is root.
+async function signalUntilNone({ uid, signal, runstates, verb, exec, attempts, pauseMs, sleep }) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (attempt > 0 && pauseMs > 0) await sleep(pauseMs);
+    // Exits non-zero when nothing was left to signal, which is the outcome wanted.
+    await exec(SETPRIV, [...dropTo(uid), KILL, signal, "-1"], { timeout: 5_000 })
+      .catch(() => {});
+    let left;
+    try {
+      left = String((await exec(PGREP, ["-u", String(uid), "--runstates", runstates], { timeout: 5_000 })).stdout ?? "").trim();
+    } catch (err) {
+      // pgrep exits 1 when it finds nothing; any other failure proves nothing.
+      if (err.code !== 1) throw new Error(`could not check for the package's processes: ${err.message}`);
+      left = "";
+    }
+    if (left === "") return;
+  }
+  throw new Error(`the package left processes running as uid ${uid} that ${attempts} ${verb} did not stop`);
+}
+
+const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Kills every process the package uid owns. `execFile` returns when the entrypoint exits,
+// and anything it started in the background would otherwise run on into the next
+// package's turn as the same uid, able to write that package's output.
+export async function killPackageProcesses({ uid, exec = run, attempts = 5 }) {
+  await signalUntilNone({ uid, signal: "-KILL", runstates: LIVE_STATES, verb: "kills", exec, attempts, pauseMs: 0 });
+}
+
+// Stops every process the package uid owns, so nothing it writes can land between
+// /suspend's flush and its verify. A process inside a write stops only once the write
+// returns, so the attempts are spaced out.
+export async function freezePackageProcesses({ uid, exec = run, attempts = 5, pauseMs = 200, sleep = pause }) {
+  await signalUntilNone({ uid, signal: "-STOP", runstates: "R,S,D", verb: "stops", exec, attempts, pauseMs, sleep });
+}
+
+// Continues every process the package uid owns. Exits non-zero when there was nothing to
+// signal, which is not a failure.
+export async function thawPackageProcesses({ uid, exec = run }) {
+  await exec(SETPRIV, [...dropTo(uid), KILL, "-CONT", "-1"], { timeout: 5_000 })
+    .catch((err) => {
+      if (err.code !== 1) throw err;
+    });
+}
+
+// Runs a package's entrypoint in the sandbox, as the package uid.
 //
 // The environment is replaced rather than extended: a package inherits nothing from the
 // runner's process, which holds credentials in its own $HOME and whatever the SDK has
 // cached after a resume. What it gets is what package-env named, plus the proxy, which
 // is the only route out of the namespace.
-export async function runSandboxed({ uid, netns, command, args = [], env, cwd, timeout, proxyUrl, exec = run }) {
+export async function runSandboxed({ uid, netns, command, args = [], env, cwd, signal, proxyUrl, exec = run }) {
   const spec = sandboxCommand({ uid, netns, command, args });
   return exec(spec.command, spec.args, {
     cwd,
-    timeout,
+    signal,
     env: proxyUrl ? { ...env, HTTPS_PROXY: proxyUrl, https_proxy: proxyUrl } : env,
+    killSignal: "SIGKILL",
     maxBuffer: 8 * 1024 * 1024
   });
 }
