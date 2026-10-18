@@ -1,7 +1,8 @@
 // Two sources, deliberately separated. Environment variables are baked into the
 // image's snapshot and so are shared by every VM: they may hold nothing
-// researcher-specific and nothing secret. Everything per-VM arrives in
-// runHookPayload at /run.
+// researcher-specific and nothing secret. The per-VM configuration arrives in
+// runHookPayload at /run; each /work answer brings fresh session and class tokens, and
+// /storage-credentials the S3 credentials.
 
 export const REQUIRED_PAYLOAD_FIELDS = Object.freeze([
   "session_token",
@@ -13,9 +14,8 @@ export const REQUIRED_PAYLOAD_FIELDS = Object.freeze([
   "portal",
   "firebase_project",
   "bucket",
-  // Where the VM retires its own report-server credential when it is torn down. It
-  // comes from the caller rather than a map here because whatever launches the VM has
-  // already had to reach report-server to obtain the credential in the first place.
+  // report-server, for the applies check, the package's own calls and the VM's revocation;
+  // from the caller, which already reached it to mint the credential.
   "report_server_url",
   // Where /work, /idle and /storage-credentials live. Nothing calls into the VM, so
   // this is the only way it learns what to do.

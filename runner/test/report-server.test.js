@@ -35,6 +35,14 @@ test("no answer in time and a failed connection are not refusals", async () => {
   const hang = (url, init) => new Promise((_, reject) => init.signal.addEventListener("abort", () => { aborted = true; reject(init.signal.reason); }));
   await assert.rejects(ask(hang, { timeoutMs: 20 }), (err) => err instanceof ReportServerError && !err.refusal && err.status === null);
   assert.ok(aborted, "the bound aborted the call");
-  assert.equal(APPLIES_TIMEOUT_MS, 30_000);
   await assert.rejects(ask(async () => { throw new TypeError("fetch failed"); }), (err) => err instanceof ReportServerError && !err.refusal);
+});
+
+test("a check given no bound uses thirty seconds", async (t) => {
+  assert.equal(APPLIES_TIMEOUT_MS, 30_000);
+  const bounds = [];
+  const timeout = AbortSignal.timeout;
+  t.mock.method(AbortSignal, "timeout", (ms) => { bounds.push(ms); return timeout.call(AbortSignal, ms); });
+  await ask(answer(200, { applies: true }));
+  assert.deepEqual(bounds, [APPLIES_TIMEOUT_MS]);
 });

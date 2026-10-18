@@ -9,11 +9,14 @@ export { S3Backend } from "./backend-s3.js";
 
 // Lifecycle hooks are capped at 60 seconds by Lambda, so a hook can never contain
 // a full sync of a researcher's prefix. Instead the syncer pushes continuously and
-// the hook flushes what is outstanding and then proves the flush covered the
-// current state. `suspended` is written only on that proof; anything else is
-// `failed` with the reason, leaving the previous S3 copy untouched.
+// the hook flushes what is outstanding and then re-scans: `suspended` is written only
+// when no file the scan reads is outstanding, and anything else is `failed` with the
+// reason. A flush that fails partway has still uploaded the files before the failure.
+// A file the scan cannot read, one with another hard link, is never synced, and the
+// verify names it.
 export class Syncer {
   #uploaded = new Map();
+  #skipped = new Set();
   #timer = null;
   #inFlight = null;
 
@@ -26,6 +29,14 @@ export class Syncer {
   // Files that have changed since we last saw them land.
   async pending() {
     return pendingFiles(await scanTree(this.root), this.#uploaded);
+  }
+
+  // Each unsyncable path is logged once while it stays so, not on every tick.
+  #reportSkipped(skipped) {
+    for (const rel of skipped) {
+      if (!this.#skipped.has(rel)) log.error("sync.unsyncable", { path: rel, reason: "another hard link" });
+    }
+    this.#skipped = new Set(skipped);
   }
 
   // Pushes everything outstanding. Serialized: a scheduler tick that fires while a
@@ -41,6 +52,7 @@ export class Syncer {
 
   async #flushOnce() {
     const scanned = await scanTree(this.root);
+    this.#reportSkipped(scanned.skipped);
     const pending = pendingFiles(scanned, this.#uploaded);
     // Resolved only when there is something to send: a root not yet created scans as empty.
     const realRoot = pending.length ? fs.realpathSync(this.root) : this.root;
@@ -51,13 +63,19 @@ export class Syncer {
         log.warn("sync.skipped", { path: rel });
         continue;
       }
-      // Closed whatever the put did, and before the flush resolves, so a failed upload does
-      // not leave the file open.
-      const body = createReadStream(null, { fd: source.fd, start: 0 });
+      // Exactly the size the open saw, whatever the package appends meanwhile, so the body
+      // always agrees with the stated length. An empty file reads nothing, since `end` is
+      // inclusive. Closed whatever the put did, and before the flush resolves, so a failed
+      // upload does not leave the file open.
+      const body = source.size > 0
+        ? createReadStream(null, { fd: source.fd, start: 0, end: source.size - 1 })
+        : null;
       try {
-        await this.backend.put(rel, { body, size: source.size });
+        await this.backend.put(rel, { body: body ?? Buffer.alloc(0), size: source.size });
       } finally {
-        if (!body.closed) {
+        if (!body) {
+          fs.closeSync(source.fd);
+        } else if (!body.closed) {
           const closed = once(body, "close");
           body.destroy();
           await closed;
@@ -75,8 +93,10 @@ export class Syncer {
   // while the flush ran is still outstanding, and saying otherwise is exactly the
   // false claim of durability this contract exists to prevent.
   async verify() {
-    const outstanding = await this.pending();
-    return { ok: outstanding.length === 0, outstanding };
+    const scanned = await scanTree(this.root);
+    this.#reportSkipped(scanned.skipped);
+    const outstanding = pendingFiles(scanned, this.#uploaded);
+    return { ok: outstanding.length === 0, outstanding, skipped: scanned.skipped };
   }
 
   // What the hooks call. Resolves with a reason rather than throwing, because the
@@ -84,7 +104,7 @@ export class Syncer {
   async flushAndVerify(hook) {
     try {
       const flushed = await timed("sync.flush", { hook }, () => this.flush());
-      const { ok, outstanding } = await this.verify();
+      const { ok, outstanding, skipped } = await this.verify();
       if (!ok) {
         return {
           ok: false,
@@ -92,7 +112,7 @@ export class Syncer {
           outstanding
         };
       }
-      return { ok: true, ...flushed };
+      return { ok: true, ...flushed, skipped };
     } catch (err) {
       return { ok: false, reason: `sync failed: ${err.message}` };
     }

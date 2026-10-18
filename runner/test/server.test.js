@@ -9,6 +9,7 @@ import { Runner } from "../server/runner.js";
 import { makeSteps } from "../server/steps.js";
 import { MemoryStore, runnerPath } from "../server/status.js";
 import { DirBackend, Syncer } from "../server/sync/index.js";
+import { captureLog } from "./helpers/capture-log.js";
 
 const HOOK = "/aws/lambda-microvms/runtime/v1";
 const PORTAL = "learn_portal_staging_concord_org";
@@ -31,10 +32,13 @@ let server;
 let base;
 let docs;
 let runner;
+// Every state written to the runner document, in order, through whichever store wrote it.
+let states;
 
 beforeEach(async () => {
   work = await mkdtemp(path.join(tmpdir(), "rd-http-"));
   docs = new Map();
+  states = [];
   const env = {
     ...loadEnv({ SYNC_BACKEND: "DIR", SYNC_DIR: path.join(work, "remote") }),
     dataRoot: path.join(work, "data"),
@@ -42,7 +46,15 @@ beforeEach(async () => {
   };
   runner = new Runner({
     env,
-    makeStore: () => new MemoryStore({ docs }),
+    makeStore: () => {
+      const store = new MemoryStore({ docs });
+      const merge = store.merge.bind(store);
+      store.merge = (p, fields) => {
+        if (p === runnerPath(PORTAL, "439") && fields.state) states.push(fields.state);
+        return merge(p, fields);
+      };
+      return store;
+    },
     // Nothing queued, and /idle suspends: the loop ends as soon as it has asked.
     makeFunctionClient: () => async (route) => (route === "work"
       ? { success: true, packages: [], scopes: {}, session_token: SESSION, firebase_project: "report-service-dev" }
@@ -79,8 +91,7 @@ test("the lifecycle hooks route through to the runner", async () => {
   assert.equal((await post(`${HOOK}/resume`)).status, 200);
   await runner.loop;
   assert.equal((await post(`${HOOK}/terminate`)).status, 200);
-  const doc = docs.get(runnerPath(PORTAL, "439"));
-  assert.equal(doc.state, "terminated");
+  assert.deepEqual(states, ["starting", "ready", "ready", "suspending", "suspended", "ready", "terminated"]);
 });
 
 test("/run-package and /refresh-token exist nowhere", async () => {
@@ -119,15 +130,8 @@ test("GET / reports the VM's live state for a human", async () => {
 });
 
 test("a hook that fails is logged as hook.failed", async () => {
-  const lines = [];
-  const original = process.stdout.write;
-  process.stdout.write = (chunk) => { lines.push(String(chunk)); return true; };
-  try {
-    await post(`${HOOK}/suspend`);
-  } finally {
-    process.stdout.write = original;
-  }
-  const failed = lines.map((l) => JSON.parse(l)).find((l) => l.event === "hook.failed");
+  const lines = await captureLog(() => post(`${HOOK}/suspend`));
+  const failed = lines.find((l) => l.event === "hook.failed");
   assert.ok(failed);
   assert.equal(failed.status, 409);
 });

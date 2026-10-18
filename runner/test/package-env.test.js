@@ -18,8 +18,9 @@ const SCOPE = {
 };
 let root;
 
+// The real path: macOS's temp directory is under a link, which readPackageResult refuses.
 beforeEach(async () => {
-  root = await mkdtemp(path.join(tmpdir(), "rd-pkg-"));
+  root = fs.realpathSync(await mkdtemp(path.join(tmpdir(), "rd-pkg-")));
 });
 afterEach(async () => {
   await rm(root, { recursive: true, force: true });
@@ -41,6 +42,18 @@ function prepare(overrides = {}) {
     login: async (args) => { logins.push(args); },
     ...overrides
   });
+}
+
+// Prepares once, lets `plant` leave files in the first run's paths, and prepares again,
+// recording what the second preparation hands to the package. The first preparation's
+// chown does nothing, since a real one needs privileges a test may not have.
+async function prepareAgain(plant) {
+  const uid = process.getuid();
+  const first = await prepare({ uid, chown: () => {} });
+  plant(first.paths);
+  const chowned = [];
+  const second = await prepare({ uid, chown: (target) => chowned.push(target) });
+  return { first, second, chowned };
 }
 
 // The credential must never become durable state. The runner's own lives under $HOME
@@ -190,13 +203,12 @@ test("the home belongs to the package before cc-data is logged in", async () => 
 // Root chowns a tree the package wrote to, so a link the package left there must not hand
 // it the link's target.
 test("a link the package left in its data directory is not followed", async () => {
-  const chowned = [];
-  const first = await prepare({ uid: process.getuid() });
   const outside = path.join(root, "root-only");
   fs.writeFileSync(outside, "secret");
-  fs.symlinkSync(outside, path.join(first.paths.dataDir, "planted"));
-  fs.symlinkSync(root, path.join(first.paths.ccDataRoot, "planted-dir"));
-  await prepare({ uid: process.getuid(), chown: (target) => chowned.push(target) });
+  const { first, chowned } = await prepareAgain((paths) => {
+    fs.symlinkSync(outside, path.join(paths.dataDir, "planted"));
+    fs.symlinkSync(root, path.join(paths.ccDataRoot, "planted-dir"));
+  });
   for (const target of chowned) {
     assert.ok(!target.includes("planted"), `chowned ${target}`);
     assert.notEqual(target, outside);
@@ -206,12 +218,13 @@ test("a link the package left in its data directory is not followed", async () =
 
 // A hard link passes every check a symbolic link fails, and can name a file of root's.
 test("a hard-linked file in the data directory is not chowned", async () => {
-  const chowned = [];
-  const first = await prepare({ uid: process.getuid() });
   const outside = path.join(root, "root-only-hard");
   fs.writeFileSync(outside, "secret");
-  fs.linkSync(outside, path.join(first.paths.dataDir, "hard"));
-  await prepare({ uid: process.getuid(), chown: (target) => chowned.push(target) });
+  const { first, chowned } = await prepareAgain((paths) => {
+    fs.linkSync(outside, path.join(paths.dataDir, "hard"));
+    fs.writeFileSync(path.join(paths.dataDir, "plain"), "x");
+  });
+  assert.ok(chowned.includes(path.join(first.paths.dataDir, "plain")), "a plain file beside it is handed over");
   assert.ok(!chowned.includes(path.join(first.paths.dataDir, "hard")));
 });
 
@@ -230,16 +243,15 @@ test("a hard-linked display.md is refused", async () => {
   assert.throws(() => readPackageResult(paths.outputDir), /linked from elsewhere/);
 });
 
-// Everything in the class directory comes back from S3 on a cold start, written by the
-// syncer as root, and all of it is the package's.
-test("the package owns every file of its class's data directory", async () => {
-  const chowned = [];
-  const first = await prepare({ uid: process.getuid() });
+// The syncer restores the class directory from S3 as root, so each plain file in it, nested
+// ones included, is handed to the package.
+test("the package owns every plain file of its class's data directory", async () => {
+  const { first, chowned } = await prepareAgain((paths) => {
+    fs.mkdirSync(path.join(paths.dataDir, "clue-documents"), { recursive: true });
+    fs.writeFileSync(path.join(paths.dataDir, "clue-documents", "content.jsonl"), "{}");
+    fs.writeFileSync(path.join(paths.dataDir, "runs.json"), "{}");
+  });
   const nested = path.join(first.paths.dataDir, "clue-documents");
-  fs.mkdirSync(nested, { recursive: true });
-  fs.writeFileSync(path.join(nested, "content.jsonl"), "{}");
-  fs.writeFileSync(path.join(first.paths.dataDir, "runs.json"), "{}");
-  await prepare({ uid: process.getuid(), chown: (target) => chowned.push(target) });
   assert.ok(chowned.includes(path.join(first.paths.dataDir, "runs.json")));
   assert.ok(chowned.includes(path.join(nested, "content.jsonl")), "a nested directory's files are the package's too");
 });
@@ -254,11 +266,7 @@ test("cc-data pulls into the synced data root, not into the throwaway home", asy
 });
 
 test("the dataset root survives a rerun and is handed back to the package", async () => {
-  const uid = process.getuid();
-  const first = await prepare({ uid });
-  fs.writeFileSync(path.join(first.paths.ccDataRoot, "pulled"), "keep me");
-  const chowned = [];
-  const second = await prepare({ uid, chown: (target) => chowned.push(target) });
+  const { first, second, chowned } = await prepareAgain((paths) => fs.writeFileSync(path.join(paths.ccDataRoot, "pulled"), "keep me"));
   assert.ok(fs.existsSync(path.join(second.paths.ccDataRoot, "pulled")), "the pull survives");
   assert.ok(chowned.includes(path.join(first.paths.ccDataRoot, "pulled")));
 });
@@ -281,6 +289,8 @@ test("a display.md that is a link is refused, not followed", async () => {
 
 test("an output directory swapped for a link is refused", async () => {
   const { paths } = await prepare();
+  fs.writeFileSync(path.join(paths.outputDir, "display.md"), "# the package's");
+  assert.equal(readPackageResult(paths.outputDir).display, "# the package's", "the directory as prepared is read");
   const elsewhere = path.join(root, "elsewhere");
   fs.mkdirSync(elsewhere);
   fs.writeFileSync(path.join(elsewhere, "display.md"), "# not the package's");

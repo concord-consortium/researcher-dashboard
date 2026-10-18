@@ -87,7 +87,14 @@ A `MicrovmImage` change starts an image build. VMs already running keep their ve
 
 A runner change reaches a stack only through a new image: publish the artifact, then update the stack with `CodeArtifactKey` pointing at it and every other parameter unchanged. A new package version needs no release; a change to the runner's own code does. "Updating a stack" cannot do this, since it carries `CodeArtifactKey` over with its previous value. Each release takes a `VERSION` never published before, so each has its own key: `publish-artifact` refuses one already in the bucket.
 
-Publish the artifact first, and stop if it fails or refuses the version, since everything after it would release whatever is already at that key. The bucket is the one "Before a stack is created in an account" names: `concordqa-devops` for staging, `concord-devops` for production.
+Before publishing, gate the image (`runner/README.md`, "The smoke gate"): check the contract copy and run the smoke package inside the image, and stop if either fails.
+
+```sh
+cd ../runner && npm run contract:check
+make smoke-image SMOKE_CLASS_ID=<id> SMOKE_CLASS_HASH=<hash>
+```
+
+Then publish the artifact, and stop if it fails or refuses the version, since everything after it would release whatever is already at that key. The bucket is the one "Before a stack is created in an account" names: `concordqa-devops` for staging, `concord-devops` for production.
 
 ```sh
 cd ../runner && make publish-artifact VERSION=<x.y.z> ARTIFACT_BUCKET=<bucket in the stack's account>
@@ -108,7 +115,14 @@ aws cloudformation create-change-set --stack-name "$STACK" --change-set-name "gi
   --parameters $PARAMS ParameterKey=CodeArtifactKey,ParameterValue="$KEY"
 ```
 
-Review, diff and execute the change set as in "Updating a stack"; the update builds the new image. Then terminate the suspended VMs on an older version, since nothing else retires them, with your own credentials, since the launcher cannot list VMs. A VM already on the new version is left alone, and so is a running one on an older version, which may be in the middle of a researcher's run: it suspends once it is idle, so run the loop again later until it terminates nothing. Each VM's state is read again just before it is terminated, since the function may have resumed it after the listing. That narrows the race rather than closing it: a resume landing between the read and the terminate is still lost, and only the function replacing old VMs itself, instead of resuming them, removes it.
+Review, diff and execute the change set as in "Updating a stack"; the update builds the new image. Once the new image version is active, run the smoke package on the stack, and if it fails, roll back by deactivating that image version, since launches take the latest active one:
+
+```sh
+cd ../runner && RD_SMOKE_ACCESS_TOKEN=<token> node smoke/smoke.mjs stack \
+  --identity <origin>/runner-smoke --version <v> --class-hash <hash> --terminate
+```
+
+Then terminate the suspended VMs on an older version, since nothing else retires them, with your own credentials, since the launcher cannot list VMs. A VM already on the new version is left alone, and so is a running one on an older version, which may be in the middle of a researcher's run: it suspends once it is idle, so run the loop again later until it terminates nothing. Each VM's state is read again just before it is terminated, since the function may have resumed it after the listing. That narrows the race rather than closing it: a resume landing between the read and the terminate is still lost, and only the function replacing old VMs itself, instead of resuming them, removes it.
 
 ```sh
 IMAGE=$(aws cloudformation describe-stacks --stack-name "$STACK" \

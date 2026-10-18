@@ -5,15 +5,20 @@ import { tmpdir } from "node:os";
 import fs from "node:fs";
 import path from "node:path";
 import test, { afterEach, beforeEach } from "node:test";
-import { DirBackend, Syncer } from "../server/sync/index.js";
+import { DirBackend, S3Backend, Syncer } from "../server/sync/index.js";
 import { isExcluded, openForSync, pendingFiles, scanTree } from "../server/sync/scan.js";
+import { captureLog } from "./helpers/capture-log.js";
+
+// Only Linux has /proc, which the swapped-directory check and the open-file count read.
+const HAS_PROC = fs.existsSync("/proc/self/fd");
 
 let work;
 let local;
 let remote;
 
 beforeEach(async () => {
-  work = await mkdtemp(path.join(tmpdir(), "rd-sync-"));
+  // The real path: macOS's temp directory is under a link.
+  work = fs.realpathSync(await mkdtemp(path.join(tmpdir(), "rd-sync-")));
   local = path.join(work, "local");
   remote = path.join(work, "remote");
   await mkdir(local, { recursive: true });
@@ -211,18 +216,19 @@ test("pullDown on an empty prefix is the normal first session, not an error", as
 // A log-based metric counts sync.failed, so a failed tick is logged under it too.
 test("a tick whose flush fails is logged as sync.failed", async () => {
   await write("answers.v1.jsonl", "a");
-  const s = syncer({ backend: { put: async () => { throw new Error("AccessDenied"); }, list: async () => [] }, intervalMs: 5 });
-  const lines = [];
-  const original = process.stdout.write;
-  process.stdout.write = (chunk) => { lines.push(String(chunk)); return true; };
-  try {
+  let puts = 0;
+  const s = syncer({ backend: { put: async () => { puts += 1; throw new Error("AccessDenied"); }, list: async () => [] }, intervalMs: 5 });
+  const lines = await captureLog(async () => {
     s.start();
-    for (let i = 0; i < 100 && !lines.some((l) => l.includes("sync.failed")); i++) await new Promise((r) => setTimeout(r, 5));
-  } finally {
-    s.stop();
-    process.stdout.write = original;
-  }
-  const line = lines.flatMap((l) => l.split("\n")).filter(Boolean).map((l) => JSON.parse(l)).find((l) => l.event === "sync.failed");
+    try {
+      // Until a tick has tried an upload, then one more interval for its failure's line.
+      for (let i = 0; i < 100 && puts === 0; i++) await new Promise((r) => setTimeout(r, 5));
+      await new Promise((r) => setTimeout(r, 5));
+    } finally {
+      s.stop();
+    }
+  });
+  const line = lines.find((l) => l.event === "sync.failed");
   assert.deepEqual({ hook: line?.hook, error: line?.error }, { hook: "tick", error: "AccessDenied" });
 });
 
@@ -250,17 +256,70 @@ test("openForSync refuses a pipe, a link, a hard link and a path through a swapp
   fs.linkSync(real, path.join(work, "hard"));
   assert.equal(openForSync(real), null, "a file with another hard link");
   fs.unlinkSync(path.join(work, "hard"));
+  if (!HAS_PROC) return;
   fs.renameSync(path.join(local, "dir"), path.join(local, "moved"));
   fs.symlinkSync(path.join(local, "moved"), path.join(local, "dir"));
   assert.equal(openForSync(real), null, "a directory above it became a link");
 });
 
 // A broker outage fails every tick's upload; each must give back the file it opened.
-test("an upload that fails closes the file the syncer opened", async () => {
+test("an upload that fails closes the file the syncer opened", { skip: !HAS_PROC && "needs /proc" }, async () => {
   await write("a.txt", "a");
   const failing = syncer({ backend: { put: async () => { throw new Error("storage-credentials answered 502"); }, list: async () => [] } });
   const open = () => fs.readdirSync("/proc/self/fd").length;
   const before = open();
   for (let i = 0; i < 5; i++) await failing.flush().catch(() => {});
   assert.equal(open(), before);
+});
+
+// A package appending to a log while a tick uploads it: the body is what the open saw, so
+// it always agrees with the length the upload states.
+test("a file that grows during its upload is sent at the size it was opened at", async () => {
+  const abs = await write("log.jsonl", "first\n");
+  const sent = [];
+  const s = syncer({ backend: { list: async () => [], put: async (rel, { body, size }) => {
+    fs.appendFileSync(abs, "appended while uploading\n");
+    const chunks = [];
+    for await (const chunk of body) chunks.push(chunk);
+    sent.push({ rel, size, body: Buffer.concat(chunks).toString() });
+  } } });
+  await s.flush();
+  assert.deepEqual(sent, [{ rel: "log.jsonl", size: 6, body: "first\n" }]);
+  assert.equal((await s.verify()).ok, false, "what was appended is still outstanding");
+});
+
+test("an empty file is uploaded as an empty body, even if it grows meanwhile", async () => {
+  const abs = await write("empty.txt", "");
+  const sent = [];
+  const s = syncer({ backend: { list: async () => [], put: async (rel, { body, size }) => {
+    fs.appendFileSync(abs, "x");
+    sent.push({ size, length: Buffer.isBuffer(body) ? body.length : null });
+  } } });
+  await s.flush();
+  assert.deepEqual(sent, [{ size: 0, length: 0 }]);
+});
+
+test("S3Backend states the size the syncer gives as the upload's length", async () => {
+  const commands = [];
+  const backend = new S3Backend({ bucket: "b", prefix: "researchers/439", client: async () => ({ send: async (command) => { commands.push(command.input); } }) });
+  await backend.put("a.txt", { body: Buffer.from("abc"), size: 3 });
+  assert.equal(commands[0].ContentLength, 3);
+  assert.equal(commands[0].Key, "researchers/439/a.txt");
+});
+
+// The syncer, running as root, never reads such a file, so it is never synced; that is
+// logged once, and the verify names it.
+test("a file skipped for another hard link is logged once and named by the verify", async () => {
+  const abs = await write("linked.txt", "a");
+  fs.linkSync(abs, path.join(work, "outside-link"));
+  const s = syncer();
+  let result;
+  const lines = await captureLog(async () => {
+    await s.flush();
+    await s.flush();
+    result = await s.flushAndVerify("suspend");
+  });
+  assert.deepEqual(lines.filter((l) => l.event === "sync.unsyncable").map((l) => l.path), ["linked.txt"]);
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.skipped, ["linked.txt"]);
 });

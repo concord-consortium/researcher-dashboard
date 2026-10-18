@@ -35,10 +35,19 @@ test("an answer without the envelope is refused", async () => {
   await assert.rejects(() => call("idle", { idToken: "t", body: {} }), /no JSON envelope/);
 });
 
-// Fifteen seconds, inside the hooks' sixty and well short of a suspend.
 test("a call the function never answers is abandoned at its bound", async () => {
-  assert.equal(FUNCTION_TIMEOUT_MS, 15_000);
   const fetchImpl = (url, init) => new Promise((_, reject) => init.signal.addEventListener("abort", () => reject(init.signal.reason)));
   const call = makeFunctionClient({ baseUrl: "https://f", fetchImpl, timeoutMs: 20 });
-  await assert.rejects(() => call("work", { idToken: "t", body: {} }));
+  await assert.rejects(() => call("work", { idToken: "t", body: {} }), (err) => err.name === "TimeoutError");
+});
+
+// Fifteen seconds, inside the hooks' sixty and well short of a suspend.
+test("a client given no bound uses fifteen seconds", async (t) => {
+  assert.equal(FUNCTION_TIMEOUT_MS, 15_000);
+  const bounds = [];
+  const timeout = AbortSignal.timeout;
+  t.mock.method(AbortSignal, "timeout", (ms) => { bounds.push(ms); return timeout.call(AbortSignal, ms); });
+  const { fetchImpl } = fakeFetch(200, { success: true });
+  await makeFunctionClient({ baseUrl: "https://f", fetchImpl })("idle", { idToken: "t", body: {} });
+  assert.deepEqual(bounds, [FUNCTION_TIMEOUT_MS]);
 });

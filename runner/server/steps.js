@@ -119,6 +119,7 @@ export function makeSteps({ login = ccDataLogin } = {}) {
       // the only thing positioned to keep it: the sandbox has no route to CloudWatch
       // and the VM's disk dies with it.
       let result;
+      let failure = null;
       try {
         result = await runSandboxed({
           uid,
@@ -130,14 +131,20 @@ export function makeSteps({ login = ccDataLogin } = {}) {
           proxyUrl,
           ...(exec ? { exec } : {})
         });
+        logPackageOutput(result, "info");
       } catch (err) {
         logPackageOutput(err, "error");
-        throw err;
-      } finally {
-        // Before the output is read, so nothing of the package's is left to change it.
-        await killPackageProcesses({ uid, ...(exec ? { exec } : {}) });
+        failure = err;
       }
-      logPackageOutput(result, "info");
+      // Before the output is read, so nothing of the package's is left to change it. A
+      // process that cannot be stopped could change the next package's files, so the run
+      // fails, and the reason keeps how the package itself ended.
+      try {
+        await killPackageProcesses({ uid, ...(exec ? { exec } : {}) });
+      } catch (err) {
+        throw new Error(`the package's processes could not be stopped (${err.message}), after ${failure ? `the package failed: ${failure.message}` : "the package finished"}`);
+      }
+      if (failure) throw failure;
       return readPackageResult(paths.outputDir);
     }
   };

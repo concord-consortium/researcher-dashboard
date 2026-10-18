@@ -158,13 +158,27 @@ export class ClassDocuments {
     }));
   }
 
-  // A run that failed, or a package refused before it was claimed. The reason reaches the
+  // A run that failed, its stage left at the one it failed in. The reason reaches the
   // researcher's page, so it is redacted.
   async failed(docId, { pkg, error }) {
     await this.store.merge(this.#result(docId), this.#stamped({
       status: "failed",
       error: redact(error),
       package: pkg,
+      finished_at: this.store.serverTimestamp()
+    }));
+  }
+
+  // A package refused before any claim: it never ran, so nothing of the last run's is left
+  // beside the refusal. started_at stays, since the rules refuse clearing it.
+  async refused(docId, { pkg, error }) {
+    await this.store.merge(this.#result(docId), this.#stamped({
+      status: "failed",
+      stage: null,
+      error: redact(error),
+      package: pkg,
+      summary: null,
+      display: null,
       finished_at: this.store.serverTimestamp()
     }));
   }

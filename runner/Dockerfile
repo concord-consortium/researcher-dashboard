@@ -37,7 +37,7 @@ ARG DUCKDB_VERSION
 
 # Node is pinned to a major line rather than taking the `nodejs` default, so a later
 # rebuild cannot change the runtime under a shared VM snapshot. 24 is the current LTS
-# line; the Firebase client SDK declares no engine ceiling and firebase-admin wants >=22.
+# line, and the Firebase client SDK declares no engine ceiling.
 # util-linux supplies setpriv and kill, and iproute supplies `ip netns`, which the runner uses to
 # run a package as an unprivileged uid inside a network namespace whose only
 # route out is the egress proxy. iptables is what keeps the runner's own HTTP server

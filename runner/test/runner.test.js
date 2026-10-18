@@ -8,11 +8,12 @@ import { PACKAGE_MAX_DURATION_DEFAULT, disableDefaultCredentialChain, loadEnv } 
 import { makeSteps } from "../server/steps.js";
 import { FREEZE_TIMEOUT_MS, HEARTBEAT_SECONDS, HookError, LOST_RUN_REASON, PACKAGE_END_TIMEOUT_MS, PACKAGE_TIMEOUT_MARGIN_MS, REVOKE_TIMEOUT_MS, Runner, TOKEN_TIMEOUT_MS } from "../server/runner.js";
 import { buildRunner } from "../server/index.js";
-import { packageDocId, packageKey } from "../server/package-fetch.js";
+import { PackageFetchFailed, packageDocId, packageKey } from "../server/package-fetch.js";
 import { MemoryStore, SERVER_TIME, STATUS_WRITE_TIMEOUT_MS, classPath, resultPath, runnerPath, scopePath } from "../server/status.js";
 import { StorageCredentials } from "../server/storage.js";
 import { ReportServerError } from "../server/report-server.js";
 import { DirBackend, S3Backend, Syncer } from "../server/sync/index.js";
+import { captureLog } from "./helpers/capture-log.js";
 
 const PORTAL = "learn_portal_staging_concord_org";
 const USER = "439";
@@ -109,6 +110,8 @@ const manifestFor = (identity, extra = {}) => ({
 });
 
 let work;
+// Every runner a test builds, ended after the test so no loop outlives it.
+let liveRunners = [];
 
 function steps(record, overrides = {}) {
   return {
@@ -172,8 +175,47 @@ function build({ stepOverrides = {}, envOverrides = {}, makeStore, wrapStore = (
       return () => { timer.cancelled = true; };
     }
   });
+  liveRunners.push(runner);
   return { runner, fn, docs, record, clock, env };
 }
+
+// The class's authored profile, holding one assignment URL.
+const withProfile = (built, assignmentUrl = "https://a/x") =>
+  built.docs.set(classPath(PORTAL, CLASS), { platform_id: PLATFORM_ID, assignment_urls: [assignmentUrl], interactive_urls: [] });
+// A manifest for `identity` declaring URL patterns, so report-server is asked about it.
+const declaring = (built, identity, urls = { any: ["*x*"] }) => {
+  built.record.manifests[identity] = manifestFor(identity, { urls });
+};
+
+// Calls `fn` with the count and length of each of the loop's waits, before the wait; a
+// true answer skips the wait.
+function beforeEachSleep(built, fn) {
+  let n = 0;
+  const sleep = built.runner.sleep;
+  built.runner.sleep = async (ms) => { n += 1; if (!(await fn(n, ms))) await sleep(ms); };
+}
+
+// The fake function's client wrapped by `wrap(route, args, call)`, which may change an
+// answer or stand in for it.
+function wrapFunction(built, wrap) {
+  const call = built.fn.makeFunctionClient();
+  built.runner.makeFunctionClient = () => (route, args) => wrap(route, args, call);
+}
+
+// Each /work answer passed through `change`, which edits it in place or returns another.
+function changingWork(built, change) {
+  wrapFunction(built, async (route, args, call) => {
+    const answer = await call(route, args);
+    return route === "work" ? (change(answer) ?? answer) : answer;
+  });
+}
+
+// A wrapStore whose merges `when` picks are refused with `message`.
+const refusingMerges = (when, message = "PERMISSION_DENIED") => (store) => {
+  const merge = store.merge.bind(store);
+  store.merge = (p, fields) => (when(p, fields) ? Promise.reject(new Error(message)) : merge(p, fields));
+  return store;
+};
 
 const runnerDoc = (docs) => docs.get(runnerPath(PORTAL, USER));
 const settle = async (n = 5) => { for (let i = 0; i < n; i++) await new Promise((r) => setImmediate(r)); };
@@ -197,7 +239,19 @@ beforeEach(async () => {
   work = await mkdtemp(path.join(tmpdir(), "rd-runner-"));
 });
 
+// A runner still awake is ended: terminate() stands its loop down before its first await,
+// and anything the hook then waits on is given a moment, not the test file's timeout.
 afterEach(async () => {
+  const ending = liveRunners.filter((runner) => runner.state !== null && runner.state !== "terminated").map((runner) =>
+    Promise.race([
+      runner.terminate().catch(() => {}).then(() => runner.loop),
+      new Promise((r) => setTimeout(r, 200).unref())
+    ]));
+  await Promise.all(ending);
+  // A package a test never lets end keeps its run's bound, a timer of the declared duration
+  // plus ten minutes, which would hold the file open.
+  for (const runner of liveRunners) runner.currentRun?.bound?.end();
+  liveRunners = [];
   await rm(work, { recursive: true, force: true });
 });
 
@@ -245,34 +299,28 @@ test("/run refuses a payload carrying no forwarded credential", async () => {
 });
 
 // The S3 prefix is built from platform_user_id, so a token naming someone else is never used.
-test("/run refuses a session token that names another researcher", async () => {
-  const { runner } = build();
-  const other = JSON.stringify({ ...JSON.parse(PAYLOAD), session_token: sessionToken({ platform_user_id: 999 }) });
-  await assert.rejects(() => runner.run({ microvmId: "mvm-1", runHookPayload: other }), /names researcher 999/);
-});
-
-test("/run refuses a session token for another portal", async () => {
-  const { runner } = build();
-  const other = JSON.stringify({ ...JSON.parse(PAYLOAD), session_token: sessionToken({ platform_id: "https://learn.concord.org" }) });
-  await assert.rejects(() => runner.run({ microvmId: "mvm-1", runHookPayload: other }), /names portal/);
+test("/run refuses a session token that names another researcher, another portal, or no runner claim", async () => {
+  for (const [claims, refusal] of [
+    [{ platform_user_id: 999 }, /names researcher 999/],
+    [{ platform_id: "https://learn.concord.org" }, /names portal/],
+    [{ researcher_dashboard_runner: false }, /runner claim/]
+  ]) {
+    const { runner } = build();
+    const other = JSON.stringify({ ...JSON.parse(PAYLOAD), session_token: sessionToken(claims) });
+    await assert.rejects(() => runner.run({ microvmId: "mvm-1", runHookPayload: other }), refusal);
+  }
 });
 
 test("/run logs the default chain as enabled when the process still holds credentials", async () => {
   const built = build();
   built.runner.processEnv = { AWS_ACCESS_KEY_ID: "x" };
-  const lines = await captured(async () => {
+  const lines = await captureLog(async () => {
     await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
     await built.runner.loop;
   });
   const line = lines.find((l) => l.event === "aws.default_chain_enabled");
   assert.deepEqual(line?.present, ["AWS_ACCESS_KEY_ID"]);
   assert.ok(!lines.some((l) => l.event === "aws.default_chain_disabled"));
-});
-
-test("/run refuses a session token without the runner claim", async () => {
-  const { runner } = build();
-  const other = JSON.stringify({ ...JSON.parse(PAYLOAD), session_token: sessionToken({ researcher_dashboard_runner: false }) });
-  await assert.rejects(() => runner.run({ microvmId: "mvm-1", runHookPayload: other }), /runner claim/);
 });
 
 test("the status doc says which image version the VM is running", async () => {
@@ -340,7 +388,7 @@ test("a count the package did not report is absent, not zero", async () => {
 test("an unparseable log_freshness_at is left out, and the counts still land", async () => {
   const built = build({ stepOverrides: { readPackageCounts: async () => ({ answers: 3, log_freshness_at: "not a date" }) } });
   built.fn.queue({ identity: "users/1/wildfire-responses" });
-  const lines = await captured(async () => {
+  const lines = await captureLog(async () => {
     await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
     await built.runner.loop;
   });
@@ -471,9 +519,9 @@ test("a package declaring no patterns runs without asking report-server", async 
 test("report-server unavailable for three attempts fails the package so the VM can suspend", async () => {
   const built = build({ applies: async () => { throw new ReportServerError("report-server answered 503 to the applies check", { status: 503 }); } });
   built.fn.queue({ identity: "users/1/ap" });
-  built.record.manifests["users/1/ap"] = manifestFor("users/1/ap", { urls: { any: ["*x*"] } });
-  built.docs.set(classPath(PORTAL, CLASS), { platform_id: PLATFORM_ID, assignment_urls: ["https://a/x"], interactive_urls: [] });
-  const lines = await captured(async () => {
+  declaring(built, "users/1/ap");
+  withProfile(built);
+  const lines = await captureLog(async () => {
     await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
     await built.runner.loop;
   });
@@ -500,9 +548,9 @@ test("a class profile that cannot be read three times fails the package so the V
     }
   });
   built.fn.queue({ identity: "users/1/ap" });
-  built.record.manifests["users/1/ap"] = manifestFor("users/1/ap", { urls: { any: ["*x*"] } });
+  declaring(built, "users/1/ap");
   stopAfter(built, 40);
-  const lines = await captured(async () => {
+  const lines = await captureLog(async () => {
     await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
     await built.runner.loop;
   });
@@ -524,10 +572,10 @@ test("a plan a resume has stood down makes no further call or write", async () =
       return new Promise((r) => { answerOld = r; });
     }
   });
-  built.docs.set(classPath(PORTAL, CLASS), { platform_id: PLATFORM_ID, assignment_urls: ["https://a/x"], interactive_urls: [] });
+  withProfile(built);
   for (const identity of ["users/1/first", "users/1/second"]) {
     built.fn.queue({ identity });
-    built.record.manifests[identity] = manifestFor(identity, { urls: { any: ["*x*"] } });
+    declaring(built, identity);
   }
   await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
   await until(() => answerOld, "the old plan's applies check");
@@ -574,7 +622,7 @@ test("a plan stood down during its fetch asks report-server nothing", async () =
       resolvePackage: ({ pkg }) => new Promise((r) => { pending.push(() => r(manifestFor(pkg.identity, { urls: { any: ["*x*"] } }))); })
     }
   });
-  built.docs.set(classPath(PORTAL, CLASS), { platform_id: PLATFORM_ID, assignment_urls: ["https://a/x"], interactive_urls: [] });
+  withProfile(built);
   built.fn.queue({ identity: "users/1/counts" });
   await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
   await until(() => pending.length, "the old plan's fetch");
@@ -587,6 +635,47 @@ test("a plan stood down during its fetch asks report-server nothing", async () =
   assert.equal(built.record.applies.length, 1, "only the new plan asks");
 });
 
+// The broker or S3 failing during a fetch may pass, so it gets the applies check's three
+// attempts; an archive refused for what it holds fails at the first.
+test("a fetch that fails twice and then succeeds runs the package, written failed never", async () => {
+  let failures = 2;
+  const built = build({ stepOverrides: { resolvePackage: async ({ pkg }) => {
+    built.record.resolved.push(pkg);
+    if (failures-- > 0) throw new PackageFetchFailed("packages/users/1/counts/1.0.0.zip could not be fetched: storage-credentials answered 502");
+    return manifestFor(pkg.identity);
+  } } });
+  built.fn.queue({ identity: "users/1/counts" });
+  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+  await built.runner.loop;
+  assert.equal(built.record.resolved.length, 3);
+  assert.equal(result(built.docs, "users/1/counts").status, "done");
+  assert.ok(!writesTo(built.record, resultPath(PORTAL, CLASS, USER, "users__1__counts")).some((w) => w.status === "failed"));
+});
+
+test("a fetch that fails three times is written failed, to be run again", async () => {
+  const built = build({ stepOverrides: { resolvePackage: async ({ pkg }) => {
+    built.record.resolved.push(pkg);
+    throw new PackageFetchFailed("packages/users/1/counts/1.0.0.zip could not be fetched: socket hang up");
+  } } });
+  built.fn.queue({ identity: "users/1/counts" });
+  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+  await built.runner.loop;
+  assert.equal(built.record.resolved.length, 3);
+  assert.match(result(built.docs, "users/1/counts").error, /could not be fetched: socket hang up; run it again$/);
+});
+
+test("an archive refused for what it holds is written failed at the first attempt", async () => {
+  const built = build({ stepOverrides: { resolvePackage: async ({ pkg }) => {
+    built.record.resolved.push(pkg);
+    throw new Error("package users/1/counts 1.0.0 failed its checksum");
+  } } });
+  built.fn.queue({ identity: "users/1/counts" });
+  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+  await built.runner.loop;
+  assert.equal(built.record.resolved.length, 1);
+  assert.match(result(built.docs, "users/1/counts").error, /failed its checksum$/);
+});
+
 test("a fetch that fails after a resume is refused once, by the new plan", async () => {
   let reject;
   const built = build({ stepOverrides: { resolvePackage: () => new Promise((_, r) => { reject = r; }) } });
@@ -596,7 +685,7 @@ test("a fetch that fails after a resume is refused once, by the new plan", async
   const oldLoop = built.runner.loop;
   built.runner.resume();
   await settle(10);
-  const lines = await captured(async () => {
+  const lines = await captureLog(async () => {
     reject(new Error("packages/users/1/counts/1.0.0.zip is missing or not readable"));
     await oldLoop;
     await built.runner.loop;
@@ -626,7 +715,7 @@ test("a claim that fails after a resume is not charged to the new awake period",
   await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
   await until(() => rejectOld, "the old loop's claim");
   const oldLoop = built.runner.loop;
-  const lines = await captured(async () => {
+  const lines = await captureLog(async () => {
     built.runner.resume();
     rejectOld(new Error("UNAVAILABLE"));
     await oldLoop;
@@ -658,8 +747,8 @@ test("a fetch that failed is tried again when the package is run again", async (
 test("a request report-server refuses outright refuses the package with its message", async () => {
   const built = build({ applies: async () => { throw new ReportServerError("scope_urls[3] is longer than 2048 bytes", { status: 400, refusal: true }); } });
   built.fn.queue({ identity: "users/1/ap" });
-  built.record.manifests["users/1/ap"] = manifestFor("users/1/ap", { urls: { any: ["*x*"] } });
-  built.docs.set(classPath(PORTAL, CLASS), { platform_id: PLATFORM_ID, assignment_urls: ["https://a/x"], interactive_urls: [] });
+  declaring(built, "users/1/ap");
+  withProfile(built);
   await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
   await built.runner.loop;
   const doc = result(built.docs, "users/1/ap");
@@ -672,12 +761,12 @@ test("a refusal whose write hangs is bounded, so the loop moves on", async (t) =
   const g = gate((p, fields) => p.includes("/results/") && fields.status === "failed");
   const built = build({ wrapStore: g.wrap, applies: () => ({ applies: false, reason: "no URL in this class matches the required pattern *x*" }) });
   built.docs.set(classPath(PORTAL, CLASS), { assignment_urls: ["https://a"], interactive_urls: [] });
-  built.record.manifests["users/1/refused"] = manifestFor("users/1/refused", { urls: { all: ["*x*"] } });
+  declaring(built, "users/1/refused", { all: ["*x*"] });
   built.fn.queue({ identity: "users/1/refused" });
   t.mock.timers.enable({ apis: ["setTimeout"] });
   let lines;
   try {
-    lines = await captured(async () => {
+    lines = await captureLog(async () => {
       await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
       await until(() => g.held.length, "the refusal's write");
       t.mock.timers.tick(STATUS_WRITE_TIMEOUT_MS + 1000);
@@ -699,16 +788,11 @@ test("a window-exhausted write that hangs is bounded, so the loop moves on", asy
   built.fn.queue({ identity: "users/1/long" });
   built.record.manifests["users/1/long"] = manifestFor("users/1/long", { expected_duration_seconds: 7000 });
   built.fn.state.workErrors.push(Object.assign(new Error("not yet"), { status: 500 }));
-  const origSleep = built.runner.sleep;
-  let jumped = false;
-  built.runner.sleep = async (ms) => {
-    if (!jumped) { jumped = true; clock.t += 7 * 3600_000; return; }
-    await origSleep(ms);
-  };
+  beforeEachSleep(built, (n) => n === 1 && (clock.t += 7 * 3600_000));
   t.mock.timers.enable({ apis: ["setTimeout"] });
   let lines;
   try {
-    lines = await captured(async () => {
+    lines = await captureLog(async () => {
       await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
       await until(() => g.held.length, "the window's write");
       t.mock.timers.tick(STATUS_WRITE_TIMEOUT_MS + 1000);
@@ -735,33 +819,17 @@ test("a package declaring patterns on a class with no profile is refused", async
 test("a package refused on a drained VM is taken off the status document's queue", async () => {
   const built = build();
   built.record.manifests["users/1/x"] = manifestFor("users/1/x", { expected_duration_seconds: 36_000 });
-  const origSleep = built.runner.sleep;
   let queued = false;
-  built.runner.sleep = async (ms) => {
-    if (!queued && runnerDoc(built.docs)?.state === "ready") {
-      queued = true;
-      built.fn.queue({ identity: "users/1/x" });
-      built.docs.set(runnerPath(PORTAL, USER), { ...runnerDoc(built.docs), queue: [{ class_hash: CLASS, package_key: packageDocId("users/1/x") }] });
-    }
-    await origSleep(ms);
-  };
+  onceWhen(built, () => runnerDoc(built.docs)?.state === "ready", () => {
+    queued = true;
+    built.fn.queue({ identity: "users/1/x" });
+    built.docs.set(runnerPath(PORTAL, USER), { ...runnerDoc(built.docs), queue: [{ class_hash: CLASS, package_key: packageDocId("users/1/x") }] });
+  });
   await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
   await built.runner.loop;
   assert.ok(queued, "the package was queued after the VM drained");
   assert.equal(result(built.docs, "users/1/x").status, "failed");
   assert.deepEqual(runnerDoc(built.docs).queue, []);
-});
-
-test("a manifest declaring ten hours is refused by the runner's ceiling", async () => {
-  const built = build();
-  built.fn.queue({ identity: "users/1/long" });
-  built.record.manifests["users/1/long"] = manifestFor("users/1/long", { expected_duration_seconds: 36_000 });
-  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
-  await built.runner.loop;
-
-  const doc = result(built.docs, "users/1/long");
-  assert.equal(doc.status, "failed");
-  assert.match(doc.error, /declares 36000s, over the runner's ceiling of 7200s/);
 });
 
 test("the ceiling admits a package declaring exactly the most report-server accepts, and refuses one second more", async () => {
@@ -775,11 +843,11 @@ test("the ceiling admits a package declaring exactly the most report-server acce
 
   assert.equal(result(built.docs, "users/1/at").status, "done");
   assert.equal(result(built.docs, "users/1/over").status, "failed");
-  assert.match(result(built.docs, "users/1/over").error, /over the runner's ceiling/);
+  assert.match(result(built.docs, "users/1/over").error, new RegExp(`declares ${PACKAGE_MAX_DURATION_DEFAULT + 1}s, over the runner's ceiling of ${PACKAGE_MAX_DURATION_DEFAULT}s`));
 });
 
 test("a package's run is bounded by its declared duration plus the margin by default", async (t) => {
-  const { built, signal } = await bounded(t, {});
+  const { built, signal } = await hungUnderMockTimers(t, {});
   try {
     t.mock.timers.tick(60_000 + PACKAGE_TIMEOUT_MARGIN_MS - 1);
     await settle(10);
@@ -792,7 +860,6 @@ test("a package's run is bounded by its declared duration plus the margin by def
   }
   await until(() => result(built.docs, SLOW).status === "failed", "the failure");
   assert.match(result(built.docs, SLOW).error, /ran past its 660s bound/);
-  built.runner.terminate().catch(() => {});
 });
 
 // /run is at 12:00, so the VM's cap is 20:00, less five minutes. At 16:30, 3h25m are
@@ -805,13 +872,8 @@ test("the window check fails what cannot finish before the VM's cap, up front", 
   built.record.manifests["users/1/first"] = manifestFor("users/1/first", { expected_duration_seconds: 7000 });
   built.record.manifests["users/1/second"] = manifestFor("users/1/second", { expected_duration_seconds: 7000 });
   built.fn.state.workErrors.push(Object.assign(new Error("not yet"), { status: 500 }));
-  const origSleep = built.runner.sleep;
-  let jumped = false;
-  built.runner.sleep = async (ms) => {
-    if (!jumped) { jumped = true; clock.t += 4.5 * 3600_000; return; }
-    await origSleep(ms);
-  };
-  const lines = await captured(async () => {
+  beforeEachSleep(built, (n) => n === 1 && (clock.t += 4.5 * 3600_000));
+  const lines = await captureLog(async () => {
     await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
     await built.runner.loop;
   });
@@ -834,7 +896,7 @@ function killable(events) {
 }
 
 // A hung package started under mocked timers, with the signal its bound aborts.
-async function bounded(t, envOverrides) {
+async function hungUnderMockTimers(t, envOverrides) {
   let signal;
   const stopped = killable([]);
   const built = build({ envOverrides, stepOverrides: { ...stopped, runPackage: (args) => { signal = args.signal; return stopped.runPackage(args); } } });
@@ -898,7 +960,6 @@ test("a timed-out package whose step never ends is failed once its end's bound p
   } finally {
     t.mock.timers.reset();
   }
-  built.runner.terminate().catch(() => {});
 });
 
 // Every package runs as one uid, so one past its bound must be gone before the next starts.
@@ -953,7 +1014,7 @@ test("an archive that cannot be fetched is refused as missing or not readable", 
 test("a queued package is fetched from the payload's bucket at its identity's key", async () => {
   const asked = [];
   const built = build({
-    makePackageBackend: ({ bucket }) => ({ async get(key) { asked.push({ bucket, key }); throw new Error("stop"); } }),
+    makePackageBackend: ({ bucket }) => ({ async get(key) { asked.push({ bucket, key }); throw Object.assign(new Error("stop"), { name: "NoSuchKey" }); } }),
     stepOverrides: { resolvePackage: makeSteps().resolvePackage }
   });
   built.fn.queue({ identity: "users/136/class-counts" });
@@ -967,12 +1028,7 @@ test("a queued package is fetched from the payload's bucket at its identity's ke
 test("a queued entry whose package_key disagrees with its identity is refused", async () => {
   const built = build();
   built.fn.queue({ identity: "users/1/counts" });
-  const call = built.fn.makeFunctionClient();
-  built.runner.makeFunctionClient = () => async (route, args) => {
-    const answer = await call(route, args);
-    if (route === "work") answer.packages = answer.packages.map((p) => ({ ...p, package_key: "users__1__other" }));
-    return answer;
-  };
+  changingWork(built, (answer) => { answer.packages = answer.packages.map((p) => ({ ...p, package_key: "users__1__other" })); });
   await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
   await built.runner.loop;
   assert.match(result(built.docs, "users/1/counts").error, /named this package users__1__other/);
@@ -983,12 +1039,7 @@ test("a queued entry whose package_key disagrees with its identity is refused", 
 test("a queued entry whose identity is unusable is failed at its package key", async () => {
   const built = build();
   built.fn.queue({ identity: "users/1/counts" });
-  const call = built.fn.makeFunctionClient();
-  built.runner.makeFunctionClient = () => async (route, args) => {
-    const answer = await call(route, args);
-    if (route === "work") answer.packages = answer.packages.map((p) => ({ ...p, identity: "Users/1/counts" }));
-    return answer;
-  };
+  changingWork(built, (answer) => { answer.packages = answer.packages.map((p) => ({ ...p, identity: "Users/1/counts" })); });
   stopAfter(built, 40);
   await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
   await built.runner.loop;
@@ -1015,15 +1066,10 @@ test("a queued entry is refused when its version, checksum, catalog id or scope 
   for (const [name, entry, scope, reason] of cases) {
     const built = build();
     built.fn.queue({ identity: "users/1/counts" });
-    const call = built.fn.makeFunctionClient();
-    built.runner.makeFunctionClient = () => async (route, args) => {
-      const answer = await call(route, args);
-      if (route === "work") {
-        if (entry) answer.packages = answer.packages.map(entry);
-        if (scope && answer.scopes[CLASS]) answer.scopes = { [CLASS]: { ...answer.scopes[CLASS], scope: scope(answer.scopes[CLASS].scope) } };
-      }
-      return answer;
-    };
+    changingWork(built, (answer) => {
+      if (entry) answer.packages = answer.packages.map(entry);
+      if (scope && answer.scopes[CLASS]) answer.scopes = { [CLASS]: { ...answer.scopes[CLASS], scope: scope(answer.scopes[CLASS].scope) } };
+    });
     stopAfter(built, 40);
     await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
     await built.runner.loop;
@@ -1038,15 +1084,12 @@ test("a queued entry is refused when its version, checksum, catalog id or scope 
 test("an entry with neither a usable identity nor a well-formed key is logged and written nowhere", async () => {
   const built = build();
   built.fn.queue({ identity: "users/1/counts" });
-  const call = built.fn.makeFunctionClient();
-  built.runner.makeFunctionClient = () => async (route, args) => {
-    const answer = await call(route, args);
-    if (route === "work") answer.packages = answer.packages.map((p) => (p.identity === "users/1/counts" ? { ...p, identity: "Users/1/counts", package_key: "../evil" } : p));
-    return answer;
-  };
+  changingWork(built, (answer) => {
+    answer.packages = answer.packages.map((p) => (p.identity === "users/1/counts" ? { ...p, identity: "Users/1/counts", package_key: "../evil" } : p));
+  });
   built.fn.queue({ identity: "users/1/good" });
   stopAfter(built, 4);
-  const lines = await captured(async () => {
+  const lines = await captureLog(async () => {
     await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
     await built.runner.loop;
   });
@@ -1056,7 +1099,7 @@ test("an entry with neither a usable identity nor a well-formed key is logged an
   const running = writesTo(built.record, runnerPath(PORTAL, USER)).find((w) => w.state === "running");
   assert.ok(running, "the good package's claim-time runner-document write lands");
   assert.deepEqual(running.queue, [], "an entry with no usable key is not listed");
-  assert.ok(lines.some((l) => l.event === "package.refused" && /Users\/1\/counts/.test(l.error) && /\.\.\/evil/.test(l.error)));
+  assert.ok(lines.some((l) => l.event === "package.skipped" && /Users\/1\/counts/.test(l.error) && /\.\.\/evil/.test(l.error)));
 });
 
 // ---- tokens and stores ---------------------------------------------------------
@@ -1076,20 +1119,14 @@ test("every /work answer signs in new stores, per class, and the last request's 
 
 for (const [name, change] of [
   ["another portal's session token", (fn) => { fn.state.sessionToken = () => sessionToken({ platform_id: "https://learn.concord.org" }); }],
-  ["another Firebase project", (fn, built) => {
-    const call = fn.makeFunctionClient();
-    built.runner.makeFunctionClient = () => async (route, args) => {
-      const answer = await call(route, args);
-      return route === "work" ? { ...answer, firebase_project: "report-service-pro" } : answer;
-    };
-  }]
+  ["another Firebase project", (fn, built) => changingWork(built, (answer) => ({ ...answer, firebase_project: "report-service-pro" }))]
 ]) {
   test(`a /work answer naming ${name} is not adopted`, async () => {
     const built = build();
     built.fn.queue({ identity: "users/1/counts" });
     change(built.fn, built);
     stopAfter(built, 4);
-    const lines = await captured(async () => {
+    const lines = await captureLog(async () => {
       await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
       await built.runner.loop;
     });
@@ -1107,9 +1144,7 @@ test("a /work answer whose session token names another researcher is not adopted
   const run = built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
   await run;
   // Nothing it names runs; the loop keeps asking at the idle interval.
-  let polls = 0;
-  const origSleep = built.runner.sleep;
-  built.runner.sleep = async (ms) => { polls += 1; if (polls > 3) built.runner.terminate().catch(() => {}); await origSleep(ms); };
+  stopAfter(built, 4);
   await built.runner.loop;
   assert.equal(result(built.docs, "users/1/counts").status, "queued");
   assert.equal(built.record.prepared.length, 0);
@@ -1118,28 +1153,28 @@ test("a /work answer whose session token names another researcher is not adopted
   assert.ok(refusedStores.every((st) => st.closed), "a refused token's store is closed");
 });
 
-test("a class token that names another class leaves that class's packages unclaimed", async () => {
+test("a class token that names another class leaves that class's packages unclaimed, unfetched and still listed", async () => {
   const built = build();
   built.fn.queue({ identity: "users/1/counts", tokens: { [PROJECT]: classToken(OTHER_CLASS) } });
   let polls = 0;
-  const origSleep = built.runner.sleep;
-  built.runner.sleep = async (ms) => { polls += 1; if (polls > 12) built.fn.state.entries = []; await origSleep(ms); };
-  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
-  await built.runner.loop;
+  beforeEachSleep(built, (n) => { polls = n; if (n > 12) built.fn.state.entries = []; });
+  const lines = await captureLog(async () => {
+    await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+    await until(() => polls > 2, "a few polls");
+    assert.deepEqual(runnerDoc(built.docs).queue, [{ class_hash: CLASS, package_key: "users__1__counts" }], "the drained ready lists it as still queued");
+    await built.runner.loop;
+  });
   assert.equal(result(built.docs, "users/1/counts").status, "queued");
+  assert.equal(built.record.resolved.length, 0, "nothing is fetched for a class with no store");
+  assert.ok(lines.some((l) => l.event === "package.skipped" && l.scope === CLASS));
 });
 
 test("a class with no scope entry is refused like a missing token, and no store is left open", async () => {
   const built = build();
   built.fn.queue({ identity: "users/1/counts" });
-  const call = built.fn.makeFunctionClient();
-  built.runner.makeFunctionClient = () => async (route, args) => {
-    const answer = await call(route, args);
-    if (route === "work") answer.scopes = { ...answer.scopes, [CLASS]: null };
-    return answer;
-  };
+  changingWork(built, (answer) => { answer.scopes = { ...answer.scopes, [CLASS]: null }; });
   stopAfter(built, 6);
-  const lines = await captured(async () => {
+  const lines = await captureLog(async () => {
     await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
     await built.runner.loop;
   });
@@ -1151,24 +1186,17 @@ test("a class with no scope entry is refused like a missing token, and no store 
 });
 
 test("a claim that cannot be written is tried three times, then left, without a tight loop", async () => {
-  const docs = new Map();
   const events = [];
   const built = build({
-    makeStore: () => {
-      const store = new MemoryStore({ docs });
-      const merge = store.merge.bind(store);
-      store.merge = async (p, fields) => {
-        if (fields.status === "running") events.push("claim");
-        if (fields.status === "running" || fields.status === "failed") throw new Error("PERMISSION_DENIED");
-        return merge(p, fields);
-      };
-      return store;
-    }
+    // The claim and the refusal after the last attempt are both refused, so the entry stays queued.
+    wrapStore: refusingMerges((p, fields) => {
+      if (fields.status === "running") events.push("claim");
+      return fields.status === "running" || fields.status === "failed";
+    })
   });
   built.fn.queue({ identity: "users/1/counts" });
-  let polls = 0;
-  const origSleep = built.runner.sleep;
-  built.runner.sleep = async (ms) => { events.push(ms); polls += 1; if (polls > 20) built.runner.terminate().catch(() => {}); await origSleep(ms); };
+  stopAfter(built, 21);
+  beforeEachSleep(built, (_, ms) => { events.push(ms); });
   await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
   await built.runner.loop;
   const attempts = events.flatMap((e, i) => (e === "claim" ? [i] : []));
@@ -1185,36 +1213,35 @@ test("a claim that cannot be written is tried three times, then left, without a 
 
 // ---- /work's answers -----------------------------------------------------------
 
-test("a 409 long after /run waits one idle poll, not five seconds", async () => {
-  const clock = { t: Date.parse("2026-09-26T12:00:00Z") };
-  const built = build({ clock });
-  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
-  await built.runner.loop;
-  await built.runner.suspend();
-  clock.t += 120_000;
-  built.fn.state.workErrors.push(Object.assign(new Error("not the recorded VM"), { status: 409 }));
-  const before = built.record.sleeps.length;
-  built.runner.resume();
-  await built.runner.loop;
-  assert.equal(built.record.sleeps[before], built.env.idlePollMs);
-});
-
-test("a 409 right after /run is retried after five seconds", async () => {
-  const built = build();
-  built.fn.state.workErrors.push(Object.assign(new Error("not the recorded VM"), { status: 409 }));
-  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
-  await built.runner.loop;
-  assert.equal(built.record.sleeps[0], 5000);
-  assert.deepEqual(built.fn.routes().slice(0, 2), ["work", "work"]);
-});
-
-test("any other /work failure waits one idle poll", async () => {
-  const built = build();
-  built.fn.state.workErrors.push(Object.assign(new Error("down"), { status: 502 }));
-  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
-  await built.runner.loop;
-  assert.equal(built.record.sleeps[0], 30_000);
-});
+// /work refuses the VM with a 409 until the function records its launch, just after /run.
+for (const [name, status, longAfterRun, wait] of [
+  ["a 409 right after /run is retried after five seconds", 409, false, 5000],
+  ["a 409 long after /run waits one idle poll, not five seconds", 409, true, 30_000],
+  ["any other /work failure waits one idle poll", 502, false, 30_000]
+]) {
+  test(name, async () => {
+    const clock = { t: Date.parse("2026-09-26T12:00:00Z") };
+    const built = build({ clock });
+    const failNextWork = () => built.fn.state.workErrors.push(Object.assign(new Error("not the recorded VM"), { status }));
+    if (!longAfterRun) failNextWork();
+    await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+    await built.runner.loop;
+    let before = 0;
+    let firstCall = 0;
+    if (longAfterRun) {
+      await built.runner.suspend();
+      clock.t += 120_000;
+      failNextWork();
+      before = built.record.sleeps.length;
+      firstCall = built.fn.routes().length;
+      built.runner.resume();
+      await built.runner.loop;
+    }
+    assert.equal(built.env.idlePollMs, 30_000);
+    assert.equal(built.record.sleeps[before], wait);
+    assert.deepEqual(built.fn.routes().slice(firstCall, firstCall + 2), ["work", "work"], "the failed /work, then the retry");
+  });
+}
 
 // ---- idle ----------------------------------------------------------------------
 
@@ -1234,18 +1261,62 @@ test("a drained VM asks for work through its idle period, flushes, then asks to 
 test("a launch record that lands after /run's ready is corrected by the first /work", async () => {
   const built = build();
   built.fn.state.workErrors.push(Object.assign(new Error("not the recorded VM"), { status: 409 }));
-  const origSleep = built.runner.sleep;
-  let first = true;
-  built.runner.sleep = async (ms) => {
-    if (first) { first = false; built.docs.set(runnerPath(PORTAL, USER), { ...runnerDoc(built.docs), state: "starting" }); }
-    await origSleep(ms);
-  };
+  beforeEachSleep(built, (n) => { if (n === 1) built.docs.set(runnerPath(PORTAL, USER), { ...runnerDoc(built.docs), state: "starting" }); });
   await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
   await built.runner.loop;
   assert.equal(runnerDoc(built.docs).state, "ready");
 });
 
-// Ten polls through the idle period must not mean ten writes of the same document.
+// A failure that keeps repeating counts toward the idle period as an empty poll does, so the
+// VM still asks to be suspended rather than polling until its cap. stopAfter ends a loop
+// that never asks, which leaves the VM terminated.
+for (const { name, setup } of [
+  { name: "a /work that keeps failing", setup: async (built) => {
+    wrapFunction(built, (route, args, call) => {
+      if (route !== "work") return call(route, args);
+      built.fn.state.calls.push({ route });
+      return Promise.reject(Object.assign(new Error("/work answered 502"), { status: 502 }));
+    });
+    await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+  } },
+  { name: "a session token that keeps being refused", setup: async (built) => {
+    changingWork(built, (answer) => ({ ...answer, session_token: sessionToken({ platform_user_id: 999 }) }));
+    await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+  } },
+  { name: "storage credentials that cannot be fetched after a resume", setup: async (built) => {
+    await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+    await built.runner.loop;
+    built.runner.storage = { markStale() {}, client: async () => { throw new Error("storage-credentials answered 502"); } };
+    await built.runner.suspend();
+    built.fn.state.calls.length = 0;
+    built.runner.resume();
+  } }
+]) {
+  test(`with ${name}, the loop still asks /idle once the idle period has passed`, async () => {
+    const built = build();
+    stopAfter(built, 40);
+    await setup(built);
+    await built.runner.loop;
+    assert.notEqual(built.runner.state, "terminated", "the loop asked /idle before stopAfter ended it");
+    assert.deepEqual(built.fn.routes().filter((r) => r === "idle"), ["idle"]);
+    assert.equal(built.fn.routes().at(-1), "idle");
+    assert.equal(built.fn.routes().filter((r) => r === "work").length, built.env.idlePeriodMs / built.env.idlePollMs + 1);
+  });
+}
+
+// An entry that arrives unwritable changes what the drained ready lists, so ready is written again.
+test("a drained VM writes ready again when only its leftover queue changes", async () => {
+  const built = build();
+  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+  await until(() => runnerDoc(built.docs).state === "ready" && built.fn.routes().includes("work"), "the drained ready");
+  assert.deepEqual(runnerDoc(built.docs).queue, []);
+  built.fn.queue({ identity: "users/1/counts", tokens: { [PROJECT]: classToken(OTHER_CLASS) } });
+  await until(() => runnerDoc(built.docs).queue?.length === 1, "the ready listing the unwritable entry");
+  assert.deepEqual(runnerDoc(built.docs).queue, [{ class_hash: CLASS, package_key: "users__1__counts" }]);
+  await built.runner.terminate();
+});
+
+// Eleven /work calls through the idle period must not mean eleven writes of the same document.
 test("a drained VM writes ready once, not on every poll", async () => {
   const built = build();
   await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
@@ -1256,9 +1327,7 @@ test("a drained VM writes ready once, not on every poll", async () => {
 
 test("work requested while idle is taken at the next poll", async () => {
   const built = build();
-  let polls = 0;
-  const origSleep = built.runner.sleep;
-  built.runner.sleep = async (ms) => { polls += 1; if (polls === 2) built.fn.queue({ identity: "users/1/late" }); await origSleep(ms); };
+  beforeEachSleep(built, (n) => { if (n === 2) built.fn.queue({ identity: "users/1/late" }); });
   await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
   await built.runner.loop;
   assert.equal(result(built.docs, "users/1/late").status, "done");
@@ -1281,7 +1350,7 @@ test("an /idle that neither queues nor suspends waits out another idle period", 
   const built = build();
   const inProgress = { success: true, suspended: false, run_in_progress: true };
   built.fn.state.idle.push(inProgress, inProgress);
-  const lines = await captured(async () => {
+  const lines = await captureLog(async () => {
     await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
     await built.runner.loop;
   });
@@ -1307,17 +1376,16 @@ test("/idle is not called on a flush that does not verify", async () => {
 
 test("an /idle call that fails waits out another idle period", async () => {
   const built = build();
-  const call = built.fn.makeFunctionClient();
   let failed = false;
-  built.runner.makeFunctionClient = () => async (route, args) => {
+  wrapFunction(built, async (route, args, call) => {
     if (route === "idle" && !failed) {
       failed = true;
       built.fn.state.calls.push({ route: "idle" });
       throw Object.assign(new Error("SuspendMicrovm failed"), { status: 502 });
     }
     return call(route, args);
-  };
-  const lines = await captured(async () => {
+  });
+  const lines = await captureLog(async () => {
     await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
     await built.runner.loop;
   });
@@ -1330,9 +1398,7 @@ test("an /idle call that fails waits out another idle period", async () => {
 // Stops a loop that would otherwise poll until the VM's cap, so a regression fails the
 // test rather than hanging the file.
 function stopAfter(built, polls) {
-  let n = 0;
-  const sleep = built.runner.sleep;
-  built.runner.sleep = async (ms) => { n += 1; if (n === polls) built.runner.terminate().catch(() => {}); await sleep(ms); };
+  beforeEachSleep(built, (n) => { if (n === polls) built.runner.terminate().catch(() => {}); });
 }
 
 // The function re-appends a finished package with a fresh queued result when it is run again.
@@ -1343,8 +1409,7 @@ const requeue = (built, identity) =>
 // while the VM stays awake.
 function onceWhen(built, when, fn) {
   let done = false;
-  const sleep = built.runner.sleep;
-  built.runner.sleep = async (ms) => { if (!done && when()) { done = true; fn(); } await sleep(ms); };
+  beforeEachSleep(built, () => { if (!done && when()) { done = true; fn(); } });
 }
 
 test("a package failed because report-server could not answer runs when it is run again", async () => {
@@ -1354,8 +1419,8 @@ test("a package failed because report-server could not answer runs when it is ru
     return { applies: true, reason: null };
   } });
   built.fn.queue({ identity: "users/1/ap" });
-  built.record.manifests["users/1/ap"] = manifestFor("users/1/ap", { urls: { any: ["*x*"] } });
-  built.docs.set(classPath(PORTAL, CLASS), { platform_id: PLATFORM_ID, assignment_urls: ["https://a/x"], interactive_urls: [] });
+  declaring(built, "users/1/ap");
+  withProfile(built);
   onceWhen(built, () => result(built.docs, "users/1/ap").status === "failed", () => { down = false; requeue(built, "users/1/ap"); });
   stopAfter(built, 60);
   await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
@@ -1371,8 +1436,8 @@ test("failed attempts before a successful claim do not count against the next ru
     return { applies: true, reason: null };
   } });
   built.fn.queue({ identity: "users/1/ap" });
-  built.record.manifests["users/1/ap"] = manifestFor("users/1/ap", { urls: { any: ["*x*"] } });
-  built.docs.set(classPath(PORTAL, CLASS), { platform_id: PLATFORM_ID, assignment_urls: ["https://a/x"], interactive_urls: [] });
+  declaring(built, "users/1/ap");
+  withProfile(built);
   // One more blip on the next run is that run's first failure, not its third. A new
   // version, so report-server is asked again rather than its last answer reused.
   let rerun = false;
@@ -1390,39 +1455,59 @@ test("failed attempts before a successful claim do not count against the next ru
   assert.equal(writesTo(built.record, resultPath(PORTAL, CLASS, USER, "users__1__ap")).filter((w) => w.status === "running").length, 2);
 });
 
-test("a resume gives a claim that could not be written three more attempts", async () => {
-  const docs = new Map();
-  let attempts = 0;
-  const built = build({
-    makeStore: () => {
-      const store = new MemoryStore({ docs });
-      const merge = store.merge.bind(store);
-      store.merge = async (p, fields) => {
-        if (fields.status === "running") { attempts += 1; throw new Error("PERMISSION_DENIED"); }
-        return merge(p, fields);
-      };
-      return store;
-    }
-  });
+// Claims and result writes that throw, counting the claims.
+function refusingResults({ refusal = false } = {}) {
+  const counted = { claims: 0 };
+  const wrapStore = (store) => {
+    const merge = store.merge.bind(store);
+    store.merge = async (p, fields) => {
+      if (fields.status === "running") { counted.claims += 1; throw new Error("PERMISSION_DENIED"); }
+      if (refusal && p.includes("/results/")) throw new Error("PERMISSION_DENIED");
+      return merge(p, fields);
+    };
+    return store;
+  };
+  return { counted, wrapStore };
+}
+
+test("an entry whose claim cannot be written is written refused after three attempts, so the VM can suspend", async () => {
+  const { counted, wrapStore } = refusingResults();
+  const built = build({ wrapStore });
+  built.fn.queue({ identity: "users/1/counts" });
+  stopAfter(built, 40);
+  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+  await built.runner.loop;
+  assert.equal(counted.claims, 3);
+  const doc = result(built.docs, "users/1/counts");
+  assert.equal(doc.status, "failed");
+  assert.match(doc.error, /could not record its claim on this package \(PERMISSION_DENIED\); run it again/);
+  assert.equal(built.runner.state, "ready", "suspended by /idle, not stopped by stopAfter");
+  assert.equal(built.fn.routes().at(-1), "idle");
+});
+
+test("a resume gives a claim whose refusal could not be written either three more attempts", async () => {
+  const { counted, wrapStore } = refusingResults({ refusal: true });
+  const built = build({ wrapStore });
   built.fn.queue({ identity: "users/1/counts" });
   built.fn.state.idle.push({ success: true, suspended: true });
   await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
   await built.runner.loop;
-  assert.equal(attempts, 3);
+  assert.equal(counted.claims, 3);
+  assert.deepEqual(runnerDoc(built.docs).queue, [{ class_hash: CLASS, package_key: "users__1__counts" }], "the drained ready lists the entry still queued");
   await built.runner.suspend();
   built.fn.state.idle.push({ success: true, suspended: true });
   built.runner.resume();
   await built.runner.loop;
-  assert.equal(attempts, 6);
+  assert.equal(counted.claims, 6);
 });
 
 test("re-planning after each package resolves and asks report-server about each package once", async () => {
   const built = build();
   for (const n of ["a", "b", "c", "d"]) {
     built.fn.queue({ identity: `users/1/${n}` });
-    built.record.manifests[`users/1/${n}`] = manifestFor(`users/1/${n}`, { urls: { any: ["*x*"] } });
+    declaring(built, `users/1/${n}`);
   }
-  built.docs.set(classPath(PORTAL, CLASS), { platform_id: PLATFORM_ID, assignment_urls: ["https://a/x"], interactive_urls: [] });
+  withProfile(built);
   await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
   await built.runner.loop;
   for (const n of ["a", "b", "c", "d"]) assert.equal(result(built.docs, `users/1/${n}`).status, "done");
@@ -1440,10 +1525,10 @@ test("the status document's queue leaves out a package the same plan failed", as
   built.fn.queue({ identity: "users/1/first" });
   built.fn.queue({ identity: "users/1/refused" });
   built.fn.queue({ identity: "users/1/third" });
-  built.record.manifests["users/1/refused"] = manifestFor("users/1/refused", { urls: { all: ["*x*"] } });
-  built.docs.set(classPath(PORTAL, CLASS), { platform_id: PLATFORM_ID, assignment_urls: ["https://a/y"], interactive_urls: [] });
+  declaring(built, "users/1/refused", { all: ["*x*"] });
+  withProfile(built, "https://a/y");
   await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
-  while (!release) await new Promise((r) => setImmediate(r));
+  await until(() => release, "the first package step");
   try {
     assert.equal(result(built.docs, "users/1/refused").status, "failed");
     assert.deepEqual(runnerDoc(built.docs).queue, [{ class_hash: CLASS, package_key: "users__1__third" }]);
@@ -1460,7 +1545,7 @@ test("an /idle answer from before a resume is ignored", async () => {
   let release;
   built.fn.state.block = { route: "idle", promise: new Promise((r) => { release = r; }) };
   await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
-  while (!built.fn.routes().includes("idle")) await new Promise((r) => setImmediate(r));
+  await until(() => built.fn.routes().includes("idle"), "the first /idle");
   const firstLoop = built.runner.loop;
   await built.runner.suspend();
   built.fn.state.block = null;
@@ -1487,12 +1572,12 @@ test("a loop stood down by a resume during its pre-idle flush does not ask to be
     if (why === "idle" && !held) { held = true; await new Promise((r) => { releaseFlush = r; }); }
     return flush(why);
   };
-  while (!releaseFlush) await new Promise((r) => setImmediate(r));
+  await until(() => releaseFlush, "the pre-idle flush");
   const firstLoop = built.runner.loop;
   await built.runner.suspend();
   built.fn.queue({ identity: "users/1/slow" });
   built.runner.resume();
-  while (!built.runner.currentRun || !releaseRun) await new Promise((r) => setImmediate(r));
+  await until(() => built.runner.currentRun && releaseRun, "the resumed run's package step");
   try {
     releaseFlush();
     await firstLoop;
@@ -1542,6 +1627,7 @@ async function holding(opts = {}) {
 test("the claim records the interval its heartbeat is written at", async () => {
   const { built, finish } = await holding();
   try {
+    assert.equal(built.runner.state, "running");
     const claim = writesTo(built.record, resultPath(PORTAL, CLASS, USER, SLOW_KEY)).find((w) => w.status === "running");
     assert.equal(claim.heartbeat_seconds, HEARTBEAT_SECONDS);
     assert.deepEqual(built.record.timers.map((t) => t.ms), [HEARTBEAT_SECONDS * 1000]);
@@ -1582,110 +1668,82 @@ test("a heartbeat is skipped while the last one is unsettled", async () => {
   await built.runner.loop;
 });
 
-test("the finish waits for a heartbeat in flight, and no heartbeat follows it", async () => {
-  const g = gate(isBeat);
-  const { built, finish } = await holding({ wrapStore: g.wrap });
-  await tick(built);
-  finish();
-  await settle(10);
-  assert.equal(result(built.docs, SLOW).status, "running", "done is not written while a beat is in flight");
-  g.held[0].release();
-  await built.runner.loop;
-  assert.equal(result(built.docs, SLOW).status, "done");
-  assert.ok(built.record.timers.every((t) => t.cancelled), "the timer stopped with the run");
-  const writes = writesTo(built.record, resultPath(PORTAL, CLASS, USER, SLOW_KEY)).length;
-  await tick(built);
-  assert.equal(writesTo(built.record, resultPath(PORTAL, CLASS, USER, SLOW_KEY)).length, writes, "the timer stopped with the run");
-});
-
-test("the run's final write is awaited past the status bound, and nothing else is written until it settles", async (t) => {
-  const g = gate((p, fields) => p.includes("/results/") && fields.status === "done");
-  const { built, finish } = await holding({ wrapStore: g.wrap });
-  const classStore = built.runner.currentRun.store;
-  const runnerWrites = writesTo(built.record, runnerPath(PORTAL, USER)).length;
-  const calls = built.fn.state.calls.length;
-  t.mock.timers.enable({ apis: ["setTimeout"] });
-  try {
-    finish();
+for (const [outcome, end] of [
+  ["done", (step) => step.resolve({ display: "x", summary: "y" })],
+  ["failed", (step) => step.reject(new Error("package exited 1"))]
+]) {
+  test(`a run ending ${outcome} waits for a heartbeat in flight before its final write, and no heartbeat follows`, async () => {
+    const g = gate(isBeat);
+    let step;
+    const built = build({ wrapStore: g.wrap, stepOverrides: { runPackage: () => new Promise((resolve, reject) => { step = { resolve, reject }; }) } });
+    built.fn.queue({ identity: SLOW });
+    await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+    await until(() => step, "the package step");
+    await tick(built);
+    end(step);
     await settle(10);
-    assert.equal(g.held.length, 1, "done was issued");
-    t.mock.timers.tick(STATUS_WRITE_TIMEOUT_MS + 1000);
-    await settle(10);
-    assert.equal(writesTo(built.record, runnerPath(PORTAL, USER)).length, runnerWrites, "no runner-document write");
-    assert.equal(built.fn.state.calls.length, calls, "no /work");
-    assert.equal(classStore.closed, false, "the run's store stays open");
-  } finally {
-    t.mock.timers.reset();
-  }
-  g.held[0].release();
-  await built.runner.loop;
-  assert.equal(result(built.docs, SLOW).status, "done");
-  assert.equal(classStore.closed, true);
-  assert.equal(runnerDoc(built.docs).state, "ready");
-});
-
-test("a finish the store refuses is followed by a failure, awaited past the status bound the same way", async (t) => {
-  const g = gate((p, fields) => p.includes("/results/") && fields.status === "failed");
-  const { built, finish } = await holding({
-    wrapStore: (store) => {
-      g.wrap(store);
-      const merge = store.merge;
-      store.merge = (p, fields) => (p.includes("/results/") && fields.status === "done" ? Promise.reject(new Error("PERMISSION_DENIED")) : merge(p, fields));
-      return store;
-    }
+    assert.equal(result(built.docs, SLOW).status, "running", `${outcome} is not written while a beat is in flight`);
+    g.held[0].release();
+    await built.runner.loop;
+    assert.equal(result(built.docs, SLOW).status, outcome);
+    assert.ok(built.record.timers.every((t) => t.cancelled), "the timer stopped with the run");
+    const writes = writesTo(built.record, resultPath(PORTAL, CLASS, USER, SLOW_KEY)).length;
+    await tick(built);
+    assert.equal(writesTo(built.record, resultPath(PORTAL, CLASS, USER, SLOW_KEY)).length, writes, "the timer stopped with the run");
   });
-  const classStore = built.runner.currentRun.store;
-  const runnerWrites = writesTo(built.record, runnerPath(PORTAL, USER)).length;
-  const calls = built.fn.state.calls.length;
-  t.mock.timers.enable({ apis: ["setTimeout"] });
-  try {
-    finish();
-    await settle(10);
-    assert.equal(g.held.length, 1, "the failure was issued");
-    t.mock.timers.tick(STATUS_WRITE_TIMEOUT_MS + 1000);
-    await settle(10);
-    assert.equal(writesTo(built.record, runnerPath(PORTAL, USER)).length, runnerWrites, "no runner-document write");
-    assert.equal(built.fn.state.calls.length, calls, "no /work");
-    assert.equal(classStore.closed, false, "the run's store stays open");
-  } finally {
-    t.mock.timers.reset();
-  }
-  g.held[0].release();
-  await built.runner.loop;
-  assert.equal(result(built.docs, SLOW).status, "failed");
-  assert.match(result(built.docs, SLOW).error, /PERMISSION_DENIED/);
-  assert.equal(classStore.closed, true);
-});
+}
 
-test("a package that fails waits for a heartbeat in flight before its failure, and no heartbeat follows", async () => {
-  const g = gate(isBeat);
-  let fail;
-  const built = build({ wrapStore: g.wrap, stepOverrides: { runPackage: () => new Promise((_, reject) => { fail = reject; }) } });
-  built.fn.queue({ identity: SLOW });
-  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
-  await until(() => fail, "the package step");
-  await tick(built);
-  fail(new Error("package exited 1"));
-  await settle(10);
-  assert.equal(result(built.docs, SLOW).status, "running", "failed is not written while a beat is in flight");
-  g.held[0].release();
-  await built.runner.loop;
-  assert.equal(result(built.docs, SLOW).status, "failed");
-  assert.ok(built.record.timers.every((t) => t.cancelled), "the timer stopped with the run");
-  const writes = writesTo(built.record, resultPath(PORTAL, CLASS, USER, SLOW_KEY)).length;
-  await tick(built);
-  assert.equal(writesTo(built.record, resultPath(PORTAL, CLASS, USER, SLOW_KEY)).length, writes, "the timer stopped with the run");
-});
+for (const { name, issued, wrapStore, settled } of [
+  {
+    name: "the run's final write is awaited past the status bound, and nothing else is written until it settles",
+    issued: "done",
+    wrapStore: (g) => g.wrap,
+    settled: (built) => {
+      assert.equal(result(built.docs, SLOW).status, "done");
+      assert.equal(runnerDoc(built.docs).state, "ready");
+    }
+  },
+  {
+    name: "a finish the store refuses is followed by a failure, awaited past the status bound the same way",
+    issued: "failed",
+    wrapStore: (g) => (store) => refusingMerges((p, fields) => p.includes("/results/") && fields.status === "done")(g.wrap(store)),
+    settled: (built) => {
+      assert.equal(result(built.docs, SLOW).status, "failed");
+      assert.match(result(built.docs, SLOW).error, /PERMISSION_DENIED/);
+    }
+  }
+]) {
+  test(name, async (t) => {
+    const g = gate((p, fields) => p.includes("/results/") && fields.status === issued);
+    const { built, finish } = await holding({ wrapStore: wrapStore(g) });
+    const classStore = built.runner.currentRun.store;
+    const runnerWrites = writesTo(built.record, runnerPath(PORTAL, USER)).length;
+    const calls = built.fn.state.calls.length;
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    try {
+      finish();
+      await settle(10);
+      assert.equal(g.held.length, 1, `${issued} was issued`);
+      t.mock.timers.tick(STATUS_WRITE_TIMEOUT_MS + 1000);
+      await settle(10);
+      assert.equal(writesTo(built.record, runnerPath(PORTAL, USER)).length, runnerWrites, "no runner-document write");
+      assert.equal(built.fn.state.calls.length, calls, "no /work");
+      assert.equal(classStore.closed, false, "the run's store stays open");
+    } finally {
+      t.mock.timers.reset();
+    }
+    g.held[0].release();
+    await built.runner.loop;
+    settled(built);
+    assert.equal(classStore.closed, true);
+  });
+}
 
 test("a heartbeat that fails is logged and the run still finishes", async () => {
   const { built, finish } = await holding({
-    wrapStore: (store) => {
-      const merge = store.merge.bind(store);
-      store.merge = (p, fields) => (isBeat(p, fields) ? Promise.reject(new Error("UNAVAILABLE")) : merge(p, fields));
-      return store;
-    }
+    wrapStore: refusingMerges(isBeat, "UNAVAILABLE")
   });
-  const lines = await captured(() => tick(built));
+  const lines = await captureLog(() => tick(built));
   assert.ok(lines.some((l) => l.event === "heartbeat.failed"));
   finish();
   await built.runner.loop;
@@ -1754,11 +1812,7 @@ test("/suspend mid-run names the outstanding run on both its writes", async () =
 test("a hook write repairs a runner document the claim's write never reached", async () => {
   let failRunning = true;
   const { built, finish } = await holding({
-    wrapStore: (store) => {
-      const merge = store.merge.bind(store);
-      store.merge = (p, fields) => (failRunning && p.includes("/runners/") && fields.state === "running" ? Promise.reject(new Error("UNAVAILABLE")) : merge(p, fields));
-      return store;
-    }
+    wrapStore: refusingMerges((p, fields) => failRunning && p.includes("/runners/") && fields.state === "running", "UNAVAILABLE")
   });
   assert.equal(runnerDoc(built.docs).current_package, null, "the claim's runner-document write was lost");
   failRunning = false;
@@ -1881,7 +1935,7 @@ test("an adoption a resume has overtaken closes its own stores, not the new loop
 test("a refused /suspend mid-run fails the run, revokes the token and stops the loop", async () => {
   const { built, finish } = await holding();
   built.runner.syncer.flushAndVerify = async () => ({ ok: false, reason: "sync incomplete" });
-  const lines = await captured(() => assert.rejects(() => built.runner.suspend(), (err) => err instanceof HookError && err.status === 500));
+  const lines = await captureLog(() => assert.rejects(() => built.runner.suspend(), (err) => err instanceof HookError && err.status === 500));
   const doc = result(built.docs, SLOW);
   assert.equal(doc.status, "failed");
   assert.equal(doc.error, LOST_RUN_REASON);
@@ -1943,7 +1997,7 @@ test("a refused /suspend leaves a runner document that records another VM", asyn
     docs.set(runnerPath(PORTAL, USER), { ...runnerDoc(docs), microvm_id: "mvm-2", state: "starting" });
     return { ok: false, reason: "sync incomplete" };
   };
-  const lines = await captured(() => runner.suspend().catch(() => {}));
+  const lines = await captureLog(() => runner.suspend().catch(() => {}));
   assert.equal(runnerDoc(docs).microvm_id, "mvm-2");
   assert.equal(runnerDoc(docs).state, "starting");
   assert.ok(lines.some((l) => l.event === "suspend.runner_doc_skipped"));
@@ -1983,11 +2037,12 @@ test("/suspend mid-run stops the package's processes before its flush, and /resu
 });
 
 test("a freeze that never ends is given up on at its bound, and the suspend goes on", async (t) => {
-  const { built, finish } = await holding({ stepOverrides: { freezePackageProcesses: () => new Promise(() => {}) } });
+  // Before the run starts, so its bound's timer is a mocked one the suspend can pause.
   t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { built, finish } = await holding({ stepOverrides: { freezePackageProcesses: () => new Promise(() => {}) } });
   let ended = false;
   try {
-    const lines = await captured(async () => {
+    const lines = await captureLog(async () => {
       const suspending = built.runner.suspend().then(() => { ended = true; });
       await settle(10);
       t.mock.timers.tick(FREEZE_TIMEOUT_MS + 1000);
@@ -2002,10 +2057,25 @@ test("a freeze that never ends is given up on at its bound, and the suspend goes
   }
 });
 
+// /terminate's failure write is the run's last word, so its bound must not fire afterward
+// and abort the package.
+test("/terminate ends the outstanding run's bound", async (t) => {
+  const { built, signal } = await hungUnderMockTimers(t, { packageTimeoutMs: 1000 });
+  try {
+    await built.runner.terminate();
+    t.mock.timers.tick(2000);
+    await settle(10);
+    assert.equal(signal().aborted, false);
+    assert.equal(result(built.docs, SLOW).error, LOST_RUN_REASON);
+  } finally {
+    t.mock.timers.reset();
+  }
+});
+
 // The VM's clock runs on while it is suspended, so a bound counted on it would end a run
 // held across a long suspend as soon as it resumed.
 test("a package's bound counts only the time the VM is awake", async (t) => {
-  const { built, signal } = await bounded(t, { packageTimeoutMs: 1000 });
+  const { built, signal } = await hungUnderMockTimers(t, { packageTimeoutMs: 1000 });
   const pass = async (ms) => {
     built.clock.t += ms;
     t.mock.timers.tick(ms);
@@ -2027,11 +2097,10 @@ test("a package's bound counts only the time the VM is awake", async (t) => {
   }
   await until(() => result(built.docs, SLOW).status === "failed", "the failure");
   assert.match(result(built.docs, SLOW).error, /ran past its 1s bound/);
-  built.runner.terminate().catch(() => {});
 });
 
 test("a resume with no /suspend before it leaves the bound armed once", async (t) => {
-  const { built, signal } = await bounded(t, { packageTimeoutMs: 1000 });
+  const { built, signal } = await hungUnderMockTimers(t, { packageTimeoutMs: 1000 });
   try {
     built.runner.resume();
     await settle(10);
@@ -2042,15 +2111,15 @@ test("a resume with no /suspend before it leaves the bound armed once", async (t
   } finally {
     t.mock.timers.reset();
   }
-  built.runner.terminate().catch(() => {});
 });
 
 test("a /resume continues the package only once a stop that outlasted the hook has ended", async (t) => {
   let stopped;
+  // Before the run starts, so its bound's timer is a mocked one the suspend can pause.
+  t.mock.timers.enable({ apis: ["setTimeout"] });
   const { built, finish } = await holding({ stepOverrides: {
     freezePackageProcesses: () => new Promise((r) => { stopped = () => { built.record.signals.push("stopped"); r(); }; })
   } });
-  t.mock.timers.enable({ apis: ["setTimeout"] });
   try {
     const suspending = built.runner.suspend();
     await settle(10);
@@ -2100,7 +2169,6 @@ test("a claim that lands while /suspend runs has its bound armed by the resume",
   } finally {
     t.mock.timers.reset();
   }
-  built.runner.terminate().catch(() => {});
 });
 
 test("a run that finishes disarms its bound", async (t) => {
@@ -2120,7 +2188,6 @@ test("a run that finishes disarms its bound", async (t) => {
   } finally {
     t.mock.timers.reset();
   }
-  built.runner.terminate().catch(() => {});
 });
 
 test("a suspend during the post-resume /work leaves the held run's document to that suspend", async () => {
@@ -2129,7 +2196,7 @@ test("a suspend during the post-resume /work leaves the held run's document to t
   let release;
   built.fn.state.block = { route: "work", promise: new Promise((r) => { release = r; }) };
   const calls = built.fn.state.calls.length;
-  const lines = await captured(async () => {
+  const lines = await captureLog(async () => {
     built.runner.resume();
     await until(() => built.fn.state.calls.length > calls, "the post-resume /work");
     await built.runner.suspend();
@@ -2196,7 +2263,7 @@ test("a package that cannot be stopped is left to the flush's verify, and a fail
     }
   });
   let suspendedAs;
-  const lines = await captured(async () => {
+  const lines = await captureLog(async () => {
     await built.runner.suspend();
     suspendedAs = runnerDoc(built.docs).state;
     built.runner.resume();
@@ -2244,19 +2311,20 @@ test("/resume writes nothing and answers at once, and the next /work forces a fr
     const orig = store.idToken.bind(store);
     store.idToken = async (force) => { idTokens.push(force); return orig(force); };
   }
+  const callsBefore = fn.routes().length;
   const answer = runner.resume();
   assert.equal(answer instanceof Promise, false, "no await in the hook");
   assert.equal(record.stores.reduce((n, s) => n + s.writes.length, 0), writesBefore, "nothing written by the hook");
   await runner.loop;
   assert.equal(idTokens[0], true, "the first call after a resume refreshes the ID token");
-  assert.ok(fn.routes().length > 0);
+  assert.equal(fn.routes()[callsBefore], "work", "the call it refreshes the token for is /work");
 });
 
 test("a resume after a suspend logs no missing suspend", async () => {
   const { runner } = await started();
   await runner.loop;
   await runner.suspend();
-  const lines = await captured(async () => {
+  const lines = await captureLog(async () => {
     runner.resume();
     await runner.loop;
   });
@@ -2312,11 +2380,51 @@ test("a ready write in flight across a suspend and resume leaves the new loop to
   assert.equal(runnerDoc(built.docs).state, "ready", "the new loop wrote ready over suspended");
 });
 
+// Firestore tests the condition when the transaction commits, so the hold comes before it.
+test("a loop's ready write sent before /suspend does not land over the hook's suspended", async () => {
+  let held = null;
+  const built = build({
+    wrapStore: (store) => {
+      const mergeIf = store.mergeIf.bind(store);
+      store.mergeIf = async (p, onlyIf, fields) => {
+        if (!held && p.includes("/runners/") && fields.state === "ready") await new Promise((r) => { held = r; });
+        return mergeIf(p, onlyIf, fields);
+      };
+      return store;
+    }
+  });
+  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+  await until(() => held, "the loop's drained ready write");
+  await built.runner.suspend();
+  held();
+  await built.runner.loop;
+  assert.equal(runnerDoc(built.docs).state, "suspended");
+  assert.deepEqual(writesTo(built.record, runnerPath(PORTAL, USER)).map((w) => w.state).slice(-2), ["suspending", "suspended"]);
+});
+
+test("a package refused after an earlier run leaves none of that run's output beside the refusal", async () => {
+  const built = build();
+  built.fn.queue({ identity: "users/1/counts" });
+  onceWhen(built, () => result(built.docs, "users/1/counts").status === "done", () => {
+    built.fn.state.entries[0].version = "1.0.1";
+    built.record.manifests["users/1/counts"] = manifestFor("users/1/counts", { expected_duration_seconds: 36_000 });
+    requeue(built, "users/1/counts");
+  });
+  stopAfter(built, 60);
+  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+  await built.runner.loop;
+  const doc = result(built.docs, "users/1/counts");
+  assert.equal(doc.status, "failed");
+  assert.match(doc.error, /over the runner's ceiling/);
+  assert.equal(doc.package.version, "1.0.1");
+  assert.deepEqual({ summary: doc.summary, display: doc.display, stage: doc.stage }, { summary: null, display: null, stage: null });
+});
+
 test("report-server's yes is asked again after a resume", async () => {
   const built = build();
-  built.docs.set(classPath(PORTAL, CLASS), { platform_id: PLATFORM_ID, assignment_urls: ["https://a/x"], interactive_urls: [] });
+  withProfile(built);
   built.fn.queue({ identity: "users/1/ap" });
-  built.record.manifests["users/1/ap"] = manifestFor("users/1/ap", { urls: { any: ["*x*"] } });
+  declaring(built, "users/1/ap");
   await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
   await built.runner.loop;
   assert.equal(built.record.applies.length, 1);
@@ -2387,6 +2495,29 @@ test("after a resume the next package is planned from a /work answer asked once 
   assert.equal(result(built.docs, "users/1/next").package.version, "1.1.0");
 });
 
+test("/terminate mid-run stops the package's processes before its flush", async () => {
+  const { built } = await holding();
+  const flush = built.runner.syncer.flushAndVerify.bind(built.runner.syncer);
+  built.runner.syncer.flushAndVerify = (why) => { built.record.signals.push(`flush:${why}`); return flush(why); };
+  await built.runner.terminate();
+  assert.deepEqual(built.record.signals, [`freeze:${built.env.packageUid}`, "flush:terminate"]);
+});
+
+for (const hook of ["suspend", "terminate"]) {
+  test(`a /${hook} sync failure reaches the runner document redacted`, async () => {
+    const { runner, docs } = await started();
+    await runner.loop;
+    runner.syncer.flushAndVerify = async () => ({ ok: false, reason: "sync failed: https://s3/x?X-Amz-Signature=abc123" });
+    await assert.rejects(() => runner[hook](), (err) => err instanceof HookError && err.status === 500);
+    assert.equal(runnerDoc(docs).error, "sync failed: https://s3/x?X-Amz-Signature=[redacted]");
+  });
+}
+
+// The watchdog fails a lost run with the same words, so the two read as one reason.
+test("the lost-run reason is the watchdog's, word for word", () => {
+  assert.equal(LOST_RUN_REASON, "The machine running it stopped before the run finished; run it again.");
+});
+
 test("the syncer is stopped before /suspend's and /terminate's flushes", async () => {
   for (const hook of ["suspend", "terminate"]) {
     const { runner } = await started();
@@ -2408,7 +2539,7 @@ test("an ID token that never comes is given up on at its bound", async (t) => {
   for (const store of [runner.status.store]) store.idToken = () => new Promise(() => {});
   t.mock.timers.enable({ apis: ["setTimeout"] });
   try {
-    const lines = await captured(async () => {
+    const lines = await captureLog(async () => {
       runner.resume();
       await settle(10);
       const calls = fn.state.calls.length;
@@ -2424,17 +2555,15 @@ test("an ID token that never comes is given up on at its bound", async (t) => {
   }
 });
 
-test("each resume with no suspend before it is logged, not only the first", async () => {
+test("each resume with no suspend since the last is logged, not only the first", async () => {
   const { runner } = await started();
   await runner.loop;
+  const missing = async (fn) => (await captureLog(fn)).filter((l) => l.event === "lifecycle.resume_without_suspend").length;
+  assert.equal(await missing(async () => { runner.resume(); await runner.loop; }), 1, "a resume after /run alone");
   await runner.suspend();
   runner.resume();
   await runner.loop;
-  const lines = await captured(async () => {
-    runner.resume();
-    await runner.loop;
-  });
-  assert.ok(lines.some((l) => l.event === "lifecycle.resume_without_suspend"));
+  assert.equal(await missing(async () => { runner.resume(); await runner.loop; }), 1, "a second resume after one suspend");
 });
 
 test("/resume itself marks the storage credentials stale, before the loop runs", async () => {
@@ -2446,26 +2575,6 @@ test("/resume itself marks the storage credentials stale, before the loop runs",
   runner.resume();
   assert.equal(marked, 1, "marked by the hook, synchronously");
   await runner.loop;
-});
-
-test("a resume with no suspend since the last activity is logged", async () => {
-  const lines = [];
-  const original = process.stdout.write;
-  const { runner } = await started();
-  await runner.loop;
-  process.stdout.write = (chunk) => { lines.push(String(chunk)); return true; };
-  try {
-    runner.resume();
-  } finally {
-    process.stdout.write = original;
-  }
-  await runner.loop;
-  assert.ok(lines.some((l) => l.includes("lifecycle.resume_without_suspend")));
-});
-
-// The watchdog fails a lost run with the same words, so the two read as one reason.
-test("the lost-run reason is the watchdog's, word for word", () => {
-  assert.equal(LOST_RUN_REASON, "The machine running it stopped before the run finished; run it again.");
 });
 
 test("/terminate during a run fails the result first, revokes, flushes and terminates", async () => {
@@ -2522,33 +2631,65 @@ test("/terminate after an unverified flush names the outstanding run on its fail
   }
 });
 
-test("a claim that lands after /terminate has finished writes and runs nothing more", async () => {
-  const g = gate((p, fields) => p.includes("/results/") && fields.status === "running");
-  const built = build({ wrapStore: g.wrap });
-  built.fn.queue({ identity: SLOW });
-  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
-  await until(() => g.held.length, "the claim's write");
-  await built.runner.terminate();
-  built.docs.set(runnerPath(PORTAL, USER), { ...runnerDoc(built.docs), microvm_id: "mvm-2", state: "starting" });
-  g.held[0].release();
-  await settle(20);
-  assert.equal(runnerDoc(built.docs).state, "starting", "the newer VM's document is left alone");
-  assert.equal(built.record.prepared.length, 0, "the package is not prepared");
-  assert.equal(built.record.timers.length, 0);
-});
-
-test("/terminate during the claim's runner-document write starts no heartbeat", async () => {
-  const g = gate((p, fields) => p.includes("/runners/") && fields.state === "running");
-  const built = build({ wrapStore: g.wrap, stepOverrides: { runPackage: () => new Promise(() => {}) } });
-  built.fn.queue({ identity: SLOW });
-  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
-  await until(() => g.held.length, "the claim's runner-document write");
-  await built.runner.terminate();
-  g.open();
-  await settle(20);
-  assert.equal(built.record.timers.length, 0, "no heartbeat once the VM is terminating");
-  assert.equal(built.record.prepared.length, 0, "the package is not prepared");
-});
+// A claim's writes that land around a /terminate: nothing more is written for the run, its
+// package is never prepared and no heartbeat starts.
+for (const { name, holds, holdRevocation = false, act, check } of [
+  {
+    name: "a claim that lands after /terminate has finished writes and runs nothing more",
+    holds: (p, fields) => p.includes("/results/") && fields.status === "running",
+    act: async (built, g) => {
+      await built.runner.terminate();
+      built.docs.set(runnerPath(PORTAL, USER), { ...runnerDoc(built.docs), microvm_id: "mvm-2", state: "starting" });
+      g.held[0].release();
+      await settle(20);
+    },
+    check: (built) => assert.equal(runnerDoc(built.docs).state, "starting", "the newer VM's document is left alone")
+  },
+  {
+    name: "/terminate during the claim's runner-document write starts no heartbeat",
+    holds: (p, fields) => p.includes("/runners/") && fields.state === "running",
+    act: async (built, g) => {
+      await built.runner.terminate();
+      g.open();
+      await settle(20);
+    },
+    check: () => {}
+  },
+  {
+    name: "a claim that lands while /terminate is under way starts no heartbeat",
+    holds: (p, fields) => p.includes("/results/") && fields.status === "running",
+    holdRevocation: true,
+    act: async (built, g, revocation) => {
+      const terminating = built.runner.terminate();
+      await until(() => revocation.answer, "the revocation");
+      g.held[0].release();
+      await settle(20);
+      revocation.answer();
+      await terminating;
+    },
+    check: (built) => {
+      assert.equal(runnerDoc(built.docs).state, "terminated");
+      assert.ok(!writesTo(built.record, runnerPath(PORTAL, USER)).some((w) => w.state === "running"), "no running write once the VM is terminating");
+    }
+  }
+]) {
+  test(name, async () => {
+    const g = gate(holds);
+    const revocation = {};
+    const built = build({
+      wrapStore: g.wrap,
+      revoke: holdRevocation ? () => new Promise((r) => { revocation.answer = r; }) : async () => {},
+      stepOverrides: { runPackage: () => new Promise(() => {}) }
+    });
+    built.fn.queue({ identity: SLOW });
+    await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+    await until(() => g.held.length, "the claim's write");
+    await act(built, g, revocation);
+    check(built);
+    assert.equal(built.record.prepared.length, 0, "the package is not prepared");
+    assert.equal(built.record.timers.length, 0, "no heartbeat once the VM is terminating");
+  });
+}
 
 test("currentPackage names the outstanding run, and null with none", async () => {
   const { built, finish } = await holding();
@@ -2564,7 +2705,7 @@ test("a revocation that never answers does not hold /terminate past its bound", 
   t.mock.timers.enable({ apis: ["setTimeout"] });
   let ended = false;
   try {
-    const lines = await captured(async () => {
+    const lines = await captureLog(async () => {
       const terminating = runner.terminate().then(() => { ended = true; });
       await settle(10);
       t.mock.timers.tick(REVOKE_TIMEOUT_MS + 1000);
@@ -2584,7 +2725,7 @@ test("/terminate leaves a runner document that records another VM", async () => 
     try {
       built.docs.set(runnerPath(PORTAL, USER), { ...runnerDoc(built.docs), microvm_id: "mvm-2", state: "starting" });
       if (!flushed) built.runner.syncer.flushAndVerify = async () => ({ ok: false, reason: "sync incomplete" });
-      const lines = await captured(() => built.runner.terminate().catch(() => {}));
+      const lines = await captureLog(() => built.runner.terminate().catch(() => {}));
       assert.equal(runnerDoc(built.docs).microvm_id, "mvm-2");
       assert.equal(runnerDoc(built.docs).state, "starting", flushed ? "not terminated" : "not failed");
       assert.ok(lines.some((l) => l.event === "terminate.runner_doc_skipped"));
@@ -2594,49 +2735,24 @@ test("/terminate leaves a runner document that records another VM", async () => 
   }
 });
 
-test("a claim that lands while /terminate is under way starts no heartbeat", async () => {
-  const g = gate((p, fields) => p.includes("/results/") && fields.status === "running");
-  let revoked;
-  const built = build({
-    wrapStore: g.wrap,
-    revoke: () => new Promise((r) => { revoked = r; }),
-    stepOverrides: { runPackage: () => new Promise(() => {}) }
+for (const [outcome, end] of [
+  ["finishes", (step) => step.resolve({ display: "x", summary: "y" })],
+  ["fails", (step) => step.reject(new Error("package exited 1"))]
+]) {
+  test(`a run that ${outcome} after /terminate leaves the hook's failure as the last word`, async () => {
+    let step;
+    const built = build({ stepOverrides: { runPackage: () => new Promise((resolve, reject) => { step = { resolve, reject }; }) } });
+    built.fn.queue({ identity: SLOW });
+    await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
+    await until(() => step, "the package step");
+    await built.runner.terminate();
+    end(step);
+    await settle(20);
+    assert.equal(result(built.docs, SLOW).status, "failed");
+    assert.equal(result(built.docs, SLOW).error, LOST_RUN_REASON);
+    assert.equal(built.docs.get(scopePath(PORTAL, CLASS, USER)), undefined, "no counts written after the hook");
   });
-  built.fn.queue({ identity: SLOW });
-  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
-  await until(() => g.held.length, "the claim's write");
-  const terminating = built.runner.terminate();
-  await until(() => revoked, "the revocation");
-  g.held[0].release();
-  await settle(20);
-  revoked();
-  await terminating;
-  assert.equal(runnerDoc(built.docs).state, "terminated");
-  assert.ok(!writesTo(built.record, runnerPath(PORTAL, USER)).some((w) => w.state === "running"), "no running write once the VM is terminating");
-  assert.equal(built.record.timers.length, 0, "no heartbeat starts once the VM is terminating");
-});
-
-test("a run that finishes after /terminate leaves the hook's failure as the last word", async () => {
-  const { built, finish } = await holding();
-  await built.runner.terminate();
-  finish();
-  await settle(20);
-  assert.equal(result(built.docs, SLOW).status, "failed");
-  assert.equal(result(built.docs, SLOW).error, LOST_RUN_REASON);
-  assert.equal(built.docs.get(scopePath(PORTAL, CLASS, USER)), undefined, "no counts written after the hook");
-});
-
-test("a run that fails after /terminate leaves the hook's failure as the last word", async () => {
-  let fail;
-  const built = build({ stepOverrides: { runPackage: () => new Promise((_, reject) => { fail = reject; }) } });
-  built.fn.queue({ identity: SLOW });
-  await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
-  await until(() => fail, "the package step");
-  await built.runner.terminate();
-  fail(new Error("package exited 1"));
-  await settle(20);
-  assert.equal(result(built.docs, SLOW).error, LOST_RUN_REASON);
-});
+}
 
 test("a /terminate during the finished run's counts write leaves the hook's failure as the last word", async () => {
   const held = [];
@@ -2684,16 +2800,9 @@ test("a refused revocation does not fail the terminate hook", async () => {
 
 // Losing the VM is strictly worse than a status document that lags.
 test("a status write that fails does not fail the hook, and the next write reports it redacted", async () => {
-  const docs = new Map();
   let fail = false;
-  const built = build({
-    makeStore: () => {
-      const store = new MemoryStore({ docs });
-      const merge = store.merge.bind(store);
-      store.merge = async (p, fields) => { if (fail && p.includes("/runners/")) throw new Error("UNAVAILABLE for Bearer abc.def.ghi"); return merge(p, fields); };
-      return store;
-    }
-  });
+  const built = build({ wrapStore: refusingMerges((p) => fail && p.includes("/runners/"), "UNAVAILABLE for Bearer abc.def.ghi") });
+  const { docs } = built;
   await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
   await built.runner.loop;
   fail = true;
@@ -2742,15 +2851,16 @@ test("in S3 mode /run fetches the broker's credentials before its first S3 call"
     makePackageBackend: () => ({ async get() {} }),
     unzip: async () => {},
     netGuard: async () => ({}),
+    revokeReportServerToken: async () => {},
     steps: steps({ resolved: [], prepared: [], manifests: {} }),
     sleep: async () => {},
     now: (() => { let t = Date.now(); return () => (t += 60_000); })(),
     processEnv: disableDefaultCredentialChain({ AWS_ACCESS_KEY_ID: "AKIA-EXECUTION-ROLE" })
   });
-  const lines = await captured(async () => {
+  const lines = await captureLog(async () => {
     await runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
   });
-  runner.terminate().catch(() => {});
+  await runner.terminate();
   const first = events.indexOf("ListObjectsV2Command");
   assert.ok(first > 0);
   assert.equal(events[0], "storage-credentials", "no other call to the function comes first");
@@ -2794,22 +2904,10 @@ test("DIR mode fetches packages from <SYNC_DIR>/packages/<identity>", async () =
 
 // ---- the logs --------------------------------------------------------------------
 
-async function captured(fn) {
-  const lines = [];
-  const original = process.stdout.write;
-  process.stdout.write = (chunk) => { lines.push(String(chunk)); return true; };
-  try {
-    await fn();
-  } finally {
-    process.stdout.write = original;
-  }
-  return lines.flatMap((l) => l.split("\n")).filter(Boolean).map((l) => JSON.parse(l));
-}
-
 test("every line of a run names the researcher, the VM, the scope and the package, and none after it", async () => {
   const built = build();
   built.fn.queue({ identity: "users/136/class-counts" });
-  const lines = await captured(async () => {
+  const lines = await captureLog(async () => {
     await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
     await built.runner.loop;
   });
@@ -2830,22 +2928,14 @@ test("every line of a run names the researcher, the VM, the scope and the packag
 
 // The names a log-based metric would count, one per failure the runner reports.
 test("each failure the runner reports is logged under its stable event name", async () => {
-  // The stores share the document tree the fake function reads, set once it exists.
-  let docs;
   let failWrites = false;
   const built = build({
     stepOverrides: { runPackage: async () => { throw new Error("package exited 1"); } },
     revoke: async () => { throw new Error("report-server answered 500"); },
-    makeStore: () => {
-      const store = new MemoryStore({ docs });
-      const merge = store.merge.bind(store);
-      store.merge = async (p, fields) => { if (failWrites && p.includes("/runners/")) throw new Error("UNAVAILABLE"); return merge(p, fields); };
-      return store;
-    }
+    wrapStore: refusingMerges((p) => failWrites && p.includes("/runners/"), "UNAVAILABLE")
   });
-  docs = built.docs;
   built.fn.queue({ identity: "users/1/broken" });
-  const lines = await captured(async () => {
+  const lines = await captureLog(async () => {
     await built.runner.run({ microvmId: "mvm-1", runHookPayload: PAYLOAD });
     await built.runner.loop;
     failWrites = true;

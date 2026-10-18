@@ -3,9 +3,10 @@
 // fetch and child_process, and nothing else, so it runs from a fresh checkout with
 // `node smoke/smoke.mjs <command>` in runner/.
 //
-//   build  [--any <pattern>]... [--version <v>] [--hold <seconds>]
-//          the smoke package's zip, reproducibly, and its checksum; --hold makes the package
-//          sleep that long after its checks and declare that much longer
+//   build  --any <pattern>... [--version <v>] [--hold <seconds>]
+//          the smoke package's zip, reproducibly, and its checksum, applying only to classes
+//          that match a pattern; --hold makes the package sleep that long after its checks
+//          and declare that much longer
 //   image  --class-id <id> --class-hash <hash> [--portal <host>]
 //          builds the image and runs the smoke package inside it, against staging's
 //          report-server, as the researcher whose token is in RD_SMOKE_REPORT_SERVER_TOKEN
@@ -26,6 +27,7 @@ import { resultPath, runnerPath } from "../server/status.js";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PACKAGE = path.join(HERE, "package");
 const STAGING_PORTAL = "learn.portal.staging.concord.org";
+const RUNNER_READ_TIMEOUT_MS = 30_000;
 // The marker the smoke package writes into its display, read from it rather than repeated.
 const MARKER = fs.readFileSync(path.join(PACKAGE, "run.py"), "utf8").match(/^MARKER = "([^"]+)"$/m)?.[1] ?? fail("run.py defines no MARKER");
 
@@ -72,6 +74,8 @@ function fail(message) {
 // A reproducible archive: the package's files in sorted order with fixed timestamps, so
 // the same package always has the same checksum.
 function build(opts) {
+  // A manifest with no patterns applies to every class, and this archive exists to be published.
+  if (!opts.any.length) fail("--any <pattern> is required: without one the package is offered to every class");
   const hold = opts.hold === undefined ? undefined : positiveInteger(opts, "hold");
   const manifest = JSON.parse(fs.readFileSync(path.join(PACKAGE, "manifest.json"), "utf8"));
   if (opts.version !== undefined && !VERSION.test(opts.version)) fail(`--version ${opts.version} is not a catalog version`);
@@ -84,15 +88,13 @@ function build(opts) {
     if (entry.isFile() && !entry.name.endsWith(".pyc")) fs.copyFileSync(path.join(PACKAGE, entry.name), path.join(staged, entry.name));
   }
   const built = { ...manifest };
-  if (opts.any.length) built.urls = { any: opts.any };
+  built.urls = { any: opts.any };
   if (opts.version) built.version = opts.version;
   if (hold !== undefined) {
     built.expected_duration_seconds += hold;
     fs.writeFileSync(path.join(staged, "hold.txt"), `${hold}\n`);
   }
-  if (opts.any.length || opts.version || hold !== undefined) {
-    fs.writeFileSync(path.join(staged, "manifest.json"), `${JSON.stringify(built, null, 2)}\n`);
-  }
+  fs.writeFileSync(path.join(staged, "manifest.json"), `${JSON.stringify(built, null, 2)}\n`);
   const files = fs.readdirSync(staged).sort();
   const fixed = new Date("2020-01-01T00:00:00Z");
   for (const file of files) fs.utimesSync(path.join(staged, file), fixed, fixed);
@@ -110,6 +112,7 @@ function build(opts) {
 // Before any stack exists: the image's toolchain, cc-data and report-server's columns.
 function image(opts) {
   need(opts, "classId", "classHash");
+  const classId = positiveInteger(opts, "classId");
   matching(opts, "classHash", CLASS_HASH, "a class hash of 48 lowercase hex digits");
   matching(opts, "portal", HOSTNAME, "a hostname");
   const token = process.env.RD_SMOKE_REPORT_SERVER_TOKEN ?? fail("RD_SMOKE_REPORT_SERVER_TOKEN is not set");
@@ -118,7 +121,7 @@ function image(opts) {
   const imageName = process.env.IMAGE ?? "researcher-dashboard-runner";
   const platform = process.env.PLATFORM ?? "linux/arm64";
   execFileSync("make", ["build", `IMAGE=${imageName}`, `PLATFORM=${platform}`], { cwd: path.join(HERE, ".."), stdio: "inherit" });
-  const scope = scopeFile({ scope: { kind: "class", id: opts.classHash, classes: [{ class_hash: opts.classHash, class_id: Number(opts.classId) }], assignments: [] }, dataset: "pkg-0", outputDir: "/tmp/out" });
+  const scope = scopeFile({ scope: { kind: "class", id: opts.classHash, classes: [{ class_hash: opts.classHash, class_id: classId }], assignments: [] }, dataset: "pkg-0", outputDir: "/tmp/out" });
   // The cc-data the image was built with, read from the pin rather than written twice.
   const ref = fs.readFileSync(path.join(HERE, "..", "Dockerfile"), "utf8").match(/^ARG CC_DATA_REF=(\S+)$/m)?.[1] ?? fail("the Dockerfile pins no CC_DATA_REF");
   const script = [
@@ -178,10 +181,10 @@ async function stack(opts) {
   let idToken = session.idToken;
   let refreshToken = session.refreshToken;
   let expiresAt = Date.now() + Number(session.expiresIn) * 1000;
-  const freshIdToken = async () => {
+  const freshIdToken = async (signal) => {
     if (expiresAt - Date.now() > 5 * 60_000) return idToken;
     const res = await fetch(`https://securetoken.googleapis.com/v1/token?key=${apiKey}`, {
-      method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, signal,
       body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: refreshToken })
     });
     if (!res.ok) throw new Error(`refreshing the ID token answered ${res.status}: ${await res.text()}`);
@@ -191,8 +194,9 @@ async function stack(opts) {
     expiresAt = Date.now() + Number(refreshed.expires_in) * 1000;
     return idToken;
   };
-  const read = async (docPath) => {
-    const res = await fetch(`https://firestore.googleapis.com/v1/projects/${project}/databases/(default)/documents/${docPath}`, { headers: { Authorization: `Bearer ${await freshIdToken()}` } });
+  // `signal` bounds the token refresh and the read together.
+  const read = async (docPath, signal) => {
+    const res = await fetch(`https://firestore.googleapis.com/v1/projects/${project}/databases/(default)/documents/${docPath}`, { headers: { Authorization: `Bearer ${await freshIdToken(signal)}` }, signal });
     if (res.status === 404) return null;
     if (!res.ok) throw new Error(`reading ${docPath} answered ${res.status}: ${await res.text()}`);
     return res.json();
@@ -204,7 +208,7 @@ async function stack(opts) {
   let lastError = null;
   while (Date.now() < deadline) {
     try {
-      fields = (await read(resultDoc))?.fields ?? null;
+      fields = (await read(resultDoc, AbortSignal.timeout(Math.max(0, deadline - Date.now()))))?.fields ?? null;
       lastError = null;
     } catch (err) {
       lastError = err.message;
@@ -216,7 +220,8 @@ async function stack(opts) {
     await new Promise((r) => setTimeout(r, 10_000));
   }
   console.log();
-  const runner = (await read(runnerPath(portal, uid)).catch((err) => {
+  // Its own limit, since it runs once the deadline has passed.
+  const runner = (await read(runnerPath(portal, uid), AbortSignal.timeout(RUNNER_READ_TIMEOUT_MS)).catch((err) => {
     console.error(err.message);
     return null;
   }))?.fields;

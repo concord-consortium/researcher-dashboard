@@ -5,10 +5,11 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test, { afterEach, beforeEach } from "node:test";
-import { MAX_UNPACKED_BYTES, PackageUnreadable, fetchPackage, inflatedSize, packageDocId, packageKey, readManifest, sha256File } from "../server/package-fetch.js";
+import { MAX_UNPACKED_BYTES, PackageFetchFailed, PackageUnreadable, fetchPackage, inflatedSize, packageDocId, packageKey, readManifest, sha256File } from "../server/package-fetch.js";
 
 let root;
-beforeEach(async () => { root = await mkdtemp(path.join(tmpdir(), "rd-fetch-")); });
+// The real path: macOS's temp directory is under a link.
+beforeEach(async () => { root = fs.realpathSync(await mkdtemp(path.join(tmpdir(), "rd-fetch-"))); });
 afterEach(async () => { await rm(root, { recursive: true, force: true }); });
 
 const IDENTITY = "users/136/class-counts";
@@ -39,6 +40,24 @@ async function checksumOf(contents) {
   fs.writeFileSync(f, contents);
   return sha256File(f);
 }
+
+// A real archive of `files` (relative path to contents, or {link} for a symbolic link),
+// with `modes` (relative path to mode) set before zipping with `flags`, and its checksum.
+async function zipOf(name, files, flags = [], modes = {}) {
+  const dir = path.join(root, `${name}-src`);
+  for (const [rel, contents] of Object.entries(files)) {
+    fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
+    if (typeof contents === "object" && !Buffer.isBuffer(contents)) fs.symlinkSync(contents.link, path.join(dir, rel));
+    else fs.writeFileSync(path.join(dir, rel), contents);
+  }
+  for (const [rel, mode] of Object.entries(modes)) fs.chmodSync(path.join(dir, rel), mode);
+  const archive = path.join(root, `${name}.zip`);
+  execFileSync("zip", ["-q", ...flags, archive, ...fs.readdirSync(dir)], { cwd: dir });
+  const bytes = fs.readFileSync(archive);
+  return { dir, bytes, checksum: await checksumOf(bytes) };
+}
+
+const realUnzip = async (archive, dest) => { execFileSync("unzip", ["-q", "-o", archive, "-d", dest]); };
 
 test("the key is report-server's layout: the identity, then the version", () => {
   assert.equal(packageKey(IDENTITY, "1.0.0"), "users/136/class-counts/1.0.0.zip");
@@ -89,7 +108,7 @@ test("a fetch that fails for any other reason says what it was", async () => {
   const backend = { async get() { throw new Error("storage-credentials answered 502: STS refused"); } };
   await assert.rejects(
     () => fetchPackage({ backend, pkg: { identity: IDENTITY, version: "1.0.0", checksum: "sha256:x" }, workRoot: path.join(root, "work"), unzip: unzipWriting(MANIFEST), measure: small }),
-    (err) => !(err instanceof PackageUnreadable) && /could not be fetched: storage-credentials answered 502: STS refused/.test(err.message)
+    (err) => err instanceof PackageFetchFailed && /could not be fetched: storage-credentials answered 502: STS refused/.test(err.message)
   );
 });
 
@@ -137,6 +156,17 @@ test("an archive that inflates past 50 MiB is refused before anything is unpacke
   assert.equal(unzipped, false);
 });
 
+// fetchPackage's own default, not a limit the test passes in.
+test("an archive that really inflates past 50 MiB is refused by the default measure", { skip: !hasZip() }, async () => {
+  const { bytes, checksum } = await zipOf("over", { "manifest.json": JSON.stringify(MANIFEST), "big.bin": Buffer.alloc(MAX_UNPACKED_BYTES + 1) }, ["-9"]);
+  let unzipped = false;
+  await assert.rejects(
+    () => fetchPackage({ backend: backendWriting(bytes), pkg: { identity: IDENTITY, version: "1.0.0", checksum }, workRoot: path.join(root, "work"), unzip: async () => { unzipped = true; } }),
+    /unpacks to more than 52428800 bytes/
+  );
+  assert.equal(unzipped, false);
+});
+
 test("inflatedSize counts what unzip really produces, and stops at the limit", { skip: !hasZip() }, async () => {
   const dir = path.join(root, "z");
   fs.mkdirSync(dir);
@@ -151,18 +181,10 @@ test("inflatedSize counts what unzip really produces, and stops at the limit", {
 
 // unzip restores a symbolic link as a link, which could point anywhere.
 test("an archive holding a symbolic link is refused and its directory removed", { skip: !hasZip() }, async () => {
-  const dir = path.join(root, "s");
-  fs.mkdirSync(dir);
-  fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify(MANIFEST));
-  fs.writeFileSync(path.join(dir, "run.py"), "");
-  fs.symlinkSync("/etc/passwd", path.join(dir, "link"));
-  execFileSync("zip", ["-q", "-y", path.join(root, "sym.zip"), "manifest.json", "run.py", "link"], { cwd: dir });
-  const bytes = fs.readFileSync(path.join(root, "sym.zip"));
-  const checksum = await checksumOf(bytes);
+  const { bytes, checksum } = await zipOf("sym", { "manifest.json": JSON.stringify(MANIFEST), "run.py": "", link: { link: "/etc/passwd" } }, ["-y"]);
   const workRoot = path.join(root, "work");
-  const unzip = async (archive, dest) => { execFileSync("unzip", ["-q", "-o", archive, "-d", dest]); };
   await assert.rejects(
-    () => fetchPackage({ backend: backendWriting(bytes), pkg: { identity: IDENTITY, version: "1.0.0", checksum }, workRoot, unzip }),
+    () => fetchPackage({ backend: backendWriting(bytes), pkg: { identity: IDENTITY, version: "1.0.0", checksum }, workRoot, unzip: realUnzip }),
     /holds a symbolic link, link/
   );
   assert.ok(!fs.existsSync(path.join(workRoot, "packages", "users__136__class-counts", "1.0.0")));
@@ -170,19 +192,8 @@ test("an archive holding a symbolic link is refused and its directory removed", 
 
 // unzip restores modes from the archive, and every package runs as the same uid.
 test("an unpacked package is writable by no one but root", { skip: !hasZip() }, async () => {
-  const dir = path.join(root, "m");
-  fs.mkdirSync(path.join(dir, "lib"), { recursive: true });
-  fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify(MANIFEST));
-  fs.writeFileSync(path.join(dir, "run.py"), "");
-  fs.writeFileSync(path.join(dir, "lib", "tool.sh"), "");
-  fs.chmodSync(path.join(dir, "run.py"), 0o777);
-  fs.chmodSync(path.join(dir, "lib", "tool.sh"), 0o775);
-  fs.chmodSync(path.join(dir, "lib"), 0o777);
-  execFileSync("zip", ["-q", "-r", path.join(root, "modes.zip"), "manifest.json", "run.py", "lib"], { cwd: dir });
-  const bytes = fs.readFileSync(path.join(root, "modes.zip"));
-  const checksum = await checksumOf(bytes);
-  const unzip = async (archive, dest) => { execFileSync("unzip", ["-q", "-o", archive, "-d", dest]); };
-  const { dir: unpacked } = await fetchPackage({ backend: backendWriting(bytes), pkg: { identity: IDENTITY, version: "1.0.0", checksum }, workRoot: path.join(root, "work"), unzip });
+  const { bytes, checksum } = await zipOf("modes", { "manifest.json": JSON.stringify(MANIFEST), "run.py": "", "lib/tool.sh": "" }, ["-r"], { "run.py": 0o777, "lib/tool.sh": 0o775, lib: 0o777 });
+  const { dir: unpacked } = await fetchPackage({ backend: backendWriting(bytes), pkg: { identity: IDENTITY, version: "1.0.0", checksum }, workRoot: path.join(root, "work"), unzip: realUnzip });
   for (const rel of ["", "run.py", "lib", "lib/tool.sh", "manifest.json"]) {
     const mode = fs.statSync(path.join(unpacked, rel)).mode & 0o777;
     assert.equal(mode & 0o022, 0, `${rel || "the package directory"} is ${mode.toString(8)}`);
@@ -191,18 +202,10 @@ test("an unpacked package is writable by no one but root", { skip: !hasZip() }, 
 });
 
 test("a symbolic link deeper in the archive is refused too", { skip: !hasZip() }, async () => {
-  const dir = path.join(root, "n");
-  fs.mkdirSync(path.join(dir, "lib"), { recursive: true });
-  fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify(MANIFEST));
-  fs.writeFileSync(path.join(dir, "run.py"), "");
-  fs.symlinkSync("/etc/passwd", path.join(dir, "lib", "link"));
-  execFileSync("zip", ["-q", "-y", "-r", path.join(root, "nested.zip"), "manifest.json", "run.py", "lib"], { cwd: dir });
-  const bytes = fs.readFileSync(path.join(root, "nested.zip"));
-  const checksum = await checksumOf(bytes);
+  const { bytes, checksum } = await zipOf("nested", { "manifest.json": JSON.stringify(MANIFEST), "run.py": "", "lib/link": { link: "/etc/passwd" } }, ["-y", "-r"]);
   const workRoot = path.join(root, "work");
-  const unzip = async (archive, dest) => { execFileSync("unzip", ["-q", "-o", archive, "-d", dest]); };
   await assert.rejects(
-    () => fetchPackage({ backend: backendWriting(bytes), pkg: { identity: IDENTITY, version: "1.0.0", checksum }, workRoot, unzip }),
+    () => fetchPackage({ backend: backendWriting(bytes), pkg: { identity: IDENTITY, version: "1.0.0", checksum }, workRoot, unzip: realUnzip }),
     /holds a symbolic link, lib\/link/
   );
   assert.ok(!fs.existsSync(path.join(workRoot, "packages", "users__136__class-counts", "1.0.0")));

@@ -33,7 +33,8 @@ export class S3Backend {
     return (await this.client()).send(command);
   }
 
-  // `body` reads the file the syncer opened and checked; the syncer closes it.
+  // `body` reads exactly `size` bytes of the file the syncer opened and checked, and the
+  // syncer closes it; an empty file's is an empty Buffer.
   async put(relPath, { body, size }) {
     await this.#send(
       new PutObjectCommand({

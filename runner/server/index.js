@@ -136,7 +136,7 @@ export function buildRunner(env) {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   // Before anything else: the runner makes no AWS call on the execution role, and a
-  // client that tries fails here, loudly, naming its cause.
+  // client that tries fails at its first call, loudly, naming its cause.
   disableDefaultCredentialChain();
   const env = loadEnv();
   const runner = buildRunner(env);

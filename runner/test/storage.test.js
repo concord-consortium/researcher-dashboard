@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -75,7 +76,9 @@ test("a client it builds resolves the broker's credentials, whatever the environ
 });
 
 // What makes a leftover default-chain client fail at once, naming its cause, rather than
-// with an AccessDenied from the execution role.
+// with an AccessDenied from the execution role. Credentials sit in the environment and in a
+// shared credentials file first, so the client fails because of the switch, not because
+// the machine running the test has none.
 test("with the default chain switched off, a client built without credentials cannot resolve any", async () => {
   const env = { ...process.env, AWS_ACCESS_KEY_ID: "AKIA", AWS_SECRET_ACCESS_KEY: "x", AWS_PROFILE: "default" };
   disableDefaultCredentialChain(env);
@@ -88,7 +91,11 @@ test("with the default chain switched off, a client built without credentials ca
   for (const name of named) assert.equal(all[name], undefined, name);
   assert.equal(env.AWS_EC2_METADATA_DISABLED, "true");
 
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "rd-chain-"));
+  const credentials = path.join(dir, "credentials");
+  fs.writeFileSync(credentials, "[default]\naws_access_key_id = AKIAFROMTHEFILE\naws_secret_access_key = from-the-file\n");
   const saved = { ...process.env };
+  Object.assign(process.env, { AWS_ACCESS_KEY_ID: "AKIAFROMTHEENVIRONMENT", AWS_SECRET_ACCESS_KEY: "from-the-environment", AWS_SHARED_CREDENTIALS_FILE: credentials, AWS_CONFIG_FILE: path.join(dir, "config") });
   disableDefaultCredentialChain(process.env);
   try {
     const client = new S3Client({ region: "us-east-1" });
@@ -96,6 +103,7 @@ test("with the default chain switched off, a client built without credentials ca
   } finally {
     for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k];
     Object.assign(process.env, saved);
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 
@@ -123,7 +131,6 @@ test("credentials are fetched on first use and reused until near their expiry", 
   assert.equal(fetched, 2, "checked against the wall clock at the moment of use");
 });
 
-// A suspended VM's clock cannot be trusted to have moved, so a resume forces a fetch.
 test("a resume marks the credentials stale whatever the clock says", async () => {
   let fetched = 0;
   const creds = new StorageCredentials({ bucket: "researcher-dashboard-runner-staging", prefix: "researchers/439/", fetchCredentials: async () => { fetched += 1; return ANSWER(); }, makeClient: () => ({}) });
@@ -163,8 +170,15 @@ test("concurrent uses share one fetch", async () => {
 });
 
 test("credentials for another bucket or prefix are refused, not used", async () => {
-  for (const over of [{ bucket: "another-bucket" }, { prefix: "researchers/999/" }, { expiration: "soon" }]) {
-    const creds = new StorageCredentials({ bucket: "researcher-dashboard-runner-staging", prefix: "researchers/439/", fetchCredentials: async () => ANSWER(over), makeClient: () => ({}) });
-    await assert.rejects(() => creds.client(), /not|is not a time/);
+  const cases = [
+    [{ bucket: "another-bucket" }, /for bucket another-bucket, not researcher-dashboard-runner-staging$/],
+    [{ prefix: "researchers/999/" }, /for researchers\/999\/, not researchers\/439\/$/],
+    [{ expiration: "soon" }, /expiration soon is not a time$/]
+  ];
+  for (const [over, reason] of cases) {
+    let made = 0;
+    const creds = new StorageCredentials({ bucket: "researcher-dashboard-runner-staging", prefix: "researchers/439/", fetchCredentials: async () => ANSWER(over), makeClient: () => { made += 1; return {}; } });
+    await assert.rejects(() => creds.client(), reason);
+    assert.equal(made, 0, "no client is built from refused credentials");
   }
 });

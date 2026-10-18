@@ -1,10 +1,10 @@
-import { log, setContext, timed } from "./log.js";
+import { log, redact, setContext, timed } from "./log.js";
 import { VM_LIFE_SECONDS, defaultChainState, parseRunHookPayload, researcherPrefix } from "./config.js";
 import { verifySandbox } from "./sandbox.js";
 import { STATES, VmState, canTransition } from "./state.js";
 import { ClassDocuments, RunnerStatus, bounded } from "./status.js";
 import { askApplies, revokeOwnToken } from "./report-server.js";
-import { CHECKSUM, declaresPatterns, IDENTITY, PACKAGE_DOC_ID, VERSION, packageDocId } from "./package-fetch.js";
+import { CHECKSUM, declaresPatterns, IDENTITY, PACKAGE_DOC_ID, PackageFetchFailed, VERSION, packageDocId } from "./package-fetch.js";
 
 const EIGHT_HOURS_MS = VM_LIFE_SECONDS * 1000;
 // Kept back from the window for the last flush and the /terminate hook at the VM's cap.
@@ -17,9 +17,10 @@ export const LAUNCH_RECORD_WINDOW_MS = 60_000;
 export const LAUNCH_RETRY_MS = 5_000;
 export const CLAIM_ATTEMPTS = 3;
 export const TOKEN_TIMEOUT_MS = 15_000;
-// The report-server revocation in /terminate, inside the hook's 60 seconds.
+// The report-server revocation in /terminate, and in a /suspend whose flush failed, inside
+// the hook's 60 seconds.
 export const REVOKE_TIMEOUT_MS = 10_000;
-// Stopping the package in /suspend, inside the hook's 60 seconds.
+// Stopping the package in /suspend and /terminate, inside the hook's 60 seconds.
 export const FREEZE_TIMEOUT_MS = 10_000;
 // How long a package past its bound has, once killed, for its step to end.
 export const PACKAGE_END_TIMEOUT_MS = 10_000;
@@ -91,9 +92,12 @@ export class Runner {
   #run = null;
   // This request's session: the store the status document is written through.
   #session = null;
-  // This request's class stores, by class hash. Never kept past the next /work.
+  // This request's class stores, by class hash. Replaced by the next adopted /work answer,
+  // except one a running package still writes through.
   #classStores = new Map();
-  // Each resume starts a new epoch; a loop or a call from an earlier one stands down.
+  // Each resume, and each hook that ends the VM, starts a new epoch; a loop or a call from
+  // an earlier one stands down. A successful /suspend starts none: the loop's runner-document
+  // writes are conditional on no suspend having begun, and a claim it makes waits for the resume.
   #epoch = 0;
   #loop = null;
   #expiresAt = null;
@@ -112,15 +116,16 @@ export class Runner {
   // A hook's last runner-document write is made only while the document still records
   // this VM: a VM launched since owns it now.
   #ownDocument = (doc) => doc?.microvm_id === this.microvmId;
-  // Failed claim attempts per queued entry, for this awake period: cleared when the
-  // entry's result is written and on every resume.
+  // Failed claim attempts per queued entry, for this awake period: cleared once the entry
+  // is claimed or written refused, and on every resume.
   #claimFailures = new Map();
   // Verified manifests, or the fetch under way, by identity, version and checksum, which
   // never change for the VM's life, so a re-plan does not fetch and unpack the archive again.
   #manifests = new Map();
   // report-server's yes for a class, identity and version, for this awake period.
   #applies = new Set();
-  // The last state the loop wrote, so an idle poll does not rewrite an unchanged document.
+  // The last state the loop wrote, with the drained ready's queue, so an idle poll does not
+  // rewrite an unchanged document.
   #lastWritten = null;
 
   constructor({ env, makeStore, makeSyncer, makePackageBackend, makeStorage = () => null, makeFunctionClient, steps, unzip, startEgress, netGuard = verifySandbox, revokeReportServerToken = revokeOwnToken, askAppliesRoute = askApplies, now = () => Date.now(), sleep = sleepFor, startTimer = everyInterval, processEnv = process.env }) {
@@ -260,7 +265,7 @@ export class Runner {
     this.#readyAt = this.now();
     await this.status.writeFromHook("run", { state: STATES.READY, scopes: await this.#heldScopes() });
 
-    // The queue is asked for once /run has answered Lambda, which gives it 60 seconds.
+    // Started as /run answers, without waiting on the loop: Lambda gives /run 60 seconds.
     this.#startLoop({ afterResume: false });
     return { state: this.#vm.state };
   }
@@ -307,13 +312,64 @@ export class Runner {
     return epoch === this.#epoch && !this.#vm.isTerminal && !this.#terminating;
   }
 
+  // A runner-document write from the loop, which commits only while its epoch is current and
+  // no /suspend has begun: tested in the write's transaction, so one sent before the hook
+  // cannot land over the hook's own.
+  #loopWrite(epoch, fields) {
+    return this.status.writeFromHook("work", fields, {
+      onlyIf: () => this.#current(epoch) && this.#vm.state !== STATES.SUSPENDING && this.#vm.state !== STATES.SUSPENDED
+    });
+  }
+
   // Asks for work, runs it one package at a time, asking again after each, and once
   // nothing is left, keeps asking through the idle period before asking to be
-  // suspended. Every answer from an earlier epoch is ignored.
+  // suspended. A loop stands down once its epoch has passed.
   async #workLoop(epoch, afterResume) {
     let force = afterResume;
     let idleSince = null;
     let refreshed = !afterResume;
+    // One poll that ran nothing, whether /work found nothing or a call failed: the idle
+    // period counts both, so a failure that keeps repeating still reaches /idle. Answers
+    // whether the loop ends.
+    const idleTurn = async () => {
+      idleSince ??= this.now();
+      if (this.now() - idleSince < this.env.idlePeriodMs) {
+        await this.sleep(this.env.idlePollMs);
+        return false;
+      }
+      // The flush the /suspend hook would make, made first, so no suspend depends on the
+      // hook being delivered.
+      const flushed = await this.syncer.flushAndVerify("idle");
+      if (!this.#current(epoch)) return true;
+      if (!flushed.ok) {
+        log.error("sync.failed", { hook: "idle", error: flushed.reason });
+        idleSince = this.now();
+        return false;
+      }
+      let idle;
+      try {
+        idle = await this.#call("idle", { microvm_id: this.microvmId });
+      } catch (err) {
+        if (!this.#current(epoch)) return true;
+        log.warn("idle.failed", { status: err.status ?? null, error: err.message });
+        idleSince = this.now();
+        return false;
+      }
+      if (!this.#current(epoch)) return true;
+      if (idle.work_queued) {
+        idleSince = null;
+        return false;
+      }
+      if (idle.suspended) {
+        log.info("idle.suspended", {});
+        return true;
+      }
+      // Declined without work to hand out, most often a run still recorded as running
+      // here: wait out another idle period rather than asking again at once.
+      log.warn("idle.declined", { answer: idle });
+      idleSince = this.now();
+      return false;
+    };
     while (this.#current(epoch)) {
       let answer;
       try {
@@ -322,7 +378,8 @@ export class Runner {
         if (!this.#current(epoch)) return;
         const launching = err.status === 409 && this.now() - this.#readyAt < LAUNCH_RECORD_WINDOW_MS;
         log.warn("work.failed", { status: err.status ?? null, error: err.message, retry_in_ms: launching ? LAUNCH_RETRY_MS : this.env.idlePollMs });
-        await this.sleep(launching ? LAUNCH_RETRY_MS : this.env.idlePollMs);
+        if (launching) await this.sleep(LAUNCH_RETRY_MS);
+        else if (await idleTurn()) return;
         continue;
       }
       if (!this.#current(epoch)) return;
@@ -333,7 +390,7 @@ export class Runner {
         request = await this.#adopt(answer, epoch);
       } catch (err) {
         log.error("work.token_refused", { error: err.message });
-        await this.sleep(this.env.idlePollMs);
+        if (await idleTurn()) return;
         continue;
       }
 
@@ -342,7 +399,7 @@ export class Runner {
       // A run held across the suspend reads running again, unless its final write is under way.
       if (this.#run && !this.#run.finishing && this.#vm.state === STATES.READY) {
         this.#vm.to(STATES.RUNNING);
-        await this.status.writeFromHook("work", { state: STATES.RUNNING, ...this.#runningPackage() });
+        await this.#loopWrite(epoch, { state: STATES.RUNNING, ...this.#runningPackage() });
         if (!this.#current(epoch)) return;
       }
 
@@ -355,7 +412,7 @@ export class Runner {
           if (this.storage) await this.storage.client();
         } catch (err) {
           log.error("storage.credentials_failed", { error: err.message });
-          await this.sleep(this.env.idlePollMs);
+          if (await idleTurn()) return;
           continue;
         }
         if (!this.#current(epoch)) return;
@@ -368,57 +425,22 @@ export class Runner {
         continue;
       }
 
-      const next = await this.#plan(request, epoch);
-      if (!this.#current(epoch)) return;
-      if (next) {
+      const plan = await this.#plan(request, epoch);
+      if (!plan || !this.#current(epoch)) return;
+      if (plan.next) {
         idleSince = null;
         // A claim that could not be written is tried again after one idle poll, not at once.
-        if (!(await this.#runPackage(request, next, epoch))) await this.sleep(this.env.idlePollMs);
+        if (!(await this.#runPackage(plan, epoch))) await this.sleep(this.env.idlePollMs);
         continue;
       }
 
-      if (this.#lastWritten !== STATES.READY) {
-        const written = await this.status.writeFromHook("work", { state: STATES.READY, current_package: null, queue: [], error: null });
-        if (written && this.#current(epoch)) this.#lastWritten = STATES.READY;
+      const ready = `${STATES.READY} ${JSON.stringify(plan.queue)}`;
+      if (this.#lastWritten !== ready) {
+        const written = await this.#loopWrite(epoch, { state: STATES.READY, current_package: null, queue: plan.queue, error: null });
+        if (written && this.#current(epoch)) this.#lastWritten = ready;
       }
       if (this.#vm.state === STATES.RUNNING) this.#vm.to(STATES.READY);
-      idleSince ??= this.now();
-      if (this.now() - idleSince < this.env.idlePeriodMs) {
-        await this.sleep(this.env.idlePollMs);
-        continue;
-      }
-
-      // The flush the /suspend hook would make, made first, so no suspend depends on the
-      // hook being delivered.
-      const flushed = await this.syncer.flushAndVerify("idle");
-      if (!this.#current(epoch)) return;
-      if (!flushed.ok) {
-        log.error("sync.failed", { hook: "idle", error: flushed.reason });
-        idleSince = this.now();
-        continue;
-      }
-      let idle;
-      try {
-        idle = await this.#call("idle", { microvm_id: this.microvmId });
-      } catch (err) {
-        if (!this.#current(epoch)) return;
-        log.warn("idle.failed", { status: err.status ?? null, error: err.message });
-        idleSince = this.now();
-        continue;
-      }
-      if (!this.#current(epoch)) return;
-      if (idle.work_queued) {
-        idleSince = null;
-        continue;
-      }
-      if (idle.suspended) {
-        log.info("idle.suspended", {});
-        return;
-      }
-      // Declined without work to hand out, most often a run still recorded as running
-      // here: wait out another idle period rather than asking again at once.
-      log.warn("idle.declined", { answer: idle });
-      idleSince = this.now();
+      if (await idleTurn()) return;
     }
   }
 
@@ -468,10 +490,10 @@ export class Runner {
     });
   }
 
-  // Everything that can refuse a package without running it, for every package in the
-  // answer, in order: the catalog grammar, its class's store and scope, the fetch and
-  // checksum, the manifest, the ceiling, applicability and the window. A refused package
-  // is written `failed`, never `running`. Returns the first package to run, if any.
+  // Refuses, written failed and never running, every package the answer holds that cannot
+  // run; an entry with no class store, no usable result id, or CLAIM_ATTEMPTS failed
+  // attempts cannot be written and stays queued. Returns {next, queue}, or null once the
+  // epoch has passed.
   async #plan(request, epoch) {
     const candidates = [];
     // Entries this plan wrote `failed`, which are no longer queued.
@@ -480,7 +502,10 @@ export class Runner {
       // A resume stands this plan down: the new loop's plan decides, with its own stores.
       if (!this.#current(epoch)) return null;
       const store = request.classStores.get(entry.class_hash);
-      if (!store) continue;
+      if (!store) {
+        log.error("package.skipped", { scope: entry.class_hash, package: entry.identity, error: "no class store for this class" });
+        continue;
+      }
       if ((this.#claimFailures.get(this.#claimKey(entry)) ?? 0) >= CLAIM_ATTEMPTS) continue;
       const docs = this.#docs(entry.class_hash, store);
       const pkg = { identity: entry.identity, version: entry.version, checksum: entry.checksum };
@@ -489,7 +514,7 @@ export class Runner {
       if (!IDENTITY.test(entry.identity ?? "") || !VERSION.test(entry.version ?? "") || !CHECKSUM.test(entry.checksum ?? "")
           || !Number.isInteger(entry.catalog_id) || entry.catalog_id < 1) {
         if (PACKAGE_DOC_ID.test(docIdOf(entry) ?? "")) await refuse("the queued package does not match the catalog's grammar");
-        else log.error("package.refused", { error: `unusable identity ${entry.identity} and package key ${entry.package_key}` });
+        else log.error("package.skipped", { scope: entry.class_hash, error: `unusable identity ${entry.identity} and package key ${entry.package_key}` });
         continue;
       }
       const docId = packageDocId(entry.identity);
@@ -516,7 +541,11 @@ export class Runner {
       try {
         manifest = await this.#manifests.get(archiveKey);
       } catch (err) {
-        await refuse(err.message);
+        if (!this.#current(epoch)) return null;
+        // A failed fetch is tried again at the next poll, as a failed applies check is; an
+        // archive refused for what it holds fails at once.
+        if (err instanceof PackageFetchFailed) await this.#countOrRefuse({ entry, docs, pkg, resolved, epoch }, err, err.message);
+        else await refuse(err.message);
         continue;
       }
       if (!this.#current(epoch)) return null;
@@ -545,10 +574,8 @@ export class Runner {
           log.warn("report_server.refused", { call: "applies", scope: entry.class_hash, package: entry.identity, status: err.status ?? null, error: err.message });
           if (err.refusal) {
             await refuse(`report-server would not check this package against this class: ${err.message}`);
-          } else if (this.#noteClaimFailure(entry, err, epoch) >= CLAIM_ATTEMPTS) {
-            // Left queued, the package would keep the VM awake until its cap, since /idle
-            // declines to suspend while work is queued.
-            await refuse(`report-server could not say whether the package applies to this class (${err.message}); run it again`);
+          } else {
+            await this.#countOrRefuse({ entry, docs, pkg, resolved, epoch }, err, `report-server could not say whether the package applies to this class (${err.message})`);
           }
           continue;
         }
@@ -583,7 +610,12 @@ export class Runner {
       }
       runnable ??= candidate;
     }
-    return runnable && { ...runnable, resolved };
+    if (!this.#current(epoch)) return null;
+    // Still queued, as the runner document lists it: every entry this plan did not write refused.
+    const queue = request.packages
+      .filter((p) => !resolved.has(this.#claimKey(p)) && PACKAGE_DOC_ID.test(docIdOf(p) ?? ""))
+      .map((p) => ({ class_hash: p.class_hash, package_key: docIdOf(p) }));
+    return { next: runnable, queue };
   }
 
   // A package refused before any claim: logged, and written failed with the reason. A
@@ -592,13 +624,22 @@ export class Runner {
     if (!this.#current(epoch)) return;
     log.warn("package.refused", { scope: entry.class_hash, package: entry.identity, error });
     try {
-      await bounded(docs.failed(docIdOf(entry), { pkg, error }));
+      await bounded(docs.refused(docIdOf(entry), { pkg, error }));
       this.#resolved(entry, resolved);
       // The function listed it in the status document's queue, so a drained VM writes
       // ready again to take it off.
       this.#lastWritten = null;
     } catch (err) {
       this.#noteClaimFailure(entry, err, epoch);
+    }
+  }
+
+  // A failure that may pass counts as an attempt, and the last attempt writes the entry
+  // refused: left queued, it would keep the VM awake until its cap, since /idle declines to
+  // suspend while work is queued.
+  async #countOrRefuse({ entry, docs, pkg, resolved, epoch }, err, reason) {
+    if (this.#noteClaimFailure(entry, err, epoch) >= CLAIM_ATTEMPTS) {
+      await this.#refuse({ entry, docs, pkg, error: `${reason}; run it again`, resolved, epoch });
     }
   }
 
@@ -643,8 +684,8 @@ export class Runner {
     return this.#run ? { current_package: this.currentPackage } : {};
   }
 
-  async #runPackage(request, next, epoch) {
-    const { entry, pkg, docId, docs, store, scope, manifest, declared, resolved } = next;
+  async #runPackage({ next, queue }, epoch) {
+    const { entry, pkg, docId, docs, store, scope, manifest, declared } = next;
     let resolveDone;
     this.#run = { docId, classHash: entry.class_hash, store, docs, pkg, done: new Promise((r) => { resolveDone = r; }) };
     setContext({ scope: entry.class_hash, package: entry.identity });
@@ -652,26 +693,23 @@ export class Runner {
       try {
         await docs.claim(docId, { pkg, imageVersion: this.env.imageVersion, microvmId: this.microvmId, expectedDurationSeconds: declared, heartbeatSeconds: HEARTBEAT_SECONDS });
       } catch (err) {
-        this.#noteClaimFailure(entry, err, epoch);
+        await this.#countOrRefuse({ entry, docs, pkg, epoch }, err, `the runner could not record its claim on this package (${err.message})`);
         return false;
       }
       this.#resolved(entry);
-      // The VM is ending: the hook has written this run failed and the runner document
-      // terminated, which may by now name a newer VM, so nothing more is written or run.
+      // The VM is ending: the hook writes this run failed and the runner document terminated,
+      // which may by now name a newer VM, so nothing more is written or run.
       if (this.#terminating) return true;
       // A claim that lands while /suspend runs leaves the hook's state standing until the resume.
       if (this.#vm.state !== STATES.RUNNING && canTransition(this.#vm.state, STATES.RUNNING)) this.#vm.to(STATES.RUNNING);
-      // What is still queued: not the claimed entry, nor one this plan failed.
-      const queue = request.packages
-        .filter((p) => this.#claimKey(p) !== this.#claimKey(entry) && !resolved.has(this.#claimKey(p)))
-        .filter((p) => PACKAGE_DOC_ID.test(docIdOf(p) ?? ""))
-        .map((p) => ({ class_hash: p.class_hash, package_key: docIdOf(p) }));
       this.#lastWritten = STATES.RUNNING;
-      await this.status.writeFromHook("work", {
+      // Skipped while /suspend runs: the hook's writes name this run, and the resume's
+      // cycle writes it running.
+      await this.#loopWrite(epoch, {
         state: STATES.RUNNING,
         current_package: this.currentPackage,
         error: null,
-        queue,
+        queue: queue.filter((p) => p.class_hash !== entry.class_hash || p.package_key !== docId),
         scopes: await this.#heldScopes(entry.class_hash)
       });
       // A /terminate that arrived during that write leaves the run to the hook, unstarted.
@@ -703,8 +741,8 @@ export class Runner {
       const running = this.#steps({ entry, docId, docs, scope, manifest, signal: abort.signal, cancelled: () => timedOut });
       try {
         const result = await Promise.race([running, timeout]).finally(() => { this.#run.finishing = true; });
-        // /terminate has written this run failed, the last word on it: what the package
-        // left after the hook's flush was never synced.
+        // /terminate's failure write is the last word on this run: what the package left
+        // after the hook's flush was never synced.
         if (this.#terminating) return true;
         try {
           await docs.counts(result.counts);
@@ -814,20 +852,12 @@ export class Runner {
     this.#run?.bound?.pause();
     await this.status.writeFromHook("suspend", { state: STATES.SUSPENDING, ...this.#runningPackage() });
     // A package still writing would fail the verify, so it is stopped where it stands
-    // until /resume. One that cannot be stopped is left to the verify.
-    if (this.#run) {
-      this.#frozen = true;
-      this.#freezing = this.steps.freezePackageProcesses({ uid: this.env.packageUid });
-      try {
-        await bounded(this.#freezing, FREEZE_TIMEOUT_MS, "stopping the package");
-      } catch (err) {
-        log.error("package.freeze_failed", { error: err.message });
-      }
-    }
+    // until /resume.
+    await this.#freezePackage();
     this.syncer.stop();
 
-    // The one hook result that is allowed to fail: a suspend on a sync that cannot be
-    // proven is exactly what this contract exists to refuse.
+    // A suspend on a sync that cannot be proven is exactly what this contract exists to
+    // refuse, so this hook answers 500 then, as /terminate does.
     const result = await this.syncer.flushAndVerify("suspend");
     if (!result.ok) {
       log.error("sync.failed", { hook: "suspend", error: result.reason });
@@ -839,7 +869,7 @@ export class Runner {
       await this.#failOutstandingRun("suspend");
       await this.#revokeToken("suspend");
       this.#vm.to(STATES.FAILED);
-      await this.status.writeFromHook("suspend", { state: STATES.FAILED, error: result.reason, ...this.#runningPackage() }, { onlyIf: this.#ownDocument });
+      await this.status.writeFromHook("suspend", { state: STATES.FAILED, error: redact(result.reason), ...this.#runningPackage() }, { onlyIf: this.#ownDocument });
       throw new HookError(500, result.reason);
     }
     this.#vm.to(STATES.SUSPENDED);
@@ -884,24 +914,39 @@ export class Runner {
     this.#terminating = true;
     this.#epoch += 1;
     this.#wakeClaims();
-    // First, so it lands inside the hook's 60 seconds whatever the flush costs: a run
-    // outstanding at termination was interrupted, whether or not the flush completes.
+    // First, and bounded, so it is sent before whatever the flush costs: a run outstanding
+    // at termination was interrupted, whether or not the flush completes.
     await this.#failOutstandingRun("terminate");
     // Before the sync, because the sync can fail the hook and the credential should
     // stop working whether or not the data made it out.
     await this.#revokeToken("terminate");
+    // The VM's last flush has no next scan to repair a file the package was still writing.
+    await this.#freezePackage();
 
     this.syncer.stop();
     const result = await this.syncer.flushAndVerify("terminate");
     if (!result.ok) {
       if (this.#vm.state !== STATES.FAILED) this.#vm.to(STATES.FAILED);
       log.error("sync.failed", { hook: "terminate", error: result.reason });
-      await this.status.writeFromHook("terminate", { state: STATES.FAILED, error: result.reason, ...this.#runningPackage() }, { onlyIf: this.#ownDocument });
+      await this.status.writeFromHook("terminate", { state: STATES.FAILED, error: redact(result.reason), ...this.#runningPackage() }, { onlyIf: this.#ownDocument });
       throw new HookError(500, result.reason);
     }
     this.#vm.to(STATES.TERMINATED);
     await this.status.writeFromHook("terminate", { state: STATES.TERMINATED, ...this.#runningPackage() }, { onlyIf: this.#ownDocument });
     return { state: this.#vm.state, ...result };
+  }
+
+  // Stops the outstanding run's processes where they stand, until /resume continues them.
+  // One that cannot be stopped is left to the verify.
+  async #freezePackage() {
+    if (!this.#run || this.#frozen) return;
+    this.#frozen = true;
+    this.#freezing = this.steps.freezePackageProcesses({ uid: this.env.packageUid });
+    try {
+      await bounded(this.#freezing, FREEZE_TIMEOUT_MS, "stopping the package");
+    } catch (err) {
+      log.error("package.freeze_failed", { error: err.message });
+    }
   }
 
   #wakeClaims() {
@@ -915,6 +960,7 @@ export class Runner {
     const { docs, docId, pkg } = this.#run;
     // No wait for a beat in flight: one store sends its writes in order.
     this.#run.heartbeat?.cancel();
+    this.#run.bound?.end();
     try {
       await bounded(docs.failed(docId, { pkg, error: LOST_RUN_REASON }));
     } catch (err) {

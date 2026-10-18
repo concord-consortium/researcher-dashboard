@@ -61,6 +61,10 @@ export function nameOf(identity) {
 // taken to mean more than the other.
 export class PackageUnreadable extends Error {}
 
+// The broker, S3 or the network failing during the fetch, which a later attempt may not
+// meet. Every other refusal here is the archive's own and fails the same way every time.
+export class PackageFetchFailed extends Error {}
+
 // Counts what `unzip -p` inflates, and stops it past `limit`: the declared sizes in an
 // archive are the author's claim, and an entry can inflate to far more than it says.
 export function inflatedSize(archive, { limit = MAX_UNPACKED_BYTES, spawnFn = spawn } = {}) {
@@ -135,7 +139,7 @@ export async function fetchPackage({ backend, pkg, workRoot, unzip, measure = in
       if (["AccessDenied", "NoSuchKey"].includes(err.name) || err.code === "ENOENT") {
         throw new PackageUnreadable(`${PACKAGES_PREFIX}/${key} is missing or not readable`);
       }
-      throw new Error(`${PACKAGES_PREFIX}/${key} could not be fetched: ${err.message}`);
+      throw new PackageFetchFailed(`${PACKAGES_PREFIX}/${key} could not be fetched: ${err.message}`);
     }
   }
 

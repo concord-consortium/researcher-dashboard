@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { defaultChainState, disableDefaultCredentialChain, loadEnv } from "../server/config.js";
+import { PACKAGE_MAX_DURATION_DEFAULT, defaultChainState, disableDefaultCredentialChain, loadEnv } from "../server/config.js";
 
 const BASE = { SYNC_BACKEND: "DIR", SYNC_DIR: "/tmp/x" };
 
@@ -17,7 +17,7 @@ test("a runner started outside a MicroVM has no image version rather than a made
 });
 
 test("the duration ceiling refuses a configured value below report-server's limit or above the VM's life", () => {
-  assert.equal(loadEnv(BASE).packageMaxDurationSeconds, 7200);
+  assert.equal(loadEnv(BASE).packageMaxDurationSeconds, PACKAGE_MAX_DURATION_DEFAULT);
   assert.equal(loadEnv({ ...BASE, PACKAGE_MAX_DURATION_SECONDS: "28800" }).packageMaxDurationSeconds, 28800);
   assert.throws(() => loadEnv({ ...BASE, PACKAGE_MAX_DURATION_SECONDS: "7199" }), /at least 7200/);
   assert.throws(() => loadEnv({ ...BASE, PACKAGE_MAX_DURATION_SECONDS: "28801" }), /at most 28800/);
@@ -43,4 +43,12 @@ test("the default chain reads as enabled when any part of the switch is missing"
   assert.equal(defaultChainState(noImds).disabled, false);
   assert.equal(defaultChainState({ ...off(), AWS_CONFIG_FILE: "/home/x/.aws/config" }).disabled, false);
   assert.equal(defaultChainState({ ...off(), AWS_SHARED_CREDENTIALS_FILE: "/home/x/.aws/credentials" }).disabled, false);
+});
+
+test("STATUS_BACKEND selects the store and rejects anything else", () => {
+  assert.equal(loadEnv({}).statusBackend, "FIRESTORE");
+  assert.equal(loadEnv({ STATUS_BACKEND: "memory" }).statusBackend, "MEMORY");
+  // A store that signs nothing in cannot pass /run's claims check, so LOG is no backend.
+  assert.throws(() => loadEnv({ STATUS_BACKEND: "log" }), /must be FIRESTORE or MEMORY/);
+  assert.throws(() => loadEnv({ STATUS_BACKEND: "firestor" }), /must be FIRESTORE or MEMORY/);
 });

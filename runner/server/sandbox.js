@@ -61,9 +61,6 @@ async function execSandboxed({ uid, netns, command, args, exec, timeout = 15_000
   return exec(spec.command, spec.args, { timeout });
 }
 
-// Run at /run, and fatal if it does not hold. Two checks, because a sandbox that
-// is simply broken would fail the reachability test for the wrong reason and look
-// like success.
 // Run at /run, and fatal if it does not hold. Three checks, not one.
 //
 // A negative check alone was not enough once the namespace gained a network: "IMDS

@@ -18,7 +18,7 @@ ARTIFACT_URI = s3://$(ARTIFACT_BUCKET)/$(ARTIFACT_KEY)
 build:
 	docker buildx build --platform $(PLATFORM) --load -t $(IMAGE) .
 
-# Prints the four tool versions the preflight asks for, from inside the image.
+# Prints the image's four tool versions, from inside the image.
 tools:
 	docker run --rm --platform $(PLATFORM) $(IMAGE) sh -c '\
 	  cc-data version; \
@@ -35,8 +35,9 @@ shell:
 test:
 	npm test
 
-# The status writes against the Firestore and Auth emulators, which the default npm test
-# skips. Load report-service's rules to check the runner's writes against them.
+# The whole npm test, with the emulator suite the default run skips enabled against the
+# Firestore and Auth emulators. No security rules are loaded, so the emulator accepts every
+# read and write: this checks the writes' shape and server times, not report-service's rules.
 FIREBASE_PROJECT ?= demo-researcher-dashboard
 test-emulator:
 	firebase emulators:exec --only firestore,auth --project $(FIREBASE_PROJECT) \
@@ -71,9 +72,11 @@ publish-artifact: artifact
 	@echo "published $(ARTIFACT_URI)"
 
 # The smoke gate (README.md): the smoke package's zip, and the package run inside the
-# image against staging's report-server, which needs no stack.
+# image against staging's report-server, which needs no stack. The zip is built only with
+# a pattern, since a package with none is offered to every class.
 smoke-build:
-	node smoke/smoke.mjs build
+	$(if $(SMOKE_URL_PATTERN),,$(error SMOKE_URL_PATTERN is required: the smoke class's URL pattern, for the manifest's urls.any))
+	node smoke/smoke.mjs build --any '$(SMOKE_URL_PATTERN)'
 
 smoke-image:
 	$(if $(SMOKE_CLASS_ID),,$(error SMOKE_CLASS_ID is required: the smoke class's portal id))

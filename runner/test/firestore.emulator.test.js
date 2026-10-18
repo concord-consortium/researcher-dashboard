@@ -5,11 +5,13 @@ import { FirestoreStore } from "../server/firestore.js";
 import { HEARTBEAT_SECONDS } from "../server/runner.js";
 import { ClassDocuments, RunnerStatus, resultPath, runnerPath, scopePath } from "../server/status.js";
 
-// Skipped unless the emulators are up, so the default `npm test` stays hermetic.
-// `make test-emulator` starts them and sets these. Run against report-service's rules
-// as well, it shows the writes are the ones those rules accept.
+// Skipped unless the emulators are up, so the default `npm test` stays hermetic; CI's
+// emulator job sets RD_REQUIRE_EMULATOR, which turns a missing emulator into a failure.
+// No security rules are loaded, so the emulator allows every read and write: this checks
+// server timestamps and the conditional write, not report-service's rules.
 const FIRESTORE = process.env.FIRESTORE_EMULATOR_HOST;
 const AUTH = process.env.FIREBASE_AUTH_EMULATOR_HOST;
+const REQUIRED = process.env.RD_REQUIRE_EMULATOR === "1";
 const PROJECT = process.env.GCLOUD_PROJECT ?? "demo-researcher-dashboard";
 
 const PORTAL = "learn_portal_staging_concord_org";
@@ -37,6 +39,10 @@ function customToken(claims) {
   ].join(".");
 }
 
+test("the emulators are up wherever this suite is required", { skip: !REQUIRED }, () => {
+  assert.ok(FIRESTORE && AUTH, "RD_REQUIRE_EMULATOR is set, but FIRESTORE_EMULATOR_HOST or FIREBASE_AUTH_EMULATOR_HOST is not");
+});
+
 const IDENTITY = { platform_id: PLATFORM_ID, platform_user_id: 439, user_type: "researcher", researcher_dashboard_runner: true };
 
 describe("the runner's writes against the Firestore and Auth emulators", { skip: !FIRESTORE || !AUTH }, () => {
@@ -44,8 +50,8 @@ describe("the runner's writes against the Firestore and Auth emulators", { skip:
   let session;
   let klass;
 
-  // The emulator's first write compiles the rules and takes about fifteen seconds, longer
-  // than a status write is allowed, so one unbounded write warms it first.
+  // The emulator's first write can take about fifteen seconds, longer than a status write
+  // is allowed, so one unbounded write warms it first.
   before(async () => {
     session = new FirestoreStore({ projectId: PROJECT, emulators });
     await session.signIn(customToken(IDENTITY));

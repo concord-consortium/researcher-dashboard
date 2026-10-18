@@ -7,7 +7,7 @@ import { EventEmitter } from "node:events";
 import test from "node:test";
 import { portalHost } from "../server/config.js";
 import { ccDataLogin, makeSteps } from "../server/steps.js";
-import { freezePackageProcesses, thawPackageProcesses } from "../server/sandbox.js";
+import { captureLog } from "./helpers/capture-log.js";
 
 // Stands in for the cc-data process: records how it was invoked and what was
 // written to its stdin, then closes with the given exit code.
@@ -59,8 +59,13 @@ test("installCredential installs the report-service token and nothing else", asy
 
 // ---- runPackage ----------------------------------------------------------------
 
+const runArgs = (dir, outputDir, over = {}) => ({
+  manifest: { name: "x", version: "1.0.0", entrypoint: "run.py", dir }, paths: { outputDir }, env: {}, uid: 1000, ...over
+});
+
 async function withPackageDir(fn) {
-  const dir = await mkdtemp(path.join(tmpdir(), "rd-steps-"));
+  // The real path: macOS's temp directory is under a link.
+  const dir = fs.realpathSync(await mkdtemp(path.join(tmpdir(), "rd-steps-")));
   const outputDir = path.join(dir, "out");
   fs.mkdirSync(outputDir, { recursive: true });
   try {
@@ -76,15 +81,12 @@ test("runPackage runs the entrypoint as the package uid with only the named envi
     const { signal } = new AbortController();
     fs.writeFileSync(path.join(outputDir, "display.md"), "# ok");
     fs.writeFileSync(path.join(outputDir, "summary.txt"), "ok\n");
-    const result = await makeSteps().runPackage({
-      manifest: { name: "class-counts", version: "1.0.0", entrypoint: "run.py", dir },
-      paths: { outputDir },
+    const result = await makeSteps().runPackage(runArgs(dir, outputDir, {
       env: { HOME: "/work/home/x", CC_DATA_LOCAL: "/data/classes/x" },
-      uid: 1000,
       signal,
       proxyUrl: "http://10.201.0.1:8123",
       exec: async (command, args, options) => { calls.push({ command, args, options }); return { stdout: "", stderr: "" }; }
-    });
+    }));
     assert.deepEqual(result, { display: "# ok", summary: "ok" });
     const [call] = calls;
     assert.equal(call.command, "/usr/sbin/ip");
@@ -101,7 +103,7 @@ test("runPackage fails when the package wrote no display.md, and ignores a displ
   await withPackageDir(async (dir, outputDir) => {
     fs.writeFileSync(path.join(outputDir, "display.json"), JSON.stringify({ version: 1 }));
     await assert.rejects(
-      () => makeSteps().runPackage({ manifest: { name: "x", version: "1.0.0", entrypoint: "run.py", dir }, paths: { outputDir }, env: {}, uid: 1000, exec: async () => ({ stdout: "", stderr: "" }) }),
+      () => makeSteps().runPackage(runArgs(dir, outputDir, { exec: async () => ({ stdout: "", stderr: "" }) })),
       /wrote no display.md/
     );
   });
@@ -109,11 +111,11 @@ test("runPackage fails when the package wrote no display.md, and ignores a displ
 
 // Answers the package's run, then the kills and checks that follow it, from `left`: what
 // pgrep finds after each kill, an exit code 1 meaning nothing.
-function processExec({ left = [1], run = async () => ({ stdout: "", stderr: "" }), onPackage, onKill } = {}) {
+function processExec({ left = [1], run = async () => ({ stdout: "", stderr: "" }), onKill } = {}) {
   const calls = [];
   const exec = async (command, args, options) => {
     calls.push([command, ...args].join(" "));
-    if (command === "/usr/sbin/ip") { const out = await run(); onPackage?.(); return out; }
+    if (command === "/usr/sbin/ip") return run();
     if (args.includes("/usr/bin/kill")) onKill?.();
     if (command === "/usr/bin/pgrep") {
       const next = left.shift();
@@ -130,7 +132,7 @@ test("after a run every process of the package uid is killed before its output i
   await withPackageDir(async (dir, outputDir) => {
     // The display only exists once the kill has run, so a read before the kill finds none.
     const { exec, calls } = processExec({ onKill: () => fs.writeFileSync(path.join(outputDir, "display.md"), "# after kill") });
-    const result = await makeSteps().runPackage({ manifest: { name: "x", version: "1.0.0", entrypoint: "run.py", dir }, paths: { outputDir }, env: {}, uid: 1000, exec });
+    const result = await makeSteps().runPackage(runArgs(dir, outputDir, { exec }));
     assert.equal(result.display, "# after kill");
     assert.equal(calls.length, 3);
     assert.match(calls[1], /^\/usr\/bin\/setpriv --reuid=1000 --regid=1000 .* \/usr\/bin\/kill -KILL -1$/);
@@ -143,7 +145,7 @@ test("the package's processes are killed again until none is left", async () => 
   await withPackageDir(async (dir, outputDir) => {
     fs.writeFileSync(path.join(outputDir, "display.md"), "# ok");
     const { exec, calls } = processExec({ left: ["4242", 1] });
-    await makeSteps().runPackage({ manifest: { name: "x", version: "1.0.0", entrypoint: "run.py", dir }, paths: { outputDir }, env: {}, uid: 1000, exec });
+    await makeSteps().runPackage(runArgs(dir, outputDir, { exec }));
     assert.equal(calls.filter((c) => c.includes("kill -KILL -1")).length, 2);
   });
 });
@@ -151,67 +153,35 @@ test("the package's processes are killed again until none is left", async () => 
 test("a package whose processes will not die fails, and so does one that cannot be checked", async () => {
   await withPackageDir(async (dir, outputDir) => {
     fs.writeFileSync(path.join(outputDir, "display.md"), "# ok");
-    const args = { manifest: { name: "x", version: "1.0.0", entrypoint: "run.py", dir }, paths: { outputDir }, env: {}, uid: 1000 };
-    await assert.rejects(makeSteps().runPackage({ ...args, exec: processExec({ left: ["4242", "4242", "4242", "4242", "4242"] }).exec }), /5 kills did not stop/);
-    await assert.rejects(makeSteps().runPackage({ ...args, exec: processExec({ left: [Object.assign(new Error("spawn ENOENT"), { code: "ENOENT" })] }).exec }), /could not check/);
+    await assert.rejects(makeSteps().runPackage(runArgs(dir, outputDir, { exec: processExec({ left: ["4242", "4242", "4242", "4242", "4242"] }).exec })), /5 kills did not stop.*after the package finished$/);
+    await assert.rejects(makeSteps().runPackage(runArgs(dir, outputDir, { exec: processExec({ left: [Object.assign(new Error("spawn ENOENT"), { code: "ENOENT" })] }).exec })), /could not check/);
+  });
+});
+
+test("processes that will not die after the package failed keep the package's own error in the reason", async () => {
+  await withPackageDir(async (dir, outputDir) => {
+    const { exec } = processExec({
+      run: async () => { throw Object.assign(new Error("run.py exited 2"), { stdout: "", stderr: "" }); },
+      left: ["4242", "4242", "4242", "4242", "4242"]
+    });
+    await assert.rejects(makeSteps().runPackage(runArgs(dir, outputDir, { exec })), /could not be stopped \(.*5 kills did not stop.*\), after the package failed: run\.py exited 2$/);
   });
 });
 
 test("a package that fails or times out still has its processes killed", async () => {
   await withPackageDir(async (dir, outputDir) => {
     const { exec, calls } = processExec({ run: async () => { throw Object.assign(new Error("timed out"), { killed: true, stdout: "", stderr: "" }); } });
-    await assert.rejects(makeSteps().runPackage({ manifest: { name: "x", version: "1.0.0", entrypoint: "run.py", dir }, paths: { outputDir }, env: {}, uid: 1000, exec }), /timed out/);
+    await assert.rejects(makeSteps().runPackage(runArgs(dir, outputDir, { exec })), /timed out/);
     assert.ok(calls.some((c) => c.endsWith("kill -KILL -1")));
   });
 });
 
-const noPause = async () => {};
-
-test("a freeze stops every process of the package uid, again until none is runnable", async () => {
-  const { exec, calls } = processExec({ left: ["4242", 1] });
-  await freezePackageProcesses({ uid: 1000, exec, sleep: noPause });
-  assert.match(calls[0], /^\/usr\/bin\/setpriv --reuid=1000 --regid=1000 .* \/usr\/bin\/kill -STOP -1$/);
-  // A stopped process is in state T, so it is not counted.
-  assert.equal(calls[1], "/usr/bin/pgrep -u 1000 --runstates R,S,D");
-  assert.equal(calls.filter((c) => c.endsWith("kill -STOP -1")).length, 2);
-});
-
-test("a freeze that cannot stop the package, or cannot check, fails", async () => {
-  await assert.rejects(freezePackageProcesses({ uid: 1000, sleep: noPause, exec: processExec({ left: ["4242", "4242", "4242", "4242", "4242"] }).exec }), /5 stops did not stop/);
-  await assert.rejects(freezePackageProcesses({ uid: 1000, sleep: noPause, exec: processExec({ left: [Object.assign(new Error("spawn ENOENT"), { code: "ENOENT" })] }).exec }), /could not check/);
-});
-
-test("a freeze waits between its attempts, so a process inside a write can stop", async () => {
-  const events = [];
-  const { exec } = processExec({ left: ["4242", "4242", 1] });
-  const recording = (...args) => { if (args[0] === "/usr/bin/pgrep") events.push("check"); return exec(...args); };
-  await freezePackageProcesses({ uid: 1000, exec: recording, sleep: async (ms) => { events.push(`pause:${ms}`); } });
-  assert.deepEqual(events, ["check", "pause:200", "check", "pause:200", "check"]);
-});
-
-test("a thaw continues every process of the package uid, and nothing to continue is not a failure", async () => {
-  const { exec, calls } = processExec();
-  await thawPackageProcesses({ uid: 1000, exec });
-  assert.equal(calls.length, 1);
-  assert.match(calls[0], /^\/usr\/bin\/setpriv --reuid=1000 --regid=1000 .* \/usr\/bin\/kill -CONT -1$/);
-  await thawPackageProcesses({ uid: 1000, exec: async () => { throw Object.assign(new Error("kill exited 1"), { code: 1 }); } });
-  await assert.rejects(thawPackageProcesses({ uid: 1000, exec: async () => { throw Object.assign(new Error("spawn ENOENT"), { code: "ENOENT" }); } }), /ENOENT/);
-});
-
-function captureLog(run) {
-  const lines = [];
-  const original = process.stdout.write;
-  process.stdout.write = (chunk) => { lines.push(String(chunk)); return true; };
-  return Promise.resolve().then(run).finally(() => { process.stdout.write = original; }).then(() => lines.map((l) => JSON.parse(l)));
-}
-
 test("runPackage logs what the package printed, truncated from the head", async () => {
   await withPackageDir(async (dir, outputDir) => {
     fs.writeFileSync(path.join(outputDir, "display.md"), "# ok");
-    const lines = await captureLog(() => makeSteps().runPackage({
-      manifest: { name: "class-counts", version: "1.0.0", entrypoint: "run.py", dir }, paths: { outputDir }, env: {}, uid: 1000,
+    const lines = await captureLog(() => makeSteps().runPackage(runArgs(dir, outputDir, {
       exec: processExec({ run: async () => ({ stdout: `${"x".repeat(9000)}THE END`, stderr: "dataset: x" }) }).exec
-    }));
+    })));
     const output = lines.find((l) => l.event === "package.output");
     assert.ok(output.stdout.length < 9000 && output.stdout.endsWith("THE END"));
     assert.equal(output.stderr, "dataset: x");
@@ -222,19 +192,10 @@ test("a package that fails has its output logged before the failure is raised", 
   await withPackageDir(async (dir, outputDir) => {
     const failure = Object.assign(new Error("exited 1"), { stdout: "", stderr: "cc-data: NOT_AUTHENTICATED" });
     const lines = await captureLog(async () => {
-      await assert.rejects(makeSteps().runPackage({ manifest: { name: "x", version: "1.0.0", entrypoint: "run.py", dir }, paths: { outputDir }, env: {}, uid: 1000, exec: processExec({ run: async () => { throw failure; } }).exec }), /^Error: exited 1$|^exited 1$/);
+      await assert.rejects(makeSteps().runPackage(runArgs(dir, outputDir, { exec: processExec({ run: async () => { throw failure; } }).exec })), /^Error: exited 1$|^exited 1$/);
     });
     const output = lines.find((l) => l.event === "package.output");
     assert.equal(output.level, "error");
     assert.equal(output.stderr, "cc-data: NOT_AUTHENTICATED");
   });
-});
-
-test("STATUS_BACKEND selects the store and rejects anything else", async () => {
-  const { loadEnv } = await import("../server/config.js");
-  assert.equal(loadEnv({}).statusBackend, "FIRESTORE");
-  assert.equal(loadEnv({ STATUS_BACKEND: "memory" }).statusBackend, "MEMORY");
-  // A store that signs nothing in cannot pass /run's claims check, so LOG is no backend.
-  assert.throws(() => loadEnv({ STATUS_BACKEND: "log" }), /must be FIRESTORE or MEMORY/);
-  assert.throws(() => loadEnv({ STATUS_BACKEND: "firestor" }), /must be FIRESTORE or MEMORY/);
 });
