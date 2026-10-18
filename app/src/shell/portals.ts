@@ -9,7 +9,7 @@ export interface PortalConfig {
   firebaseProject: string;
 }
 
-const DEPLOYED: PortalConfig[] = [
+export const DEPLOYED: PortalConfig[] = [
   {
     origin: "https://learn.portal.staging.concord.org",
     reportServer: "https://report-server.concordqa.org",

@@ -29,3 +29,16 @@ section { border-top: 1px solid var(--line); padding-top: 0.5rem; }
 .identity { color: var(--muted); font-size: 0.85rem; }
 .community summary { cursor: pointer; }
 .disclosure { color: var(--warn); }
+.ownership { color: var(--muted); }
+.counts { list-style: none; padding: 0; }
+.active-count { font-weight: 600; margin-bottom: 0.2rem; }
+.note { color: var(--muted); margin-top: 0; }
+.state p, .finished p, .reason { margin: 0.2rem 0; }
+.when, .reason { color: var(--muted); }
+.controls { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-top: 0.3rem; }
+button[aria-disabled="true"] { opacity: 0.55; cursor: not-allowed; }
+.result-view { border: 1px solid var(--line); border-radius: 4px; padding: 0 1rem 1rem; background: #fff; }
+.result-markdown { overflow-x: auto; }
+.result-markdown table { border-collapse: collapse; }
+.result-markdown th, .result-markdown td { border: 1px solid var(--line); padding: 0.25rem 0.5rem; }
+.result-markdown img { max-width: 100%; }
