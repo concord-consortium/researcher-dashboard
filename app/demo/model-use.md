@@ -6,133 +6,135 @@ No student opened Tasks 46 and 55, so they are left out below.
 
 ## Simulation-use patterns
 
+Best is each student's highest level, as a share of the students who opened the model. First and Last count the students who clicked Hazbot by the level Hazbot gave feedback on at their first and last click. Last can be lower than Best: the level starts over when the page is reloaded and, in newer versions of the model, follows the student's latest runs. Hazbot clicks and Show me clicks count every click by that level. Finished tutorial counts, of the students who clicked Show me at a level, those who reached the last step of its tutorial on some click; Tutorial completion is the mean of each such student's furthest share of the steps. A "–" marks a level that never offers Show me, and "n/a" one that offers it where no student took it.
+
 ### Task 23: Not all wildfires behave the same way
 
-Students who opened the model: 14
+Students who opened the model: 14. 14 students clicked Hazbot 66 times (1 to 8 each); 6 students clicked Show me 10 times.
 
-| Level | Simulation-use pattern | Students |
-|---|---|---|
-| 1 | Did not run the simulation | 0 of 14 (0%) |
-| 2 | Ran the simulation with only default values | 0 of 14 (0%) |
-| 3 | Ran the simulation with incorrect zone setup values | 0 of 14 (0%) |
-| 4 | Ran the simulation with correct zone setups but without one spark in each zone | 0 of 14 (0%) |
-| 5 | Ran the simulation with correct setups and one spark in each zone | 14 of 14 (100%) |
-|   | Ran the model but never clicked Hazbot after running | 0 of 14 (0%) |
-| 100 | Student repeats run after success and wants more feedback from Hazbot (also counted in a level above) | 1 of 14 (7%) |
+| Level | Simulation-use pattern | Best | First | Last | Hazbot clicks | Show me clicks | Finished tutorial | Tutorial completion |
+|---|---|---|---|---|---|---|---|---|
+| 1 | Did not run the simulation | 0 of 14 (0%) | 10 | 2 | 18 | – | – | – |
+| 2 | Ran the simulation with only default values | 0 of 14 (0%) | 0 | 2 | 11 | 3 | 1 of 1 (100%) | 100% |
+| 3 | Ran the simulation with incorrect zone setup values | 0 of 14 (0%) | 1 | 0 | 8 | 1 | 0 of 1 (0%) | 25% |
+| 4 | Ran the simulation with correct zone setups but without one spark in each zone | 0 of 14 (0%) | 3 | 2 | 15 | 6 | 3 of 4 (75%) | 81% |
+| 5 | Ran the simulation with correct setups and one spark in each zone | 14 of 14 (100%) | 0 | 8 | 14 | – | – | – |
+|  | Ran the model but never clicked Hazbot after running | 0 of 14 (0%) |  |  |  |  |  |  |
+| 100 | Student repeats run after success and wants more feedback from Hazbot (also counted in a level above) | 1 of 14 (7%) |  |  |  |  |  |  |
 
 ### Task 24: Red Flag Warning
 
-Students who opened the model: 13
+Students who opened the model: 13. 13 students clicked Hazbot 65 times (2 to 8 each); 6 students clicked Show me 9 times.
 
-| Level | Simulation-use pattern | Students |
-|---|---|---|
-| 1 | Did not run the simulation | 1 of 13 (8%) |
-| 2 | Ran the simulation with only default values | 0 of 13 (0%) |
-| 3 | Ran the simulation with zone setups changed but without wind speed or wind direction changed | 0 of 13 (0%) |
-| 4 | Ran the simulation once with a different wind speed or a direction | 4 of 13 (31%) |
-| 5 | Ran the simulation two or more times with different wind speeds or directions | 8 of 13 (62%) |
-|   | Ran the model but never clicked Hazbot after running | 0 of 13 (0%) |
-| 100 | Student repeats run after success and wants more feedback from Hazbot (also counted in a level above) | 0 of 13 (0%) |
+| Level | Simulation-use pattern | Best | First | Last | Hazbot clicks | Show me clicks | Finished tutorial | Tutorial completion |
+|---|---|---|---|---|---|---|---|---|
+| 1 | Did not run the simulation | 1 of 13 (8%) | 6 | 1 | 14 | – | – | – |
+| 2 | Ran the simulation with only default values | 0 of 13 (0%) | 3 | 1 | 12 | 2 | 0 of 2 (0%) | 67% |
+| 3 | Ran the simulation with zone setups changed but without wind speed or wind direction changed | 0 of 13 (0%) | 1 | 1 | 5 | 5 | 2 of 3 (67%) | 83% |
+| 4 | Ran the simulation once with a different wind speed or a direction | 4 of 13 (31%) | 3 | 4 | 20 | 2 | 0 of 1 (0%) | 33% |
+| 5 | Ran the simulation two or more times with different wind speeds or directions | 8 of 13 (62%) | 0 | 6 | 14 | – | – | – |
+|  | Ran the model but never clicked Hazbot after running | 0 of 13 (0%) |  |  |  |  |  |  |
+| 100 | Student repeats run after success and wants more feedback from Hazbot (also counted in a level above) | 0 of 13 (0%) |  |  |  |  |  |  |
 
 ### Task 25: The lay of the land
 
-Students who opened the model: 12
+Students who opened the model: 12. 12 students clicked Hazbot 71 times (1 to 8 each); 5 students clicked Show me 8 times.
 
-| Level | Simulation-use pattern | Students |
-|---|---|---|
-| 1 | Did not run the simulation | 0 of 12 (0%) |
-| 2 | Ran the simulation with only one spark | 1 of 12 (8%) |
-| 3 | Ran the simulation with two sparks in the same zone | 2 of 12 (17%) |
-| 4 | Ran the simulation and placed two sparks\, but not at the top and bottom of the mountain | 1 of 12 (8%) |
-| 5 | Ran the simulation with one spark at the top and one at the bottom of the mountain but with different zone setups | 1 of 12 (8%) |
-| 6 | Ran the simulation with one spark at the top and one at the bottom of the mountain with the same zone setups | 7 of 12 (58%) |
-|   | Ran the model but never clicked Hazbot after running | 1 of 12 (8%) |
-| 100 | Student repeats run after success and wants more feedback from Hazbot (also counted in a level above) | 0 of 12 (0%) |
+| Level | Simulation-use pattern | Best | First | Last | Hazbot clicks | Show me clicks | Finished tutorial | Tutorial completion |
+|---|---|---|---|---|---|---|---|---|
+| 1 | Did not run the simulation | 0 of 12 (0%) | 8 | 1 | 18 | – | – | – |
+| 2 | Ran the simulation with only one spark | 1 of 12 (8%) | 1 | 2 | 12 | 3 | 1 of 2 (50%) | 62% |
+| 3 | Ran the simulation with two sparks in the same zone | 2 of 12 (17%) | 1 | 1 | 11 | 0 | n/a | n/a |
+| 4 | Ran the simulation and placed two sparks\, but not at the top and bottom of the mountain | 1 of 12 (8%) | 0 | 0 | 3 | 1 | 1 of 1 (100%) | 100% |
+| 5 | Ran the simulation with one spark at the top and one at the bottom of the mountain but with different zone setups | 1 of 12 (8%) | 2 | 2 | 11 | 4 | 0 of 2 (0%) | 33% |
+| 6 | Ran the simulation with one spark at the top and one at the bottom of the mountain with the same zone setups | 7 of 12 (58%) | 0 | 6 | 16 | – | – | – |
+|  | Ran the model but never clicked Hazbot after running | 1 of 12 (8%) |  |  |  |  |  |  |
+| 100 | Student repeats run after success and wants more feedback from Hazbot (also counted in a level above) | 0 of 12 (0%) |  |  |  |  |  |  |
 
 ### Task 32: Natural Vegetation
 
-Students who opened the model: 10
+Students who opened the model: 10. 10 students clicked Hazbot 52 times (1 to 8 each); 2 students clicked Show me 2 times.
 
-| Level | Simulation-use pattern | Students |
-|---|---|---|
-| 1 | Did not run the simulation | 0 of 10 (0%) |
-| 2 | Ran the simulation with default setup values only | 0 of 10 (0%) |
-| 3 | Ran the simulation with a zone setting changed but without three different vegetation types assigned \(one per zone\) | 2 of 10 (20%) |
-| 4 | Ran the simulation with 3 different vegetation types assigned \(one in each zone\) and different drought levels between zones | 0 of 10 (0%) |
-| 5 | Ran the simulation with 3 different vegetations \(one in each zone\)\, same drought\, but without one spark in each zone\) | 0 of 10 (0%) |
-| 6 | Ran the simulation with 3 different vegetations \(one in each zone\)\, same drought\, and one spark in each zone | 8 of 10 (80%) |
-|   | Ran the model but never clicked Hazbot after running | 0 of 10 (0%) |
-| 100 | Student repeats run after success and wants more feedback from Hazbot (also counted in a level above) | 0 of 10 (0%) |
+| Level | Simulation-use pattern | Best | First | Last | Hazbot clicks | Show me clicks | Finished tutorial | Tutorial completion |
+|---|---|---|---|---|---|---|---|---|
+| 1 | Did not run the simulation | 0 of 10 (0%) | 5 | 1 | 7 | – | – | – |
+| 2 | Ran the simulation with default setup values only | 0 of 10 (0%) | 0 | 0 | 3 | 2 | 2 of 2 (100%) | 100% |
+| 3 | Ran the simulation with a zone setting changed but without three different vegetation types assigned \(one per zone\) | 2 of 10 (20%) | 0 | 1 | 3 | 0 | n/a | n/a |
+| 4 | Ran the simulation with 3 different vegetation types assigned \(one in each zone\) and different drought levels between zones | 0 of 10 (0%) | 3 | 0 | 8 | 0 | n/a | n/a |
+| 5 | Ran the simulation with 3 different vegetations \(one in each zone\)\, same drought\, but without one spark in each zone\) | 0 of 10 (0%) | 2 | 0 | 9 | 0 | n/a | n/a |
+| 6 | Ran the simulation with 3 different vegetations \(one in each zone\)\, same drought\, and one spark in each zone | 8 of 10 (80%) | 0 | 8 | 22 | – | – | – |
+|  | Ran the model but never clicked Hazbot after running | 0 of 10 (0%) |  |  |  |  |  |  |
+| 100 | Student repeats run after success and wants more feedback from Hazbot (also counted in a level above) | 0 of 10 (0%) |  |  |  |  |  |  |
 
 ### Task 33: Back to Suppression
 
-Students who opened the model: 9
+Students who opened the model: 9. 9 students clicked Hazbot 51 times (3 to 8 each); 9 students clicked Show me 11 times.
 
-| Level | Simulation-use pattern | Students |
-|---|---|---|
-| 1 | Did not run the simulation | 0 of 9 (0%) |
-| 2 | Ran the simulation with default setup values only | 1 of 9 (11%) |
-| 3 | Ran the simulation with other zone setup variables changed but without assigning forest with and without suppression | 0 of 9 (0%) |
-| 4 | Ran the simulation with zones with forest and forest w\/ suppression\, and a spark not placed in each zone | 1 of 9 (11%) |
-| 5 | Ran the simulation with zones with forest and forest w\/ suppression\, a spark placed in each zone\, but different drought between the zones | 1 of 9 (11%) |
-| 6 | Ran the simulation with zones with forest and forest w\/ suppression\, a spark in each zone\, and same drought | 6 of 9 (67%) |
-|   | Ran the model but never clicked Hazbot after running | 0 of 9 (0%) |
-| 100 | Student repeats run after success and wants more feedback from Hazbot (also counted in a level above) | 0 of 9 (0%) |
+| Level | Simulation-use pattern | Best | First | Last | Hazbot clicks | Show me clicks | Finished tutorial | Tutorial completion |
+|---|---|---|---|---|---|---|---|---|
+| 1 | Did not run the simulation | 0 of 9 (0%) | 5 | 1 | 10 | – | – | – |
+| 2 | Ran the simulation with default setup values only | 1 of 9 (11%) | 0 | 0 | 3 | 1 | 0 of 1 (0%) | 25% |
+| 3 | Ran the simulation with other zone setup variables changed but without assigning forest with and without suppression | 0 of 9 (0%) | 1 | 1 | 9 | 5 | 0 of 3 (0%) | 50% |
+| 4 | Ran the simulation with zones with forest and forest w\/ suppression\, and a spark not placed in each zone | 1 of 9 (11%) | 1 | 0 | 5 | 2 | 0 of 2 (0%) | 29% |
+| 5 | Ran the simulation with zones with forest and forest w\/ suppression\, a spark placed in each zone\, but different drought between the zones | 1 of 9 (11%) | 2 | 2 | 13 | 3 | 1 of 3 (33%) | 64% |
+| 6 | Ran the simulation with zones with forest and forest w\/ suppression\, a spark in each zone\, and same drought | 6 of 9 (67%) | 0 | 5 | 11 | – | – | – |
+|  | Ran the model but never clicked Hazbot after running | 0 of 9 (0%) |  |  |  |  |  |  |
+| 100 | Student repeats run after success and wants more feedback from Hazbot (also counted in a level above) | 0 of 9 (0%) |  |  |  |  |  |  |
 
 ### Task 34: Fire Intensity
 
-Students who opened the model: 8
+Students who opened the model: 8. 8 students clicked Hazbot 29 times (1 to 6 each); 6 students clicked Show me 8 times.
 
-| Level | Simulation-use pattern | Students |
-|---|---|---|
-| 1 | Did not run the simulation | 0 of 8 (0%) |
-| 2 | Ran the simulation\(s\) with default setup values only | 4 of 8 (50%) |
-| 3 | Ran the simulation\, with drought or wind changed but vegetation unchanged | 1 of 8 (12%) |
-| 4 | Ran the simulation\, with vegetation changed but not wind or drought changed | 2 of 8 (25%) |
-| 5 | Ran the simulation with vegetation changed in at least one zone and either wind or drought changed in any zone | 1 of 8 (12%) |
-|   | Ran the model but never clicked Hazbot after running | 2 of 8 (25%) |
-| 100 | Student repeats run after success and wants more feedback from Hazbot (also counted in a level above) | 0 of 8 (0%) |
+| Level | Simulation-use pattern | Best | First | Last | Hazbot clicks | Show me clicks | Finished tutorial | Tutorial completion |
+|---|---|---|---|---|---|---|---|---|
+| 1 | Did not run the simulation | 0 of 8 (0%) | 7 | 2 | 13 | – | – | – |
+| 2 | Ran the simulation\(s\) with default setup values only | 4 of 8 (50%) | 0 | 2 | 9 | 6 | 2 of 4 (50%) | 71% |
+| 3 | Ran the simulation\, with drought or wind changed but vegetation unchanged | 1 of 8 (12%) | 1 | 2 | 4 | 2 | 1 of 2 (50%) | 75% |
+| 4 | Ran the simulation\, with vegetation changed but not wind or drought changed | 2 of 8 (25%) | 0 | 1 | 2 | 0 | n/a | n/a |
+| 5 | Ran the simulation with vegetation changed in at least one zone and either wind or drought changed in any zone | 1 of 8 (12%) | 0 | 1 | 1 | – | – | – |
+|  | Ran the model but never clicked Hazbot after running | 2 of 8 (25%) |  |  |  |  |  |  |
+| 100 | Student repeats run after success and wants more feedback from Hazbot (also counted in a level above) | 0 of 8 (0%) |  |  |  |  |  |  |
 
 ### Task 35: Standing through fire
 
-Students who opened the model: 5
+Students who opened the model: 5. 5 students clicked Hazbot 34 times (6 to 8 each); 5 students clicked Show me 11 times.
 
-| Level | Simulation-use pattern | Students |
-|---|---|---|
-| 1 | Did not run the simulation | 0 of 5 (0%) |
-| 2 | Ran the simulation with default setup values only | 1 of 5 (20%) |
-| 3 | Ran the simulation with different terrains between the zones | 0 of 5 (0%) |
-| 4 | Ran the simulation with the same terrain in both zones but without assigning forest with and without suppression to each zone | 0 of 5 (0%) |
-| 5 | Ran the simulation with forest and forest with suppression assigned but with different drought levels between the zones | 0 of 5 (0%) |
-| 6 | Ran the simulation with forest with and without suppression\, same drought and terrain types between zones\, but without a spark in each zone | 0 of 5 (0%) |
-| 7 | Ran the simulation with forest with and without suppression\, same drought and terrain between zones\, and a spark in each zone | 4 of 5 (80%) |
-|   | Ran the model but never clicked Hazbot after running | 0 of 5 (0%) |
-| 100 | Student repeats run after success and wants more feedback from Hazbot (also counted in a level above) | 0 of 5 (0%) |
+| Level | Simulation-use pattern | Best | First | Last | Hazbot clicks | Show me clicks | Finished tutorial | Tutorial completion |
+|---|---|---|---|---|---|---|---|---|
+| 1 | Did not run the simulation | 0 of 5 (0%) | 4 | 0 | 8 | – | – | – |
+| 2 | Ran the simulation with default setup values only | 1 of 5 (20%) | 0 | 1 | 5 | 4 | 1 of 1 (100%) | 100% |
+| 3 | Ran the simulation with different terrains between the zones | 0 of 5 (0%) | 0 | 0 | 1 | 1 | 0 of 1 (0%) | 25% |
+| 4 | Ran the simulation with the same terrain in both zones but without assigning forest with and without suppression to each zone | 0 of 5 (0%) | 0 | 0 | 3 | 0 | n/a | n/a |
+| 5 | Ran the simulation with forest and forest with suppression assigned but with different drought levels between the zones | 0 of 5 (0%) | 0 | 0 | 3 | 0 | n/a | n/a |
+| 6 | Ran the simulation with forest with and without suppression\, same drought and terrain types between zones\, but without a spark in each zone | 0 of 5 (0%) | 1 | 1 | 6 | 6 | 2 of 3 (67%) | 89% |
+| 7 | Ran the simulation with forest with and without suppression\, same drought and terrain between zones\, and a spark in each zone | 4 of 5 (80%) | 0 | 3 | 8 | – | – | – |
+|  | Ran the model but never clicked Hazbot after running | 0 of 5 (0%) |  |  |  |  |  |  |
+| 100 | Student repeats run after success and wants more feedback from Hazbot (also counted in a level above) | 0 of 5 (0%) |  |  |  |  |  |  |
 
 ### Task 41: Estimating risk
 
-Students who opened the model: 3
+Students who opened the model: 3. 3 students clicked Hazbot 9 times (2 to 4 each); 1 student clicked Show me 1 time.
 
-| Level | Simulation-use pattern | Students |
-|---|---|---|
-| 1 | Did not run the simulation | 0 of 3 (0%) |
-| 2 | Ran the simulation with a changed vegetation type\, drought\, or wind | 3 of 3 (100%) |
-| 3 | Ran the simulation without changed variables | 0 of 3 (0%) |
-|   | Ran the model but never clicked Hazbot after running | 0 of 3 (0%) |
-| 100 | Student repeats run after success and wants more feedback from Hazbot (also counted in a level above) | 0 of 3 (0%) |
+| Level | Simulation-use pattern | Best | First | Last | Hazbot clicks | Show me clicks | Finished tutorial | Tutorial completion |
+|---|---|---|---|---|---|---|---|---|
+| 1 | Did not run the simulation | 0 of 3 (0%) | 3 | 0 | 4 | – | – | – |
+| 2 | Ran the simulation with a changed vegetation type\, drought\, or wind | 3 of 3 (100%) | 0 | 3 | 5 | 1 | 0 of 1 (0%) | 33% |
+| 3 | Ran the simulation without changed variables | 0 of 3 (0%) | 0 | 0 | 0 | – | – | – |
+|  | Ran the model but never clicked Hazbot after running | 0 of 3 (0%) |  |  |  |  |  |  |
+| 100 | Student repeats run after success and wants more feedback from Hazbot (also counted in a level above) | 0 of 3 (0%) |  |  |  |  |  |  |
 
 ### Task 44: Fighting fires
 
-Students who opened the model: 2
+Students who opened the model: 2. 2 students clicked Hazbot 8 times (3 to 5 each); 2 students clicked Show me 3 times.
 
-| Level | Simulation-use pattern | Students |
-|---|---|---|
-| 1 | Did not run the simulation | 0 of 2 (0%) |
-| 2 | Ran the simulation with a changed vegetation type\, drought\, or wind | 1 of 2 (50%) |
-| 3 | Ran the model with no setup changes and with no fireline and helitacks OR With firelines only OR with helitacks only in a single or multiple trials | 0 of 2 (0%) |
-| 4 | Ran the model with no setup changes and with both firelines and helitacks used in a single or multiple trials | 1 of 2 (50%) |
-|   | Ran the model but never clicked Hazbot after running | 0 of 2 (0%) |
-| 100 | Student repeats run after success and wants more feedback from Hazbot (also counted in a level above) | 2 of 2 (100%) |
+| Level | Simulation-use pattern | Best | First | Last | Hazbot clicks | Show me clicks | Finished tutorial | Tutorial completion |
+|---|---|---|---|---|---|---|---|---|
+| 1 | Did not run the simulation | 0 of 2 (0%) | 1 | 0 | 2 | – | – | – |
+| 2 | Ran the simulation with a changed vegetation type\, drought\, or wind | 1 of 2 (50%) | 0 | 1 | 3 | 3 | 2 of 2 (100%) | 100% |
+| 3 | Ran the model with no setup changes and with no fireline and helitacks OR With firelines only OR with helitacks only in a single or multiple trials | 0 of 2 (0%) | 1 | 0 | 2 | 0 | n/a | n/a |
+| 4 | Ran the model with no setup changes and with both firelines and helitacks used in a single or multiple trials | 1 of 2 (50%) | 0 | 1 | 1 | – | – | – |
+|  | Ran the model but never clicked Hazbot after running | 0 of 2 (0%) |  |  |  |  |  |  |
+| 100 | Student repeats run after success and wants more feedback from Hazbot (also counted in a level above) | 2 of 2 (100%) |  |  |  |  |  |  |
 
 ## Simulation use
 
