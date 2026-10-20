@@ -51,12 +51,12 @@ describe("a result's contents", () => {
   it("scrolls to and focuses the heading an entry names, leaving the URL alone", () => {
     const scrolled: Element[] = [];
     vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(function (this: Element) { scrolled.push(this); });
-    window.location.hash = "#packages/official__wildfire-model-use";
+    window.location.hash = "#analytics/official__wildfire-model-use";
     render(<ResultMarkdown markdown={LONG} />);
     fireEvent.click(within(contents()!).getByRole("button", { name: "Task 24" }));
     const heading = screen.getByRole("heading", { name: "Task 24" });
     expect(document.activeElement).toBe(heading);
     expect(scrolled).toEqual([heading]);
-    expect(window.location.hash).toBe("#packages/official__wildfire-model-use");
+    expect(window.location.hash).toBe("#analytics/official__wildfire-model-use");
   });
 });

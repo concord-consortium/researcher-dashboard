@@ -60,8 +60,8 @@ export function titleOf(row: PackageRow): string {
   return row.current_version.title || row.name;
 }
 
-// Official first needs no key: every official row is in the Official group.
-function byTitle(a: PackageRow, b: PackageRow): number {
+// By title, ignoring case.
+export function byTitle(a: PackageRow, b: PackageRow): number {
   return titleOf(a).localeCompare(titleOf(b), undefined, { sensitivity: "base" });
 }
 

@@ -23,7 +23,7 @@ import {
 import { behindRows, newestActivity, type Activity } from "../shell/activity";
 import { useAutoRerun } from "../shell/rerun";
 import type { TokenUser } from "../shell/oauth";
-import { ALL_PACKAGES, useRoute } from "../shell/route";
+import { ALL_PACKAGES, routeHash, useRoute } from "../shell/route";
 import type { DashboardServices } from "../shell/services";
 import type { InfoReason } from "../shell/start";
 import { Info } from "./Info";
@@ -33,7 +33,7 @@ type Source = "portal" | "report-server" | "firebase";
 // What to say when a call fails with no message of its own to show.
 const UNREACHABLE: Record<Source, string> = {
   portal: "The portal could not be reached.",
-  "report-server": "The package catalog could not be reached.",
+  "report-server": "The analysis catalog could not be reached.",
   firebase: "This class's profile, your runs and your counts could not be read."
 };
 
@@ -298,8 +298,8 @@ export function ClassDashboard({ services, onExpired, user = null, portal = null
 
   // A package the list returned says why from its own row; any other is asked about once.
   const rowNotes = useMemo(() => new Map((rows ?? []).map((r) => [r.identity, r.applies
-    ? "This package is not offered in any of this class's groups."
-    : "This package no longer applies to this class."])), [rows]);
+    ? "This analysis is not offered in any of this class's groups."
+    : "This analysis no longer applies to this class."])), [rows]);
 
   useEffect(() => {
     for (const result of unlisted) {
@@ -308,10 +308,10 @@ export function ClassDashboard({ services, onExpired, user = null, portal = null
       asked.current.add(identity);
       const note = (text: string | null) => setNotes((n) => new Map(n).set(identity, text));
       services.reportServer.resolve(identity, version)
-        .then((resolved) => note(resolved.archived ? "This package has been archived." : null))
+        .then((resolved) => note(resolved.archived ? "This analysis has been archived." : null))
         .catch((error) => {
           if (error instanceof SessionExpired) return refused(error, () => {}, "report-server");
-          note(error instanceof ApiError && error.status === 404 ? "This package is no longer available to you." : null);
+          note(error instanceof ApiError && error.status === 404 ? "This analysis is no longer available to you." : null);
         });
     }
   }, [unlisted, rowNotes, services]);
@@ -341,7 +341,7 @@ export function ClassDashboard({ services, onExpired, user = null, portal = null
   // The browser tab names the view, the open package or the tab, then the class, before the page's own title.
   const baseTitle = pageTitle();
   const viewTitle = route.tab === "info" ? "Info"
-    : selectedKey ? listedTitles.get(selectedKey) ?? unlistedTitle(identityOfKey(selectedKey), allTitles) : "Packages";
+    : selectedKey ? listedTitles.get(selectedKey) ?? unlistedTitle(identityOfKey(selectedKey), allTitles) : "Analytics";
   const className = scope?.name ?? null;
   useEffect(() => {
     document.title = className && !info ? `${viewTitle} - ${className} - ${baseTitle}` : baseTitle;
@@ -403,10 +403,10 @@ export function ClassDashboard({ services, onExpired, user = null, portal = null
   const confirm = (row: PackageRow) => { setConfirming(null); void run(row, false); };
   const anyListed = grouped.length + unlisted.length > 0;
   const anyRerunnable = rerunnable.some((r) => latestFinished(results.get(packageKey(r.identity))));
-  const emptyList = filter === "search" && searchFound === 0 ? `No packages match “${search}”.` : `No packages here have the run status ${statusFilter}.`;
+  const emptyList = filter === "search" && searchFound === 0 ? `No analyses match “${search}”.` : `No analyses here have the run status ${statusFilter}.`;
   // What the list's pills and menu leave, said when a search or a filter changes it.
   const listNews = filter === "search" && searchFound > 0
-    ? `${searchFound} ${searchFound === 1 ? "package matches" : "packages match"} “${search}”.`
+    ? `${searchFound} ${searchFound === 1 ? "analysis matches" : "analyses match"} “${search}”.`
     : anyListed && shownCards.length === 0 && shownUnlisted.length === 0 && (filter === "search" || statusFilter !== "all") ? emptyList : "";
   // Any pill but Search Results ends the search.
   const selectFilter = (key: string) => { setFilter(key); if (key !== "search" && search) navigate(ALL_PACKAGES); };
@@ -427,20 +427,20 @@ export function ClassDashboard({ services, onExpired, user = null, portal = null
       {refreshProblem && <Callout tone="error">{refreshProblem}</Callout>}
       {inList && profile?.truncated && (
         <Callout tone="notice">
-          This class's content was too large to read completely, so a package may be missing from this list.
+          This class's content was too large to read completely, so an analysis may be missing from this list.
         </Callout>
       )}
       {listProblem && <Callout tone="error">{listProblem}</Callout>}
       {runsProblem && <Callout tone="error">{runsProblem}</Callout>}
       {stopped && <Callout tone="error">{STOPPED[stopped]}</Callout>}
-      {profile && !rows && !listProblem && !profileProblem && <p>Listing the packages that apply…</p>}
+      {profile && !rows && !listProblem && !profileProblem && <p>Listing the analyses that apply…</p>}
     </div>
   );
 
   return (
     <>
       <Header scope={scope} user={user} demo={demo} activity={activity} now={services.now} session={session} runnerFailed={runner?.state === "failed"}
-        tabs={<Tabs label="Dashboard sections" selected={tab} tabs={[{ key: "packages", label: "Packages", icon: CubeIcon }, { key: "info", label: "Info", icon: UserGroupIcon }]}
+        tabs={<Tabs label="Dashboard sections" selected={tab} tabs={[{ key: "info", label: "Info", icon: UserGroupIcon }, { key: "packages", label: "Analytics", icon: CubeIcon }]}
           onSelect={(key) => navigate(key === "info" ? { tab: "info" } : ALL_PACKAGES)} />} />
       <p role="status" className="visually-hidden">{announcement}</p>
       <main className="class-dashboard">
@@ -461,7 +461,7 @@ export function ClassDashboard({ services, onExpired, user = null, portal = null
               messages={messages(false)} />
           ) : listShown && rows && (
             <section className="all-packages" aria-labelledby="packages-heading">
-              <h2 id="packages-heading" className="visually-hidden">All Packages</h2>
+              <h2 id="packages-heading" className="visually-hidden">All Analyses</h2>
               {anyListed && <PackageSearch search={search} onSearch={searchFor} />}
               {anyListed && (
                 <div className="list-filters">
@@ -470,7 +470,7 @@ export function ClassDashboard({ services, onExpired, user = null, portal = null
                 </div>
               )}
               {anyRerunnable && !stopped && <p className="list-note">{RERUNS}</p>}
-              {filter !== "unlisted" && groups.length === 0 && <p>No packages apply to this class yet.</p>}
+              {filter !== "unlisted" && groups.length === 0 && <p>No analyses apply to this class yet.</p>}
               {anyListed && shownCards.length === 0 && shownUnlisted.length === 0 && (filter === "search" || statusFilter !== "all") && (
                 <p>{emptyList}</p>
               )}
@@ -487,9 +487,16 @@ export function ClassDashboard({ services, onExpired, user = null, portal = null
           )}
         </div>
 
-        {/* Focusable itself only while it holds nothing that is: the class card links the portal when known. */}
-        <div role="tabpanel" id={panelId("info")} aria-labelledby={tabId("info")} hidden={tab !== "info"} tabIndex={portal ? undefined : 0}>
+        <div role="tabpanel" id={panelId("info")} aria-labelledby={tabId("info")} hidden={tab !== "info"}>
+          {tab === "info" && messages(false)}
           <div className="info-grid">
+            <section className="info-card wide" aria-labelledby="analyses-heading">
+              <h2 id="analyses-heading"><CubeIcon aria-hidden="true" />Analyses</h2>
+              <p>
+                Pick analyses to run from the{" "}
+                <a href={routeHash(ALL_PACKAGES)} onClick={(e) => { e.preventDefault(); allPackages(); }}>Analytics tab</a>.
+              </p>
+            </section>
             <ClassCard scope={scope} projectNames={namedProjects} portal={portal} />
             <section className="info-card wide" aria-labelledby="assignments-heading">
               <h2 id="assignments-heading"><ClipboardDocumentListIcon aria-hidden="true" />Assignments</h2>

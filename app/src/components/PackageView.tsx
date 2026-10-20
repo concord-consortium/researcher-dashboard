@@ -11,7 +11,7 @@ import { usePublishedHeight } from "./usePublishedHeight";
 // its error panel already says which result is showing.
 const NEWER: Partial<Record<Status, string>> = {
   Requesting: "A new run is being requested.",
-  "Waiting for a runner": "A new run is waiting for a runner.",
+  "Waiting to start": "A new run is waiting to start.",
   Queued: "A new run is queued.",
   Running: "A new run is in progress.",
   Paused: "A new run is paused partway through.",
@@ -67,7 +67,7 @@ export function PackageView({ title, description, status, note, run, runnable, w
               <nav aria-label="Breadcrumb">
                 <ol>
                   <li>
-                    <a href={routeHash(ALL_PACKAGES)} onClick={(e) => { e.preventDefault(); onAll(); }}>All Packages</a>
+                    <a href={routeHash(ALL_PACKAGES)} onClick={(e) => { e.preventDefault(); onAll(); }}>All Analyses</a>
                     <ChevronRightIcon aria-hidden="true" />
                   </li>
                   {filter && (

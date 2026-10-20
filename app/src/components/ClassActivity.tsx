@@ -10,11 +10,11 @@ const MAX_TIMEOUT_MS = 2 ** 31 - 1;
 export type Stopped = "expired" | "not-renewed";
 
 export const STOPPED: Record<Stopped, string> = {
-  expired: "Automatic re-runs have stopped because your sign-in has expired. Run any package to sign in again.",
+  expired: "Automatic re-runs have stopped because your sign-in has expired. Run any analysis to sign in again.",
   "not-renewed": "Automatic re-runs have stopped because your sign-in could not be renewed. Launch the dashboard again from the portal."
 };
 
-export const RERUNS = "Your finished packages re-run on their own as soon as students save new work; community packages wait for you to run them.";
+export const RERUNS = "Your finished analyses re-run on their own as soon as students save new work; community analyses wait for you to run them.";
 
 // The learners in the window, re-counted as each leaves it, or null before the first snapshot.
 export function useActiveCount(activity: Map<string, Activity> | undefined, now: () => number): number | null {

@@ -1,5 +1,5 @@
 // Result markdown shaped like what the packages write: wildfire-responses' open-response tables,
-// wildfire-model-use's longer multi-section report, and the smaller packages' results.
+// activity-model-use's longer multi-section report, and the smaller packages' results.
 
 export const WILDFIRE_RESPONSES = `# Wildfire open responses
 
@@ -18,27 +18,6 @@ Questions with an open response, by assignment, in question-id order rather than
 // wildfire-simulation-use's report in the layout and wording of a real run, with every number made
 // up, so nothing from a real class is in this repo.
 export { default as MODEL_USE } from "./model-use.md?raw";
-
-export const RUNNER_SMOKE = `# Runner smoke test
-
-Runner smoke test passed.
-
-- cc-data: v0.3.0-pre.1
-- Python: 3.11.9
-- Answers pulled: 12
-- Logs pulled: 59
-`;
-
-export const ISOLATION_PROBE = `# Isolation probe
-
-No network reachable from the package sandbox.
-
-| Probe | Result |
-|---|---|
-| \`https://example.com\` | blocked |
-| \`169.254.169.254\` | blocked |
-| DNS lookup | blocked |
-`;
 
 export const EXPLANATION_KEYWORDS = `# Explanation keywords
 

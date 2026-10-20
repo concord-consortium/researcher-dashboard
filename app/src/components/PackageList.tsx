@@ -3,7 +3,7 @@ import {
   Squares2X2Icon, UserIcon, XMarkIcon
 } from "@heroicons/react/16/solid";
 import { outOfDate } from "../shell/activity";
-import { packageKey, searchWords, titleOf, type Group } from "../shell/packages";
+import { byTitle, packageKey, searchWords, titleOf, type Group } from "../shell/packages";
 import type { PackageRow } from "../shell/portal";
 import { useEffect, useId, useRef, useState, type ComponentType, type ReactNode, type SVGProps } from "react";
 import { plainError } from "../shell/errors";
@@ -23,12 +23,12 @@ export function stateText(state: RowState, title: string, listed: boolean): stri
     case "not-run":
       return "Not run.";
     case "queued":
-      if (state.waiting) return listed ? WAITING : "Queued, waiting for a runner.";
+      if (state.waiting) return listed ? WAITING : "Queued and waiting to start.";
       return state.position === null ? "Queued." : `Queued, number ${state.position} in line.`;
     case "running":
       return `Running ${title}: ${stageWords(state.stage)}.`;
     case "stuck":
-      if (!state.resumable) return "Interrupted: its runner stopped partway. This is being checked.";
+      if (!state.resumable) return "Interrupted: it stopped partway. This is being checked.";
       return listed ? "Paused partway through: resume it to finish." : "Paused partway through.";
     case "done":
       return state.summary ?? "Finished.";
@@ -168,7 +168,7 @@ type Tone = "idle" | "busy" | "ok" | "warn" | "error";
 
 // Every status a pill can show, in the order the status menu offers them.
 export const STATUSES = [
-  "Not run", "Requesting", "Waiting for a runner", "Queued", "Running", "Paused", "Interrupted", "Finished", "Failed", "Re-run failed"
+  "Not run", "Requesting", "Waiting to start", "Queued", "Running", "Paused", "Interrupted", "Finished", "Failed", "Re-run failed"
 ] as const;
 export type Status = (typeof STATUSES)[number];
 
@@ -181,7 +181,7 @@ export function statusPill(model: StatusModel): { status: Status; label: string;
   switch (state.kind) {
     case "not-run": return pill("Not run", "idle");
     case "queued":
-      if (state.waiting) return pill("Waiting for a runner", "warn");
+      if (state.waiting) return pill("Waiting to start", "warn");
       return pill("Queued", "busy", state.position === null ? "Queued" : `Queued, #${state.position}`);
     case "running": return pill("Running", "busy");
     case "stuck": return state.resumable ? pill("Paused", "warn") : pill("Interrupted", "warn");
@@ -232,7 +232,7 @@ export function RunButton({ row, model, onRun, before, held = false }: {
   );
 }
 
-export const COMMUNITY_WARNING = "Community packages are not reviewed by Concord. Running one runs a stranger's code with "
+export const COMMUNITY_WARNING = "Community analyses are not reviewed by Concord. Running one runs a stranger's code with "
   + "your access to student data, and nothing stops it sending that data elsewhere.";
 
 // Cancel takes focus so a double Enter cannot run a stranger's code; focus returns to the element focused
@@ -246,7 +246,7 @@ export function CommunityConfirm({ onConfirm, onCancel }: { onConfirm: () => voi
     return () => before?.focus();
   }, [before]);
   return (
-    <div className="community-confirm" role="group" aria-label="Run a community package?" aria-describedby={warning}
+    <div className="community-confirm" role="group" aria-label="Run a community analysis?" aria-describedby={warning}
       onKeyDown={(e) => { if (e.key === "Escape") onCancel(); }}>
       <p id={warning}>{COMMUNITY_WARNING}</p>
       <div className="confirm-buttons">
@@ -268,7 +268,7 @@ export function ViewResult({ model, title, onOpen }: { model: StatusModel; title
   );
 }
 
-// A package's title as the link that opens it, after the Packages tab's icon.
+// A package's title as the link that opens it, after the Analytics tab's icon.
 export function OpenLink({ resultKey, children, onOpen, linkRef }: {
   resultKey: string;
   children: ReactNode;
@@ -283,13 +283,13 @@ export function OpenLink({ resultKey, children, onOpen, linkRef }: {
 
 // Each filter pill's icon, which a card's tag repeats for the group it is in, and the pill's title, by key.
 const GROUPS: Record<string, { icon: ComponentType<SVGProps<SVGSVGElement>>; title: string }> = {
-  search: { icon: MagnifyingGlassIcon, title: "Packages that match your search" },
-  all: { icon: Squares2X2Icon, title: "Every package that applies to this class" },
-  official: { icon: CheckBadgeIcon, title: "Packages made and reviewed by Concord" },
-  projects: { icon: FolderIcon, title: "Packages shared with this class's research projects" },
-  mine: { icon: UserIcon, title: "Packages you uploaded" },
-  community: { icon: GlobeAltIcon, title: "Packages other researchers shared publicly, which Concord has not reviewed" },
-  unlisted: { icon: ArchiveBoxIcon, title: "Results of packages this class's list no longer offers" }
+  search: { icon: MagnifyingGlassIcon, title: "Analyses that match your search" },
+  all: { icon: Squares2X2Icon, title: "Every analysis that applies to this class" },
+  official: { icon: CheckBadgeIcon, title: "Analyses made and reviewed by Concord" },
+  projects: { icon: FolderIcon, title: "Analyses shared with this class's research projects" },
+  mine: { icon: UserIcon, title: "Analyses you uploaded" },
+  community: { icon: GlobeAltIcon, title: "Analyses other researchers shared publicly, which Concord has not reviewed" },
+  unlisted: { icon: ArchiveBoxIcon, title: "Results of analyses this class's list no longer offers" }
 };
 
 const GroupIcon = ({ group }: { group: string }) => {
@@ -360,12 +360,14 @@ export interface ListContext {
   behind: Map<string, unknown>;
 }
 
-// The cards of the groups the filter pill keeps ("all", or a group's key), each tagged with its group.
+// The cards of the groups the filter pill keeps, each tagged with its group: a group's key keeps that
+// group's, and "all" keeps every group's in one list from A to Z.
 export function listCards(groups: Group[], filter: string, { results, requests, ...rest }: ListContext): Card[] {
-  return groups.filter((g) => filter === "all" || g.key === filter).flatMap((g) => g.rows.map((row) => {
+  const cards = groups.filter((g) => filter === "all" || g.key === filter).flatMap((g) => g.rows.map((row) => {
     const key = packageKey(row.identity);
     return { row, group: g.key, tag: g.tag(row), model: rowModel({ row, result: results.get(key), request: requests.get(key), ...rest }) };
   }));
+  return filter === "all" ? cards.sort((a, b) => byTitle(a.row, b.row)) : cards;
 }
 
 export interface ListProps {
@@ -398,7 +400,7 @@ export function PackageFilters({ options, selected, onSelect }: {
   onSelect: (key: string) => void;
 }) {
   return (
-    <div role="group" aria-label="Filter packages" className="filters">
+    <div role="group" aria-label="Filter analyses" className="filters">
       {options.map((o) => (
         <button key={o.key} type="button" aria-pressed={o.key === selected} title={GROUPS[o.key]?.title} onClick={() => onSelect(o.key)}>
           <GroupIcon group={o.key} />{o.label} <span className="count">{o.count}</span>
@@ -428,8 +430,8 @@ export function PackageSearch({ search, onSearch }: { search: string | null; onS
   }
   return (
     <form role="search" className="package-search" onSubmit={(e) => { e.preventDefault(); onSearch(text.trim() || null); }}>
-      <input type="search" name="q" value={text} onChange={(e) => setText(e.target.value)} placeholder="Search for a package..."
-        aria-label="Search for a package" />
+      <input type="search" name="q" value={text} onChange={(e) => setText(e.target.value)} placeholder="Search for an analysis..."
+        aria-label="Search for an analysis" />
       <button type="submit" className="icon-button"><MagnifyingGlassIcon aria-hidden="true" />Search</button>
     </form>
   );
@@ -443,7 +445,7 @@ export function StatusFilter({ counts, selected, onSelect }: {
   onSelect: (status: Status | "all") => void;
 }) {
   return (
-    <select className="status-filter" aria-label="Filter packages by run status" value={selected}
+    <select className="status-filter" aria-label="Filter analyses by run status" value={selected}
       onChange={(e) => onSelect(e.target.value as Status | "all")}>
       <option value="all">All run statuses</option>
       {STATUSES.filter((s) => counts.get(s) || s === selected).map((s) => <option key={s} value={s}>{s} ({counts.get(s) ?? 0})</option>)}

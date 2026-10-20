@@ -36,7 +36,7 @@ export function Unlisted({ results, search, titles, notes, runner, mark, classHa
   linkRef: (key: string, link: HTMLAnchorElement | null) => void;
 }) {
   return (
-    <section className="unlisted" aria-label="Packages no longer listed">
+    <section className="unlisted" aria-label="Analyses no longer listed">
       <ul className="package-rows">
         {results.map((result) => {
           const identity = result.package.identity;

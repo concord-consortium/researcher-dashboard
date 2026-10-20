@@ -16,12 +16,12 @@ describe("App", () => {
     expect(document.body.textContent).not.toMatch(/Analy[sz]/);
   });
 
-  it("says the dashboard runs packages and shows their results and counts", () => {
+  it("says the dashboard runs analyses and shows their results and counts", () => {
     render(<App start={{ kind: "info", reason: "no-launch" }} reauthorize={none} />);
     const list = screen.getByRole("heading", { name: "What it can show" }).nextElementSibling!;
     expect([...list.querySelectorAll("li")].map((li) => li.textContent!.replace(/\s+/g, " ").trim())).toEqual([
-      "The packages that apply to the class, which you can search and filter by group: Official, Project, Personal and Community.",
-      "Running a package for the class, and reading, copying and downloading its result and its tables.",
+      "The analyses that apply to the class, which you can search and filter by group: Official, Project, Personal and Community.",
+      "Running an analysis for the class, and reading, copying and downloading its result and its tables.",
       "Finished results that re-run on their own as students save new work.",
       "How many of the class's students saved work in the last few minutes, and the counts from your own runs."
     ]);

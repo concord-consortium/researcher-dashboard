@@ -64,26 +64,26 @@ export function Header({ scope, user, demo, tabs, activity, now, session, runner
           <img className="about-logo" src={logo} alt="Concord Consortium" />
           <h2 id="about-title"><span>Researcher Dashboard</span> <span className="version">v{APP_VERSION}</span></h2>
         </div>
-        <h3>Packages and results</h3>
+        <h3>Analyses and results</h3>
         <p>
-          Each card is a package: an analysis of the class's student work. Run starts your runner, which
-          reads the class's current data, runs the package and writes its result. Open a package to read
-          its result, copy or download it, and copy or download each of its tables.
+          Each card on the Analytics tab is an analysis of the class's student work. Run reads the class's
+          current data, runs the analysis and writes its result. Open an analysis to read its result, copy
+          or download it, and copy or download each of its tables.
         </p>
         <h3>Automatic re-runs</h3>
         <p>
           While this page is open, a finished result re-runs on its own when students save new work.
-          Community packages wait for you to run them.
+          Community analyses wait for you to run them.
         </p>
         <h3>Groups</h3>
         <p>
-          Official packages are made and reviewed by Concord. Project packages are shared with this class's
-          research projects. Personal packages are the ones you uploaded. Community packages are shared publicly
+          Official analyses are made and reviewed by Concord. Project analyses are shared with this class's
+          research projects. Personal analyses are the ones you uploaded. Community analyses are shared publicly
           by other researchers and are not reviewed, so the page asks before running one.
         </p>
         <h3>Who sees what</h3>
         <p>
-          <strong>Your runs are your own.</strong> The packages you run, their results and your counts are
+          <strong>Your runs are your own.</strong> The analyses you run, their results and your counts are
           yours alone. Another researcher of this class sees only their own runs.
         </p>
         <p>

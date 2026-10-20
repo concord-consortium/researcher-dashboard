@@ -67,14 +67,14 @@ describe("PackageList", () => {
     }
   });
 
-  it("lists every group's packages in one list, each tagged with its group, and keeps only the filter's group", () => {
+  it("lists every group's packages in one list from A to Z, each tagged with its group, and keeps only the filter's group", () => {
     const official = row({ title: "Ours", official: true }), mine = row({ title: "My own", mine: true });
     const stranger = row({ title: "Stranger's", visibility: "public" });
     list([stranger, mine, official]);
     expect([...document.querySelectorAll(".package-rows > li")].map((li) => [li.querySelector(".title")!.textContent, li.querySelector(".tag")!.textContent]))
-      .toEqual([["Ours", "Official"], ["My own", "Personal"], ["Stranger's", "Community"]]);
+      .toEqual([["My own", "Personal"], ["Ours", "Official"], ["Stranger's", "Community"]]);
     expect(screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent))
-      .toEqual(["Ours Version 1.0.0 Group: Official", "My own Version 1.0.0 Group: Personal", "Stranger's Version 1.0.0 Group: Community"]);
+      .toEqual(["My own Version 1.0.0 Group: Personal", "Ours Version 1.0.0 Group: Official", "Stranger's Version 1.0.0 Group: Community"]);
     cleanup();
     list([stranger, mine, official], { filter: "mine" });
     expect([...document.querySelectorAll(".title")].map((e) => e.textContent)).toEqual(["My own"]);
@@ -127,18 +127,18 @@ describe("PackageList", () => {
       .toEqual(["Not run", "Queued, #2", "Queued", "Running", "Finished", "Failed", "Interrupted"]);
     expect(stateLine("Queued")).toBe("Queued, number 2 in line.");
     expect(stateLine("Lagging")).toBe("Queued.");
-    expect(stateLine("Busy")).toBe("Running Busy: preparing the package.");
+    expect(stateLine("Busy")).toBe("Running Busy: preparing the analysis.");
     expect(stateLine("Done")).toBe("6 open responses from 3 learners.");
     expect(finishedAt("Done")).toBe(`Finished ${formatTime(1000)}`);
     expect(item("Done").querySelector(".status-pill")!.textContent).toBe("Finished");
     expect(finishedAt("Not")).toBeNull();
     expect(stateLine("Failed")).toBeNull();
-    expect(failureText("Failed")).toBe(`Failed: The runner stopped before the run finished. ${NEXT_STEP}`);
+    expect(failureText("Failed")).toBe(`Failed: The run stopped before it finished. ${NEXT_STEP}`);
     expect(failurePanel("Failed")!.querySelector(".detail")).toBeNull();
     expect(failurePanel("Failed")!.querySelector("a")!.getAttribute("href")).toBe("https://concord.org/about/contact/");
     expect(failurePanel("Failed")!.querySelector(".when")!.textContent).toBe(`Failed ${formatTime(5000)}`);
     expect(failurePanel("Done")).toBeNull();
-    expect(stateLine("Stuck")).toBe("Interrupted: its runner stopped partway. This is being checked.");
+    expect(stateLine("Stuck")).toBe("Interrupted: it stopped partway. This is being checked.");
     expect(within(item("Stuck")).getByText("It can be run again once it is marked failed.")).toBeDefined();
   });
 
@@ -158,7 +158,7 @@ describe("PackageList", () => {
   it("asks for a run of queued work nobody will take", () => {
     const r = row({ title: "Stranded", official: true });
     list([r], { runner: { state: "terminated" }, results: new Map([[packageKey(r.identity), result(r, { status: "queued" })]]) });
-    expect(stateLine("Stranded")).toBe("Queued, waiting for a runner: run it to start one.");
+    expect(stateLine("Stranded")).toBe("Queued and waiting to start: run it to start it.");
     expect(runButton("Stranded").getAttribute("aria-disabled")).toBeNull();
   });
 
@@ -191,9 +191,9 @@ describe("PackageList", () => {
       ])
     });
     expect(stateLine("Requeued")).toBe("Re-run: queued, number 1 in line.");
-    expect(stateLine("Rerunning")).toBe("Re-run: running the package.");
+    expect(stateLine("Rerunning")).toBe("Re-run: running the analysis.");
     expect(failureText("Refailed")).toBe(
-      `The latest re-run failed: No runner picked up this run in time. Showing the result from ${formatTime(1000)}. ${NEXT_STEP}`
+      `The latest re-run failed: This run did not start in time. Showing the result from ${formatTime(1000)}. ${NEXT_STEP}`
     );
     expect(failurePanel("Refailed")!.querySelector(".when")!.textContent).toBe(`Failed ${formatTime(4000)}`);
     for (const title of ["Requeued", "Rerunning", "Refailed"]) {
@@ -208,7 +208,7 @@ describe("PackageList", () => {
     const button = runButton("Unreviewed");
     expect(button.getAttribute("aria-disabled")).toBe("true");
     expect(button.hasAttribute("disabled")).toBe(false);
-    expect(document.getElementById(button.getAttribute("aria-describedby")!)!.textContent).toBe("Only official packages can be run here for now.");
+    expect(document.getElementById(button.getAttribute("aria-describedby")!)!.textContent).toBe("Only official analyses can be run here for now.");
     fireEvent.click(button);
     expect(onRun).not.toHaveBeenCalled();
   });
@@ -261,7 +261,7 @@ describe("PackageList", () => {
     list([r], { results: new Map([[packageKey(r.identity), result(r)]]) });
     const [runRow, reason] = [...item("Unreviewed done").querySelector(".controls")!.children];
     expect([...runRow.children]).toEqual([item("Unreviewed done").querySelector(".status-pill"), runButton("Unreviewed done")]);
-    expect(reason.textContent).toBe("Only official packages can be run here for now.");
+    expect(reason.textContent).toBe("Only official analyses can be run here for now.");
   });
 
   it("offers View result, before Run, only for a finished result with something to read, through a re-run", () => {
@@ -291,7 +291,7 @@ describe("PackageList", () => {
     list([fresh, done], { results: new Map([[packageKey(done.identity), result(done)]]), onOpen });
     for (const r of [fresh, done]) {
       const link = screen.getByRole("link", { name: titleOf(r) });
-      expect(link.getAttribute("href")).toBe(`#packages/${encodeURIComponent(packageKey(r.identity))}`);
+      expect(link.getAttribute("href")).toBe(`#analytics/${encodeURIComponent(packageKey(r.identity))}`);
       fireEvent.click(link);
       expect(onOpen).toHaveBeenLastCalledWith(packageKey(r.identity));
     }
@@ -301,14 +301,14 @@ describe("PackageList", () => {
   it("shows an error the page has no words for as the package failing, with the error as its detail", () => {
     const r = row({ title: "Broke", official: true });
     list([r], { results: new Map([[packageKey(r.identity), result(r, { status: "failed", error: "cc-data reports exited 3: NOT_AUTHENTICATED", finished_at: stamp(5000) })]]) });
-    expect(failureText("Broke")).toBe(`Failed: The package stopped with an error. ${NEXT_STEP} Details: cc-data reports exited 3: NOT_AUTHENTICATED`);
+    expect(failureText("Broke")).toBe(`Failed: The analysis stopped with an error. ${NEXT_STEP} Details: cc-data reports exited 3: NOT_AUTHENTICATED`);
     expect(failurePanel("Broke")!.querySelector(".detail code")!.textContent).toBe("cc-data reports exited 3: NOT_AUTHENTICATED");
   });
 
   it("leaves out the instruction to press a control on a row that has none", () => {
-    expect(stateText({ kind: "queued", position: null, waiting: true }, "T", false)).toBe("Queued, waiting for a runner.");
+    expect(stateText({ kind: "queued", position: null, waiting: true }, "T", false)).toBe("Queued and waiting to start.");
     expect(stateText({ kind: "stuck", resumable: true }, "T", false)).toBe("Paused partway through.");
-    expect(stateText({ kind: "queued", position: null, waiting: true }, "T", true)).toBe("Queued, waiting for a runner: run it to start one.");
+    expect(stateText({ kind: "queued", position: null, waiting: true }, "T", true)).toBe("Queued and waiting to start: run it to start it.");
     expect(stateText({ kind: "stuck", resumable: true }, "T", true)).toBe("Paused partway through: resume it to finish.");
   });
 
@@ -345,7 +345,7 @@ describe("statusPill", () => {
 
   it.each([
     ["a request in flight, whatever the state", model({ pending: true, state: { kind: "done", summary: null, finishedAt: 1 } }), "Requesting", "Requesting", "busy"],
-    ["queued work nothing will take", model({ state: { kind: "queued", position: null, waiting: true } }), "Waiting for a runner", "Waiting for a runner", "warn"],
+    ["queued work nothing will take", model({ state: { kind: "queued", position: null, waiting: true } }), "Waiting to start", "Waiting to start", "warn"],
     ["a place in line, under the Queued status", model({ state: { kind: "queued", position: 2, waiting: false } }), "Queued", "Queued, #2", "busy"],
     ["a run paused on its runner", model({ state: { kind: "stuck", resumable: true } }), "Paused", "Paused", "warn"],
     ["a failed re-run over a finished result", model({ state: { kind: "failed", error: "x", finishedAt: 1 }, finished }), "Re-run failed", "Re-run failed", "error"],
@@ -360,7 +360,7 @@ describe("unlistedModel", () => {
     const pkg = { identity: "users/7/hidden", version: "1.0.0", checksum: "c" };
     const result: Result = { status: "running", stage: "run_package", microvm_id: "vm-1", package: pkg, updated_at: stamp(2) };
     const runner: Runner = { state: "running", microvm_id: "vm-1", updated_at: stamp(1) };
-    expect(unlistedModel(result, runner, null, H, "Hidden").line).toBe("Running Hidden: running the package.");
+    expect(unlistedModel(result, runner, null, H, "Hidden").line).toBe("Running Hidden: running the analysis.");
   });
 });
 

@@ -11,7 +11,7 @@ const earlier = `This result is from an earlier run, finished ${formatTime(1000)
 describe("olderResult", () => {
   it.each([
     ["a request in flight", model({ pending: true, state: { kind: "done", summary: null, finishedAt: 1000 } }), "A new run is being requested."],
-    ["a queued run nothing will take", model({ state: { kind: "queued", position: null, waiting: true } }), "A new run is waiting for a runner."],
+    ["a queued run nothing will take", model({ state: { kind: "queued", position: null, waiting: true } }), "A new run is waiting to start."],
     ["a queued run", model({ state: { kind: "queued", position: 2, waiting: false } }), "A new run is queued."],
     ["a running run", model({ state: { kind: "running", stage: "run_package", startedAt: null } }), "A new run is in progress."],
     ["a paused run", model({ state: { kind: "stuck", resumable: true } }), "A new run is paused partway through."],

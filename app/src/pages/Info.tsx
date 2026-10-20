@@ -51,9 +51,8 @@ export function Info({ reason, detail, demo = false, user = null, portal = null 
           <p>
             This is the Concord Consortium Researcher Dashboard. It runs analyses of the student work
             in a class you research, such as a summary of their open responses or how they used a
-            model, and shows you the results. Each kind of analysis is called a package. Developers
-            and researchers build and test packages on their own computers, then upload them for use
-            here.
+            model, and shows you the results. Developers and researchers build and test each analysis
+            on their own computers, then upload it as a package for use here.
           </p>
         ) : (
           <Callout tone="notice" role="status">
@@ -77,7 +76,7 @@ export function Info({ reason, detail, demo = false, user = null, portal = null 
             <div>
               <h2 id="demo-heading"><BeakerIcon aria-hidden="true" />Try the demo</h2>
               <p>
-                See the dashboard with a sample class: run packages, read their results and look around,
+                See the dashboard with a sample class: run analyses, read their results and look around,
                 without signing in. Nothing in it is real student data.
               </p>
             </div>
@@ -102,10 +101,10 @@ export function Info({ reason, detail, demo = false, user = null, portal = null 
             <h2 id="shows-heading"><CubeIcon aria-hidden="true" />What it can show</h2>
             <ul>
               <li>
-                The packages that apply to the class, which you can search and filter by group: Official,
+                The analyses that apply to the class, which you can search and filter by group: Official,
                 Project, Personal and Community.
               </li>
-              <li>Running a package for the class, and reading, copying and downloading its result and its tables.</li>
+              <li>Running an analysis for the class, and reading, copying and downloading its result and its tables.</li>
               <li>Finished results that re-run on their own as students save new work.</li>
               <li>
                 How many of the class's students saved work in the last few minutes, and the counts from your

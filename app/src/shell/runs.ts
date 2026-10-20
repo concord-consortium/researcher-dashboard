@@ -111,8 +111,8 @@ export function rowState(result: Result | undefined, runner: Runner | null, mark
 const STAGES: Record<string, string> = {
   starting: "starting",
   pull: "reading the class's data",
-  prepare_package: "preparing the package",
-  run_package: "running the package"
+  prepare_package: "preparing the analysis",
+  run_package: "running the analysis"
 };
 
 // A stage the page has no words for reads as working, never as the runner's own name for it.
@@ -124,14 +124,14 @@ export const ACCEPTED_WAIT_MS = 3 * 60_000;
 
 // Whether the row offers Run, and the reason when it does not and the state alone does not say why.
 export function runOffer(runnable: boolean, state: RowState): { enabled: boolean; reason?: string } {
-  if (!runnable) return { enabled: false, reason: "Only official packages can be run here for now." };
+  if (!runnable) return { enabled: false, reason: "Only official analyses can be run here for now." };
   if (state.kind === "running") return { enabled: false };
   if (state.kind === "stuck" && !state.resumable) return { enabled: false, reason: "It can be run again once it is marked failed." };
   if (state.kind === "queued" && !state.waiting) return { enabled: false };
   return { enabled: true };
 }
 
-export const WAITING = "Queued, waiting for a runner: run it to start one.";
+export const WAITING = "Queued and waiting to start: run it to start it.";
 
 // A run request from one row: in flight, refused with a message, an accepted Resume, or an
 // accepted Run whose queued result has not arrived yet. `at` is the row's result `updated_at` when
@@ -181,28 +181,27 @@ export const sentence = (text: string) => (/[.!?…]$/.test(text) ? text : `${te
 export function sessionLines(runner: Runner | null | undefined, classHash: string, results: Map<string, Result>,
   titleOf: (key: string) => string | null, requesting: boolean): string[] {
   const waiting = () => ([...results.values()].some((r) => r.status === "queued") && !requesting ? [WAITING] : []);
-  if (runner === null) return ["No runner yet; one starts when you run a package.", ...waiting()];
+  if (runner === null) return ["Idle until you run an analysis.", ...waiting()];
   switch (runner?.state) {
     case "starting":
-      return ["Starting a runner for your runs…"];
+      return ["Starting up for your runs…"];
     case "ready":
-      return ["Your runner is available."];
+      return ["Ready to run analyses."];
     case "running": {
       const current = runner.current_package;
       if (!current) return [];
-      if (current.class_hash !== classHash) return ["Running a package for another of your classes."];
+      if (current.class_hash !== classHash) return ["Running an analysis for another of your classes."];
       const status = results.get(current.package_key)?.status;
-      if (status && status !== "running") return ["Your runner is starting its next package."];
-      return [`Running ${titleOf(current.package_key) ?? "a package"}.`];
+      if (status && status !== "running") return ["Starting your next analysis."];
+      return [`Running ${titleOf(current.package_key) ?? "an analysis"}.`];
     }
     case "suspending":
     case "suspended":
-      return ["Your runner is idle; it starts when you run a package.",
-        ...((runner.queue ?? []).length > 0 ? ["Queued packages will start within a couple of minutes."] : [])];
+      return [(runner.queue ?? []).length > 0 ? "Idle; queued analyses will start within a couple of minutes." : "Idle until you run an analysis."];
     case "terminated":
-      return ["Your runner has stopped.", ...waiting()];
+      return ["Stopped until you run an analysis.", ...waiting()];
     case "failed":
-      return [`Your runner stopped with an error: ${sentence(runner.error ?? "no reason was given")}`, ...waiting()];
+      return [`Stopped with an error: ${sentence(runner.error ?? "no reason was given")}`, ...waiting()];
     default:
       return [];
   }

@@ -126,7 +126,7 @@ function Demo() {
               <>
                 <div style={knobs}>
                   <label style={{ ...field, flex: 1 }}>
-                    <span style={{ fontWeight: 700, whiteSpace: "nowrap" }}>Runner step</span>
+                    <span style={{ fontWeight: 700, whiteSpace: "nowrap" }}>Step time</span>
                     <select style={{ ...select, display: "block", width: "100%", marginTop: 2 }} value={stepMs} onChange={(e) => setStepMs(Number(e.target.value))}>
                       {[300, 1500, 4000, 10000].map((ms) => <option key={ms} value={ms}>{ms / 1000} s</option>)}
                     </select>

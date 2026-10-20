@@ -3,7 +3,7 @@ import { packageKey } from "../src/shell/packages";
 import type { PackageRow, Scope } from "../src/shell/portal";
 import type { Finished, Result } from "../src/shell/runs";
 import type { InfoReason } from "../src/shell/start";
-import { EXPLANATION_KEYWORDS, ISOLATION_PROBE, MODEL_USE, RUNNER_SMOKE, WILDFIRE_RESPONSES } from "./markdown";
+import { EXPLANATION_KEYWORDS, MODEL_USE, WILDFIRE_RESPONSES } from "./markdown";
 import { stamp, type WorldState } from "./world";
 
 const MIN = 60_000;
@@ -34,27 +34,18 @@ function pkg(identity: string, title: string, over: Partial<PackageRow> = {}, de
 const ROWS: PackageRow[] = [
   pkg("official/wildfire-responses", "Wildfire open responses", { official: true },
     "Every open response the class wrote in the Wildfire activities, by question."),
-  pkg("official/wildfire-model-use", "Wildfire model use", { official: true },
+  pkg("projects/20/activity-model-use", "Activity and model use", { visibility: "project", project: { id: 20, name: "Wildfire Research" } },
     "How students used the wildfire model: runs, settings, page progress and claims."),
-  pkg("official/runner-smoke", "Runner smoke test", { official: true, current_version: { version: "1.0.0", title: "Runner smoke test", description: null } }),
-  pkg("official/isolation-probe", "Isolation probe", { official: true, current_version: { version: "1.0.0", title: "Isolation probe", description: "Checks that a package cannot reach the network." } }),
-  pkg("projects/20/claim-coding", "Claim coding for Wildfire", { visibility: "project", project: { id: 20, name: "Wildfire Research" } },
-    "Codes each claim answer against the project's rubric."),
   pkg("users/200/explanation-keywords", "Explanation keywords", { visibility: "private", mine: true },
     "A tally of the science words students use in their open responses."),
-  pkg("users/311/word-cloud", "Response word cloud", {}, "A word frequency table of every open response."),
   pkg("users/402/time-on-task", "Time on task", {})
 ];
 
 const OUTPUTS = new Map([
   ["official/wildfire-responses", { summary: "6 open responses to 2 questions from 3 learners.", display: WILDFIRE_RESPONSES }],
-  ["official/wildfire-model-use", { summary: "15 students, 14 ran the model, 9 completed a task page.", display: MODEL_USE }],
-  ["official/runner-smoke", { summary: "Runner smoke test passed.", display: RUNNER_SMOKE }],
-  ["official/isolation-probe", { summary: "No network reachable from the package sandbox.", display: ISOLATION_PROBE }],
+  ["projects/20/activity-model-use", { summary: "15 students, 14 ran the model, 9 completed a task page.", display: MODEL_USE }],
   ["users/200/explanation-keywords", { summary: "8 science keywords in 6 responses.", display: EXPLANATION_KEYWORDS }],
-  ["projects/20/claim-coding", { summary: "11 claims coded: 7 strong, 3 partial, 1 missing evidence.", display: "# Claim coding for Wildfire\n\n11 claims coded: 7 strong, 3 partial, 1 missing evidence.\n\n| Code | Claims |\n|---|---:|\n| Claim with evidence and reasoning | 7 |\n| Claim with evidence only | 3 |\n| Claim without evidence | 1 |\n" }],
-  ["users/402/time-on-task", { summary: "Median 14 minutes per page across 9 pages.", display: "# Time on task\n\nMedian 14 minutes per page across 9 pages.\n\n| Page | Median minutes |\n|---|---:|\n| Activity 2, page 3 | 18 |\n| Activity 2, page 4 | 15 |\n| Activity 3, page 2 | 12 |\n" }],
-  ["users/311/word-cloud", { summary: "12 words used more than 3 times.", display: "# Response word cloud\n\n12 words used more than 3 times.\n\n| Word | Uses |\n|---|---:|\n| fire | 14 |\n| wind | 9 |\n| grass | 6 |\n" }]
+  ["users/402/time-on-task", { summary: "Median 14 minutes per page across 9 pages.", display: "# Time on task\n\nMedian 14 minutes per page across 9 pages.\n\n| Page | Median minutes |\n|---|---:|\n| Activity 2, page 3 | 18 |\n| Activity 2, page 4 | 15 |\n| Activity 3, page 2 | 12 |\n" }]
 ].map(([identity, output]) => [packageKey(identity as string), output as { summary: string; display: string }]));
 
 const row = (identity: string) => ROWS.find((r) => r.identity === identity)!;
@@ -106,21 +97,21 @@ export interface Scenario {
 export const SCENARIOS: Scenario[] = [
   {
     key: "ready",
-    label: "Signed in, several packages",
-    about: "Four official packages (two finished, two never run), a project package, one of your own and two community ones (every package runs here, so each kind can be tried; the real catalog runs official packages alone). The runner is idle; nobody has saved in the last 5 minutes. Press Run or Student saves to watch a run go through.",
+    label: "Signed in, several analyses",
+    about: "An official analysis (finished), a project analysis (never run), one of your own and a community one (every analysis runs here, so each kind can be tried; the real catalog runs official analyses alone). Runs are idle; nobody has saved in the last 5 minutes. Press Run or Student saves to watch a run go through.",
     world: (now) => ({
       ...base(now),
-      results: new Map([done("official/wildfire-responses", 40, now), done("official/runner-smoke", 38, now)])
+      results: new Map([done("official/wildfire-responses", 40, now)])
     })
   },
   {
     key: "running",
-    label: "A package running",
-    about: "Wildfire model use is re-running over its earlier result, Wildfire open responses is queued behind it, and 2 students are active.",
+    label: "An analysis running",
+    about: "Activity and model use is re-running over its earlier result, Wildfire open responses is queued behind it, and 2 students are active.",
     world: (now) => {
       const s = base(now);
-      const modelKey = packageKey("official/wildfire-model-use"), responsesKey = packageKey("official/wildfire-responses");
-      const [, modelDone] = done("official/wildfire-model-use", 50, now);
+      const modelKey = packageKey("projects/20/activity-model-use"), responsesKey = packageKey("official/wildfire-responses");
+      const [, modelDone] = done("projects/20/activity-model-use", 50, now);
       const [, responsesDone] = done("official/wildfire-responses", 48, now);
       return {
         ...s,
@@ -130,7 +121,7 @@ export const SCENARIOS: Scenario[] = [
           queue: [{ class_hash: SCOPE.class_hash, package_key: responsesKey }]
         },
         results: new Map<string, Result>([
-          [modelKey, { ...modelDone, status: "running", stage: "run_package", started_at: stamp(now - 84_000), previous: finished("official/wildfire-model-use", 50, now), updated_at: stamp(now - 20_000) }],
+          [modelKey, { ...modelDone, status: "running", stage: "run_package", started_at: stamp(now - 84_000), previous: finished("projects/20/activity-model-use", 50, now), updated_at: stamp(now - 20_000) }],
           [responsesKey, { ...responsesDone, status: "queued", previous: finished("official/wildfire-responses", 48, now), updated_at: stamp(now - 60_000) }]
         ]),
         activity: activity(now, [1, 3, 40])
@@ -140,30 +131,30 @@ export const SCENARIOS: Scenario[] = [
   {
     key: "failed",
     label: "A failed run",
-    about: "Wildfire model use's latest re-run failed over an earlier result; Isolation probe failed on its first run; the runner stopped with an error.",
+    about: "Activity and model use's latest re-run failed over an earlier result; Explanation keywords failed on its first run; runs stopped with an error.",
     world: (now) => {
       const s = base(now);
-      const [, modelDone] = done("official/wildfire-model-use", 90, now);
-      const isolation = finished("official/isolation-probe", 12, now);
+      const [, modelDone] = done("projects/20/activity-model-use", 90, now);
+      const keywords = finished("users/200/explanation-keywords", 12, now);
       return {
         ...s,
         runner: { state: "failed", error: "The runner could not start: no capacity in us-east-1", queue: [], microvm_id: "vm-demo-1", updated_at: stamp(now - 5 * MIN) },
         results: new Map<string, Result>([
-          [packageKey("official/wildfire-model-use"), { ...modelDone, status: "failed", error: "cc-data reports filter-options exited 3: NOT_AUTHENTICATED", started_at: stamp(now - 8 * MIN), finished_at: stamp(now - 7 * MIN), previous: finished("official/wildfire-model-use", 90, now), updated_at: stamp(now - 7 * MIN) }],
-          [packageKey("official/isolation-probe"), { ...isolation, status: "failed", summary: null, display: null, error: "the package exited 1 with no output", previous: null, updated_at: stamp(now - 11 * MIN) }],
+          [packageKey("projects/20/activity-model-use"), { ...modelDone, status: "failed", error: "cc-data reports filter-options exited 3: NOT_AUTHENTICATED", started_at: stamp(now - 8 * MIN), finished_at: stamp(now - 7 * MIN), previous: finished("projects/20/activity-model-use", 90, now), updated_at: stamp(now - 7 * MIN) }],
+          [packageKey("users/200/explanation-keywords"), { ...keywords, status: "failed", summary: null, display: null, error: "the package exited 1 with no output", previous: null, updated_at: stamp(now - 11 * MIN) }],
           done("official/wildfire-responses", 40, now)
         ]),
-        failing: new Map([[packageKey("official/isolation-probe"), "the package exited 1 with no output"]])
+        failing: new Map([[packageKey("users/200/explanation-keywords"), "the package exited 1 with no output"]])
       };
     }
   },
   {
     key: "long",
     label: "A long markdown result",
-    about: "The long result is **Wildfire model use**'s: click its card, or its View result button, to open it. It is a long multi-section result in a real result's layout, with made-up numbers, and scrolling it shows the subheader staying put.",
+    about: "The long result is **Activity and model use**'s: click its card, or its View result button, to open it. It is a long multi-section result in a real result's layout, with made-up numbers, and scrolling it shows the subheader staying put.",
     world: (now) => ({
       ...base(now),
-      results: new Map([done("official/wildfire-model-use", 30, now), done("official/wildfire-responses", 32, now)])
+      results: new Map([done("projects/20/activity-model-use", 30, now), done("official/wildfire-responses", 32, now)])
     })
   },
   {
@@ -173,19 +164,19 @@ export const SCENARIOS: Scenario[] = [
     world: (now) => ({
       ...base(now),
       activity: new Map(),
-      results: new Map([done("official/wildfire-responses", 300, now), done("official/wildfire-model-use", 280, now)])
+      results: new Map([done("official/wildfire-responses", 300, now), done("projects/20/activity-model-use", 280, now)])
     })
   },
   {
     key: "first",
     label: "First visit, nothing run",
-    about: "No results and no counts yet; the runner has never started.",
+    about: "No results and no counts yet; nothing has run.",
     world: (now) => ({ ...base(now), runner: null, counts: null, activity: activity(now, [2]) })
   },
   {
     key: "edge",
     label: "Edge cases",
-    about: "A truncated profile notice, a result whose package is no longer listed, and a result behind a student's save with automatic re-runs about to fire.",
+    about: "A truncated profile notice, a result whose analysis is no longer listed, and a result behind a student's save with automatic re-runs about to fire.",
     world: (now) => {
       const s = base(now);
       const gone: Result = {
@@ -197,7 +188,7 @@ export const SCENARIOS: Scenario[] = [
       return {
         ...s,
         profile: { ...s.profile!, truncated: true },
-        results: new Map([done("official/runner-smoke", 30, now), [packageKey("official/legacy-responses"), gone]]),
+        results: new Map([done("projects/20/activity-model-use", 30, now), [packageKey("official/legacy-responses"), gone]]),
         activity: activity(now, [0.5, 12])
       };
     }

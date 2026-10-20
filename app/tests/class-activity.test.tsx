@@ -86,7 +86,7 @@ describe("ClassActivity", () => {
   it("says automatic re-runs have stopped, as a status, in place of the re-run line", () => {
     show({ activity: docs(START - MIN), stopped: "expired" });
     expect(screen.getByRole("status").textContent)
-      .toBe("Automatic re-runs have stopped because your sign-in has expired. Run any package to sign in again.");
+      .toBe("Automatic re-runs have stopped because your sign-in has expired. Run any analysis to sign in again.");
     expect(screen.queryByText(/re-run on their own/)).toBeNull();
   });
 

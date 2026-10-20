@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 
-// Where the page is, kept in the URL's fragment so the browser's Back returns to All Packages.
-// `key` is a package key, the result document's id; `q` is the list's search, as `#packages?q=`.
+// Where the page is, kept in the URL's fragment so the browser's Back returns to All Analyses. The page
+// opens on Info. `key` is a package key, the result document's id; `q` is the list's search, as
+// `#analytics?q=`. `#packages` is read as `#analytics`.
 export type Route = { tab: "packages"; key: string | null; q?: string } | { tab: "info" };
 
 export const ALL_PACKAGES: Route = { tab: "packages", key: null };
@@ -15,16 +16,16 @@ export function parseRoute(hash: string): Route {
   const fragment = hash.replace(/^#/, "");
   const mark = fragment.indexOf("?");
   const [tab, ...rest] = (mark < 0 ? fragment : fragment.slice(0, mark)).split("/");
-  if (tab === "info") return { tab: "info" };
-  const key = tab === "packages" && rest.length > 0 && rest.join("/") ? decoded(rest.join("/")) : null;
+  if (tab === "info" || tab === "") return { tab: "info" };
+  const key = (tab === "analytics" || tab === "packages") && rest.length > 0 && rest.join("/") ? decoded(rest.join("/")) : null;
   const q = mark < 0 ? "" : new URLSearchParams(fragment.slice(mark + 1)).get("q")?.trim() ?? "";
   return !key && q ? { tab: "packages", key, q } : { tab: "packages", key };
 }
 
 export function routeHash(route: Route): string {
   if (route.tab === "info") return "#info";
-  if (route.key) return `#packages/${encodeURIComponent(route.key)}`;
-  return route.q ? `#packages?${new URLSearchParams({ q: route.q })}` : "#packages";
+  if (route.key) return `#analytics/${encodeURIComponent(route.key)}`;
+  return route.q ? `#analytics?${new URLSearchParams({ q: route.q })}` : "#analytics";
 }
 
 // The route, and a navigate that takes effect at once and adds a history entry; Back and Forward

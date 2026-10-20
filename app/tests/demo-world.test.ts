@@ -7,7 +7,7 @@ import type { Result } from "../src/shell/runs";
 afterEach(() => { vi.useRealTimers(); });
 
 const STEP = 100;
-const MODEL = "official__wildfire-model-use", RESPONSES = "official__wildfire-responses";
+const MODEL = "projects__20__activity-model-use", RESPONSES = "official__wildfire-responses";
 
 // A scenario's world, changed by `over` and watched the way the page watches it, with each result's
 // latest status.
@@ -39,11 +39,11 @@ describe("the demo's runner", () => {
     const changed = vi.fn();
     const world = new World(state, { stepMs: STEP, failNext: true, refuseNext: true }, changed);
     const services = world.services();
-    const refused = services.portal.runPackage("official/isolation-probe", "1.0.0").catch(() => "refused");
+    const refused = services.portal.runPackage("users/402/time-on-task", "1.0.0").catch(() => "refused");
     await vi.advanceTimersByTimeAsync(400);
     expect(await refused).toBe("refused");
     expect([world.knobs.refuseNext, changed.mock.calls.length]).toEqual([false, 1]);
-    const ran = services.portal.runPackage("official/isolation-probe", "1.0.0");
+    const ran = services.portal.runPackage("users/402/time-on-task", "1.0.0");
     await vi.advanceTimersByTimeAsync(20 * STEP);
     await ran;
     expect([world.knobs.failNext, changed.mock.calls.length]).toEqual([false, 2]);
@@ -53,7 +53,7 @@ describe("the demo's runner", () => {
     const { services, status } = await watched("running", (s) => ({ ...s, runner: { ...s.runner!, state: "suspended", queue: [] } }));
     await vi.advanceTimersByTimeAsync(20 * STEP);
     expect(status(MODEL)).toBe("running");
-    const request = services.portal.runPackage("official/wildfire-model-use", "1.2.0");
+    const request = services.portal.runPackage("projects/20/activity-model-use", "1.2.0");
     await vi.advanceTimersByTimeAsync(20 * STEP);
     await request;
     expect(status(MODEL)).toBe("done");
