@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { listCards, PackageList, stateText, statusPill } from "../src/components/PackageList";
 import { unlistedModel, unlistedTitle } from "../src/components/Unlisted";
@@ -48,6 +48,25 @@ const finishedAt = (title: string) => item(title).querySelector(".finished-at")?
 const runButton = (title: string) => within(item(title)).getByRole("button", { name: new RegExp(`^(Run|Resume) ${title}$`) });
 
 describe("PackageList", () => {
+  it("counts a running package's time up on its pill, by the second, from when its run started", () => {
+    vi.useFakeTimers({ now: 100_000 });
+    try {
+      const busy = row({ title: "Busy", official: true });
+      list([busy], {
+        runner: { state: "running", microvm_id: "vm-1", updated_at: stamp(1000) },
+        results: new Map([[packageKey(busy.identity), result(busy, { status: "running", stage: "run_package", started_at: stamp(100_000 - 84_000), updated_at: stamp(2000), finished_at: null })]])
+      });
+      const shown = () => item("Busy").querySelector(".status-pill.throb")!.textContent;
+      expect(shown()).toBe("Running · 1:24");
+      act(() => { vi.advanceTimersByTime(1000); });
+      expect(shown()).toBe("Running · 1:25");
+      act(() => { vi.advanceTimersByTime(60_000); });
+      expect(shown()).toBe("Running · 2:25");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("lists every group's packages in one list, each tagged with its group, and keeps only the filter's group", () => {
     const official = row({ title: "Ours", official: true }), mine = row({ title: "My own", mine: true });
     const stranger = row({ title: "Stranger's", visibility: "public" });
@@ -103,6 +122,7 @@ describe("PackageList", () => {
     });
     expect(stateLine("Not")).toBeNull();
     expect([...document.querySelectorAll(".status-pill.throb .label")].map((e) => e.textContent)).toEqual(["Running"]);
+    expect(item("Busy").querySelector(".status-pill .elapsed")).toBeNull();
     expect(["Not", "Queued", "Lagging", "Busy", "Done", "Failed", "Stuck"].map(pill))
       .toEqual(["Not run", "Queued, #2", "Queued", "Running", "Finished", "Failed", "Interrupted"]);
     expect(stateLine("Queued")).toBe("Queued, number 2 in line.");

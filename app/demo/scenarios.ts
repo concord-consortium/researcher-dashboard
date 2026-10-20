@@ -130,7 +130,7 @@ export const SCENARIOS: Scenario[] = [
           queue: [{ class_hash: SCOPE.class_hash, package_key: responsesKey }]
         },
         results: new Map<string, Result>([
-          [modelKey, { ...modelDone, status: "running", stage: "run_package", previous: finished("official/wildfire-model-use", 50, now), updated_at: stamp(now - 20_000) }],
+          [modelKey, { ...modelDone, status: "running", stage: "run_package", started_at: stamp(now - 84_000), previous: finished("official/wildfire-model-use", 50, now), updated_at: stamp(now - 20_000) }],
           [responsesKey, { ...responsesDone, status: "queued", previous: finished("official/wildfire-responses", 48, now), updated_at: stamp(now - 60_000) }]
         ]),
         activity: activity(now, [1, 3, 40])

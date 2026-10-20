@@ -109,8 +109,9 @@ describe("rowState", () => {
     expect(rowState(undefined, null, null, H, K)).toEqual({ kind: "not-run" });
     const queue = [{ class_hash: H, package_key: K }];
     expect(rowState(result({ status: "queued" }), runner({ queue }), null, H, K)).toEqual({ kind: "queued", position: 1, waiting: false });
-    expect(rowState(result({ stage: "run_package" }), runner(), null, H, K)).toEqual({ kind: "running", stage: "run_package" });
-    expect(rowState(result({ stage: undefined }), runner(), null, H, K)).toEqual({ kind: "running", stage: "starting" });
+    expect(rowState(result({ stage: "run_package" }), runner(), null, H, K)).toEqual({ kind: "running", stage: "run_package", startedAt: null });
+    expect(rowState(result({ stage: undefined }), runner(), null, H, K)).toEqual({ kind: "running", stage: "starting", startedAt: null });
+    expect(rowState(result({ started_at: stamp(40) }), runner(), null, H, K)).toEqual({ kind: "running", stage: "starting", startedAt: 40 });
     expect(rowState(result({ status: "done", summary: "6 open responses", finished_at: stamp(7) }), runner(), null, H, K))
       .toEqual({ kind: "done", summary: "6 open responses", finishedAt: 7 });
     expect(rowState(result({ status: "done" }), runner(), null, H, K)).toEqual({ kind: "done", summary: null, finishedAt: null });
@@ -131,7 +132,7 @@ describe("rowState", () => {
 
   it("uses the mark it is given", () => {
     const paused = runner({ state: "suspended", updated_at: stamp(110) });
-    expect(rowState(result(), paused, mark(90, paused), H, K)).toEqual({ kind: "running", stage: "starting" });
+    expect(rowState(result(), paused, mark(90, paused), H, K)).toEqual({ kind: "running", stage: "starting", startedAt: null });
   });
 });
 
@@ -151,7 +152,7 @@ describe("runOffer", () => {
   });
 
   it("is disabled without a reason while the state says why", () => {
-    expect(runOffer(true, { kind: "running", stage: "starting" })).toEqual({ enabled: false });
+    expect(runOffer(true, { kind: "running", stage: "starting", startedAt: null })).toEqual({ enabled: false });
     expect(runOffer(true, { kind: "queued", position: 1, waiting: false })).toEqual({ enabled: false });
   });
 

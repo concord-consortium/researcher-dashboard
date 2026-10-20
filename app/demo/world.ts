@@ -202,7 +202,7 @@ export class World {
     const vm = this.state.runner?.microvm_id ?? "vm-demo-1";
     const queued = this.state.results.get(key)!;
     for (const stage of STAGES.slice(from)) {
-      this.setResult(key, { ...queued, status: "running", stage, microvm_id: vm, updated_at: stamp(Date.now()) });
+      this.setResult(key, { ...queued, status: "running", stage, started_at: stamp(startedAt), microvm_id: vm, updated_at: stamp(Date.now()) });
       await this.step();
     }
     const failure = this.state.failing.get(key) ?? (this.knobs.failNext ? FAILED_ERROR : null);

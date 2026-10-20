@@ -1,7 +1,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { Time } from "../src/components/Time";
-import { formatTime, fullTime } from "../src/shell/runs";
+import { elapsedText, formatTime, fullTime } from "../src/shell/runs";
 
 afterEach(cleanup);
 
@@ -34,5 +34,18 @@ describe("Time", () => {
     expect(time.tagName).toBe("TIME");
     expect(time.getAttribute("title")).toBe(fullTime(ms));
     expect(time.getAttribute("dateTime")).toBe(new Date(ms).toISOString());
+  });
+});
+
+describe("elapsedText", () => {
+  it("gives minutes and seconds, and hours from an hour", () => {
+    expect(elapsedText(0)).toBe("0:00");
+    expect(elapsedText(84_999)).toBe("1:24");
+    expect(elapsedText(10 * 60_000 + 5_000)).toBe("10:05");
+    expect(elapsedText(3_600_000 + 2 * 60_000 + 3_000)).toBe("1:02:03");
+  });
+
+  it("reads 0:00 for a start ahead of this clock", () => {
+    expect(elapsedText(-5_000)).toBe("0:00");
   });
 });

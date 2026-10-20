@@ -10,8 +10,9 @@ import { plainError } from "../shell/errors";
 import { routeHash } from "../shell/route";
 import { Callout } from "./Callout";
 import { FinishedWhen, Time } from "./Time";
+import { useNow } from "./useNow";
 import {
-  formatTime, latestFinished, millis, rowState, runOffer, sentence, stageWords, WAITING,
+  elapsedText, formatTime, latestFinished, millis, rowState, runOffer, sentence, stageWords, WAITING,
   type Finished, type Result, type RowState, type Runner, type RunRequest, type SessionMark
 } from "../shell/runs";
 
@@ -189,12 +190,16 @@ export function statusPill(model: StatusModel): { status: Status; label: string;
   }
 }
 
-// A package's state in a word or two.
+// A package's state in a word or two; a running one also shows how long it has been going, by the second.
 export function StatusPill({ model }: { model: StatusModel }) {
   const { label, tone } = statusPill(model);
+  const run = model.state.kind === "running" && !model.pending ? model.state : null;
+  const startedAt = run?.startedAt ?? null;
+  const now = useNow(startedAt !== null);
   return (
-    <span className={`status-pill ${tone}${model.state.kind === "running" && !model.pending ? " throb" : ""}`}>
+    <span className={`status-pill ${tone}${run ? " throb" : ""}`}>
       <span className="label">{label}</span>
+      {startedAt !== null && <span className="elapsed"> · {elapsedText(now - startedAt)}</span>}
     </span>
   );
 }

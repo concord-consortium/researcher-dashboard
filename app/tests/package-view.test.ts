@@ -13,7 +13,7 @@ describe("olderResult", () => {
     ["a request in flight", model({ pending: true, state: { kind: "done", summary: null, finishedAt: 1000 } }), "A new run is being requested."],
     ["a queued run nothing will take", model({ state: { kind: "queued", position: null, waiting: true } }), "A new run is waiting for a runner."],
     ["a queued run", model({ state: { kind: "queued", position: 2, waiting: false } }), "A new run is queued."],
-    ["a running run", model({ state: { kind: "running", stage: "run_package" } }), "A new run is in progress."],
+    ["a running run", model({ state: { kind: "running", stage: "run_package", startedAt: null } }), "A new run is in progress."],
     ["a paused run", model({ state: { kind: "stuck", resumable: true } }), "A new run is paused partway through."],
     ["an interrupted run", model({ state: { kind: "stuck", resumable: false } }), "A new run was interrupted."]
   ] as const)("warns over the earlier result during %s, with when it finished", (_name, m, newer) => {
@@ -21,13 +21,13 @@ describe("olderResult", () => {
   });
 
   it("says nothing with no result, for the result that is current, or over a failed re-run's own error", () => {
-    expect(olderResult(model({ state: { kind: "running", stage: "run_package" } }), null)).toBeNull();
+    expect(olderResult(model({ state: { kind: "running", stage: "run_package", startedAt: null } }), null)).toBeNull();
     expect(olderResult(model({ state: { kind: "done", summary: null, finishedAt: 1000 } }), finished)).toBeNull();
     expect(olderResult(model({ state: { kind: "failed", error: "x", finishedAt: 2000 }, finished }), finished)).toBeNull();
   });
 
   it("leaves out the time a result has none for", () => {
-    expect(olderResult(model({ state: { kind: "running", stage: "run_package" } }), { ...finished, finished_at: undefined }))
+    expect(olderResult(model({ state: { kind: "running", stage: "run_package", startedAt: null } }), { ...finished, finished_at: undefined }))
       .toBe("This result is from an earlier run. A new run is in progress.");
   });
 });

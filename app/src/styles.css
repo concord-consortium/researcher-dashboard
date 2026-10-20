@@ -386,8 +386,10 @@ button.danger:focus-visible { outline-color: var(--error); }
 .status-pill.ok { background: var(--ok-bg); color: var(--ok); }
 .status-pill.warn { background: var(--warn-bg); color: var(--warn); }
 .status-pill.error { background: #fdecec; color: var(--error); }
-/* A few pulses when a run starts, then still: the word Running says the rest. */
+/* A few pulses when a run starts, then still, so the motion stays under 5 seconds: the elapsed time
+   counting up says the run is alive. */
 .status-pill.throb { animation: throb 1.6s ease-in-out 3; }
+.status-pill .elapsed { font-variant-numeric: tabular-nums; }
 @keyframes throb {
   0%, 100% { box-shadow: 0 0 0 0 rgba(5, 146, 175, 0.45); }
   50% { box-shadow: 0 0 0 5px rgba(5, 146, 175, 0); background: var(--cc-teal-light4); }
