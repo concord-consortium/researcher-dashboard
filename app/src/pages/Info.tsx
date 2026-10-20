@@ -1,7 +1,7 @@
 import { ArrowLeftIcon, ArrowTopRightOnSquareIcon, BeakerIcon, CubeIcon, PlayCircleIcon } from "@heroicons/react/16/solid";
 import { BUILD_VERSION } from "../build-info";
 import { Brand, UserInfo } from "../components/Brand";
-import type { TokenUser } from "../shell/oauth";
+import type { User } from "../shell/portal";
 import { Callout } from "../components/Callout";
 import { CONTACT_URL } from "../components/PackageList";
 import type { InfoReason } from "../shell/start";
@@ -30,10 +30,10 @@ const HIDE_PANELS: InfoReason[] = ["withdrawn", "access-denied", "class-gone"];
 // Not a demo itself: invented results here would read as real ones. This page says what the
 // dashboard is, why it is showing instead, and how to get in, and never shows class data. With no
 // launch it links to the demo page, which is marked as sample data throughout.
-// `user` is known only once the page has signed in, so it is absent before the token is redeemed.
+// `user` is known only once the portal has said who signed in, so it is absent before then.
 // `portal` is the origin of the portal the page signed in to, known once it has.
 export function Info({ reason, detail, demo = false, user = null, portal = null }: {
-  reason: InfoReason; detail?: string; demo?: boolean; user?: TokenUser | null; portal?: string | null;
+  reason: InfoReason; detail?: string; demo?: boolean; user?: User | null; portal?: string | null;
 }) {
   const access = ACCESS[reason];
   return (

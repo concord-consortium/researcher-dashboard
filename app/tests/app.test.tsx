@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
 import type { Portal, ReportServer } from "../src/shell/portal";
-import { jwt, SCOPE } from "./fixtures";
+import { SCOPE } from "./fixtures";
 
 afterEach(cleanup);
 
@@ -66,22 +66,22 @@ describe("App", () => {
     expect(screen.getByText(/signing in/i)).toBeDefined();
   });
 
-  const signedIn = (accessToken: string, demo = false) => {
-    const token = { accessToken, issuedAt: 0, expiresAt: 1 };
+  const signedIn = (demo = false) => {
+    const token = { accessToken: "at", issuedAt: 0, expiresAt: 1 };
     const portal = { origin: "https://p.test", reportServer: "https://r.test", firebaseProject: "f" };
-    const services = { portal: { scope: async () => SCOPE } as unknown as Portal, reportServer: {} as ReportServer, watchClass: async () => () => {}, now: () => 0 };
+    const services = { portal: { scope: async () => SCOPE, user: async () => null } as unknown as Portal, reportServer: {} as ReportServer, watchClass: async () => () => {}, now: () => 0 };
     render(<App start={{ kind: "ready", portal, launch: { authDomain: "https://p.test", classId: "1", loginHint: null }, token }} reauthorize={none} services={services} demo={demo} />);
   };
 
-  it("renders the class once signed in, with no name for a token that has none", async () => {
-    signedIn("at");
+  it("renders the class once signed in, with no name when the portal gives none", async () => {
+    signedIn();
     expect(await screen.findByRole("heading", { level: 1, name: SCOPE.name })).toBeDefined();
     expect(document.querySelector(".app-header .user")).toBeNull();
     expect(within(screen.getByRole("banner")).queryByText("Demo with sample data")).toBeNull();
   });
 
   it("links the portal that launched it under the class's name in the Info tab's Class card", async () => {
-    signedIn("at");
+    signedIn();
     fireEvent.click(await screen.findByRole("tab", { name: "Info" }));
     const card = screen.getByRole("region", { name: "Class" });
     const facts = [...card.querySelectorAll("dt")].map((dt) => [dt.textContent, dt.nextElementSibling!.textContent]);
@@ -90,15 +90,8 @@ describe("App", () => {
   });
 
   it("says it is a demo in the header only on the demo page", async () => {
-    signedIn("at", true);
+    signedIn(true);
     const pill = within(await screen.findByRole("banner")).getByText("Demo with sample data");
     expect(pill.getAttribute("title")).toMatch(/made-up class and simulated runs/);
-  });
-
-  it("names the signed-in user in the header, with their username, from the token's claims", async () => {
-    signedIn(jwt({ uid: 200, first_name: "Dana", last_name: "Researcher", username: "dresearcher" }));
-    const banner = await screen.findByRole("banner");
-    expect(within(banner).getByText("Dana Researcher")).toBeDefined();
-    expect(within(banner).getByText("dresearcher")).toBeDefined();
   });
 });

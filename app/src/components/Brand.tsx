@@ -1,6 +1,6 @@
 import { BeakerIcon } from "@heroicons/react/16/solid";
 import logo from "../assets/cc-logo.png";
-import type { TokenUser } from "../shell/oauth";
+import type { User } from "../shell/portal";
 
 export const DEMO_LABEL = "Demo with sample data";
 
@@ -22,8 +22,8 @@ export function Brand({ demo }: { demo: boolean }) {
   );
 }
 
-// Who is signed in, from the access token's claims, for the header's far right.
-export function UserInfo({ user }: { user: TokenUser }) {
+// Who is signed in, from the portal, for the header's far right.
+export function UserInfo({ user }: { user: User }) {
   return (
     <div className="user">
       <p className="user-name">{user.name}</p>

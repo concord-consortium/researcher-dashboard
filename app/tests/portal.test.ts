@@ -58,6 +58,29 @@ describe("Api", () => {
 });
 
 describe("Portal", () => {
+  it("asks /auth/user who signed in, and names them from its first and last names, with the username", async () => {
+    const { api, fetchImpl } = apiWith(respond({ provider: "concord_id", id: "1", extra: { first_name: "Dana", last_name: "Researcher", full_name: "Full Name", username: "dresearcher" } }));
+    expect(await new Portal(api).user()).toEqual({ name: "Dana Researcher", username: "dresearcher" });
+    const [url, init] = call(fetchImpl);
+    expect(url).toBe("https://portal.test/auth/user");
+    expect(init.method).toBeUndefined();
+    expect(init.headers).toEqual({ Authorization: "Bearer at-1" });
+  });
+
+  it("reads a name outside ASCII", async () => {
+    expect((await new Portal(apiWith(respond({ extra: { first_name: "Zoë", last_name: "Ñúñez" } })).api).user())?.name).toBe("Zoë Ñúñez");
+  });
+
+  it("names the user from whichever name it has, with no username", async () => {
+    expect(await new Portal(apiWith(respond({ extra: { first_name: " Dana ", last_name: "" } })).api).user()).toEqual({ name: "Dana", username: null });
+  });
+
+  it("names nobody from an answer with no name, even with a username", async () => {
+    expect(await new Portal(apiWith(respond({ extra: { username: "dresearcher" } })).api).user()).toBeNull();
+    expect(await new Portal(apiWith(respond({ id: "1" })).api).user()).toBeNull();
+    expect(await new Portal(apiWith(respond(null)).api).user()).toBeNull();
+  });
+
   it("asks for a Firebase token for the scope's class, as a researcher", async () => {
     const { api, fetchImpl } = apiWith(respond({ token: "custom" }));
     expect(await new Portal(api).firebaseToken("report-service-dev", "hash1")).toBe("custom");

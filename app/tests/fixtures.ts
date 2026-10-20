@@ -8,10 +8,6 @@ export const SCOPE: Scope = {
   assignments: [{ offering_id: 9, runnable_id: 8, name: "Wildfire", url: "https://ap.test/?activity=1", tool: "ActivityPlayer" }]
 };
 
-// An access token's shape carrying `claims`, with a placeholder signature.
-export const jwt = (claims: Record<string, unknown>) =>
-  `${Buffer.from('{"alg":"RS256"}').toString("base64url")}.${Buffer.from(JSON.stringify(claims)).toString("base64url")}.sig`;
-
 // A Firestore Timestamp, as the page reads it.
 export const stamp = (ms: number) => ({ toMillis: () => ms });
 

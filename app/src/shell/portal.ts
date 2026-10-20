@@ -40,6 +40,8 @@ export interface PackageRow {
 
 export interface Resolved { archived: boolean }
 
+export interface User { name: string; username: string | null }
+
 // `reason` is the server's own message, and null when its answer carried none (a proxy's HTML
 // error page, say), which the page then words for itself.
 export class ApiError extends Error {
@@ -100,6 +102,15 @@ export class Portal {
 
   scope(): Promise<Scope> {
     return this.api.request<Scope>("/api/v1/researcher_dashboard/scope");
+  }
+
+  // The token's `profile` capability, whose answer carries only the user's id and names. Null for an
+  // answer with no name.
+  async user(): Promise<User | null> {
+    const body = await this.api.request<{ extra?: Record<string, unknown> } | null>("/auth/user");
+    const text = (key: string) => (typeof body?.extra?.[key] === "string" ? (body.extra[key] as string).trim() : "");
+    const name = [text("first_name"), text("last_name")].filter(Boolean).join(" ");
+    return name ? { name, username: text("username") || null } : null;
   }
 
   refreshProfile(): Promise<unknown> {
