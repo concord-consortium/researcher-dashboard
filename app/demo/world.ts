@@ -10,7 +10,7 @@ export const stamp = (ms: number) => ({ toMillis: () => ms });
 export interface Knobs {
   // Milliseconds between the simulated runner's writes.
   stepMs: number;
-  // The next run the machine takes ends failed.
+  // The next run the runner takes ends failed.
   failNext: boolean;
   // The next Run press is refused by the portal.
   refuseNext: boolean;
@@ -129,8 +129,8 @@ export class World {
   }
 
   // What the function does with a run request: queue the result, keeping the last finished run, and
-  // start a machine if none is taking work. A package already queued or running is not queued again,
-  // but a request for it still wakes the machine, which is how a paused run resumes.
+  // start a runner if none is taking work. A package already queued or running is not queued again,
+  // but a request for it still wakes the runner, which is how a paused run resumes.
   private enqueue(key: string, version: string) {
     const prior = this.state.results.get(key);
     const pending = prior?.status === "queued" || prior?.status === "running";
@@ -157,7 +157,7 @@ export class World {
     if (this.stopped) throw new Error("stopped");
   }
 
-  // The packages left running partway through, which the machine finishes before its queue.
+  // The packages left running partway through, which the runner finishes before its queue.
   unfinished(): string[] {
     return [...this.state.results].filter(([, r]) => r.status === "running").map(([key]) => key);
   }
