@@ -152,8 +152,6 @@ export const fullTime = (ms: number) => new Date(ms).toLocaleString();
 const DAY_MS = 24 * 3600 * 1000;
 const dayStart = (ms: number) => new Date(ms).setHours(0, 0, 0, 0);
 
-// A time as short as it reads: "today, 10:11 AM", "yesterday, 4:02 PM", "Oct 14, 9:12 AM", with the
-// year only when it is not this one. The day is told against the clock when it is called.
 // How long a run has been going, as m:ss, or h:mm:ss from an hour; a start ahead of this clock reads 0:00.
 export function elapsedText(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 1000));
@@ -162,6 +160,8 @@ export function elapsedText(ms: number): string {
   return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
 }
 
+// A time as short as it reads: "today, 10:11 AM", "yesterday, 4:02 PM", "Oct 14, 9:12 AM", with the
+// year only when it is not this one. The day is told against the clock when it is called.
 export function formatTime(ms: number, now = Date.now()): string {
   const time = new Date(ms).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
   const days = Math.round((dayStart(now) - dayStart(ms)) / DAY_MS);
