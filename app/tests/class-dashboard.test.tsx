@@ -10,10 +10,10 @@ import type { ClassListeners, DashboardServices } from "../src/shell/services";
 import pkg from "../package.json";
 import { row, SCOPE, stamp } from "./fixtures";
 
-// The page keeps its place in the URL's fragment, which outlives a test.
 // The title the dashboard's own HTML gives the page, which it keeps after the view and class.
 document.title = "Researcher Dashboard";
 
+// The page keeps its place in the URL's fragment, which outlives a test.
 afterEach(() => { cleanup(); window.history.replaceState(null, "", "/"); });
 
 const NOW = 100 * 24 * 3600 * 1000;
@@ -79,6 +79,14 @@ describe("ClassDashboard", () => {
     expect(within(banner).getByRole("img", { name: "Concord Consortium" })).toBeDefined();
     infoTab();
     expect(screen.getByRole("listitem").textContent).toBe("Wildfire · Activity Player");
+  });
+
+  it("leaves the Info panel out of the tab order once its class card links the portal", async () => {
+    render(<ClassDashboard services={services().fake} onExpired={vi.fn()} portal="https://portal.test" />);
+    await screen.findByRole("heading", { level: 1, name: SCOPE.name });
+    infoTab();
+    expect(screen.getByRole("tabpanel").hasAttribute("tabindex")).toBe(false);
+    expect(within(screen.getByRole("tabpanel")).getByRole("link", { name: "https://portal.test" })).toBeDefined();
   });
 
   it("names the view and the class in the browser tab, and gives the page its own title back when it goes", async () => {
@@ -897,7 +905,7 @@ describe("what the page says of the researcher's own runs", () => {
     await s.runner({ state: "suspended", queue: [{ class_hash: SCOPE.class_hash, package_key: KEY }] });
     await s.activity(new Map([["301", { lastActivityAt: stamp(NOW) }], ["302", { lastActivityAt: stamp(NOW - 3600_000) }]]));
     expect(countOf("Runner")).toBe("Your runner is idle; it starts when you run a package. Queued packages will start within a couple of minutes.");
-    expect(countOf("Active students")).toBe("1 (last 5 minutes)");
+    expect(countOf("Active students")).toBe("1 (in the last 5 minutes)");
     expect(document.querySelector("[aria-labelledby=counts-heading] .facts")!.closest("[aria-live]")).toBeNull();
   });
 
@@ -942,13 +950,13 @@ describe("opening a package", () => {
     fireEvent.click(link("Wildfire open responses"));
     const line = `Includes every save before ${fullTime(900)}, when this run began reading the class's data.`;
     const when = () => view().querySelector(".result-when")!;
-    expect(when().getAttribute("title")).toBe(line);
+    expect(when().getAttribute("title")).toBe(`Finished ${fullTime(1000)}. ${line}`);
     expect(when().textContent).toBe(`Version 1.0.0 · Finished ${formatTime(1000)} ${line}`);
     const previous = { package: WILDFIRE_PACKAGE, summary: "Earlier", started_at: stamp(900), finished_at: stamp(1000) };
     const older = () => view().querySelector(".callout.notice");
     expect(older()).toBeNull();
     await s.results(new Map([[KEY, wildfire({ status: "running", started_at: stamp(5000), updated_at: stamp(5000), previous })]]));
-    expect(when().getAttribute("title")).toBe(line);
+    expect(when().getAttribute("title")).toBe(`Finished ${fullTime(1000)}. ${line}`);
     expect(older()!.textContent).toBe(`This result is from an earlier run, finished ${formatTime(1000)}. A new run is in progress.`);
   });
 

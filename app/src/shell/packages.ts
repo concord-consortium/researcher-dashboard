@@ -41,7 +41,6 @@ export interface Group {
   tag: (row: PackageRow) => string;
 }
 
-// A search's words, lowercased.
 export function searchWords(search: string): string[] {
   return search.toLowerCase().split(/\s+/).filter(Boolean);
 }
@@ -50,6 +49,11 @@ export function searchWords(search: string): string[] {
 export function matchesSearch(search: string, texts: (string | null | undefined)[]): boolean {
   const haystack = texts.filter(Boolean).join("\n").toLowerCase();
   return searchWords(search).every((word) => haystack.includes(word));
+}
+
+// Each project's name by its id, as any of the rows gives it.
+export function projectNames(rows: PackageRow[]): Map<number, string> {
+  return new Map(rows.flatMap((r) => (r.project?.name ? [[r.project.id, r.project.name] as const] : [])));
 }
 
 export function titleOf(row: PackageRow): string {
@@ -77,7 +81,7 @@ export function groupPackages(rows: PackageRow[], scope: Scope): Group[] {
     else if (row.visibility === "public") community.push(row);
   }
 
-  const names = new Map(projects.flatMap((r) => (r.project?.name ? [[r.project.id, r.project.name] as const] : [])));
+  const names = projectNames(projects);
   const projectName = (row: PackageRow) => {
     const name = names.get(row.project!.id);
     return name ? `Project: ${name}` : `Project ${row.project!.id}`;

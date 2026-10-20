@@ -359,14 +359,13 @@ button.danger:focus-visible { outline-color: var(--error); }
 .facts dt { color: var(--muted); }
 .facts dd { margin: 0; font-weight: 700; }
 .facts dd .when { font-weight: 400; }
-.state p, .finished p, .reason { margin: 0.2rem 0; }
+.state p, .reason { margin: 0.2rem 0; }
 .callout .when, .callout .detail { display: block; }
 .callout .detail { font-size: 0.85rem; }
 .callout .detail code { overflow-wrap: anywhere; }
 .when, .reason { color: var(--muted); }
 .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-top: 0.3rem; }
 .result-view, .all-packages, .unlisted { border-top: 0; padding-top: 0; }
-.result-view [role="status"] { margin: 0; }
 .card .identity { display: block; }
 .card-main { flex: 1; min-width: 0; }
 .card .controls { flex-direction: column; align-items: flex-end; flex: none; margin: 0; text-align: right; }

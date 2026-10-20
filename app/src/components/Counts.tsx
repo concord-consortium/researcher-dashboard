@@ -1,6 +1,6 @@
 import { ChartBarIcon } from "@heroicons/react/16/solid";
 import type { Activity } from "../shell/activity";
-import { ACTIVE_WINDOW_MINUTES } from "../shell/activity";
+import { ACTIVE_WINDOW_MINUTES, windowLabel } from "../shell/activity";
 import { millis, type Counts as CountsDoc } from "../shell/runs";
 import { Time } from "./Time";
 import { useActiveCount } from "./ClassActivity";
@@ -23,7 +23,7 @@ export function Counts({ counts, session, activity, now }: {
       <h2 id="counts-heading"><ChartBarIcon aria-hidden="true" />Current Status</h2>
       <dl className="facts">
         {session.length > 0 && <div><dt>Runner</dt><dd>{session.join(" ")}</dd></div>}
-        {active !== null && <div><dt>Active students</dt><dd>{active} <span className="when">(last {ACTIVE_WINDOW_MINUTES} minutes)</span></dd></div>}
+        {active !== null && <div><dt>Active students</dt><dd>{active} <span className="when">({windowLabel(ACTIVE_WINDOW_MINUTES)})</span></dd></div>}
         {data && <>
           <div><dt>Answers</dt><dd>{number(data.answers)}</dd></div>
           <div><dt>Logs</dt><dd>{number(data.logs)}</dd></div>

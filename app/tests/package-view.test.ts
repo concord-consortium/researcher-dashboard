@@ -1,13 +1,10 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { olderResult } from "../src/components/PackageView";
-import type { StatusModel } from "../src/components/PackageList";
 import { formatTime } from "../src/shell/runs";
-import { stamp } from "./fixtures";
+import { stamp, statusModel } from "./fixtures";
 
-const model = (over: Partial<StatusModel>): StatusModel => ({
-  state: { kind: "not-run" }, line: "", pending: false, refusal: null, finished: null, outdated: false, versionNote: null, ...over
-});
+const model = statusModel;
 const finished = { package: { identity: "x", version: "1.0.0", checksum: "c" }, finished_at: stamp(1000) };
 const earlier = `This result is from an earlier run, finished ${formatTime(1000)}.`;
 

@@ -6,12 +6,17 @@ export type Route = { tab: "packages"; key: string | null; q?: string } | { tab:
 
 export const ALL_PACKAGES: Route = { tab: "packages", key: null };
 
+// A key that is not valid percent-encoding, as in a cut-off link, opens no package.
+const decoded = (text: string) => {
+  try { return decodeURIComponent(text); } catch { return null; }
+};
+
 export function parseRoute(hash: string): Route {
   const fragment = hash.replace(/^#/, "");
   const mark = fragment.indexOf("?");
   const [tab, ...rest] = (mark < 0 ? fragment : fragment.slice(0, mark)).split("/");
   if (tab === "info") return { tab: "info" };
-  const key = tab === "packages" && rest.length > 0 && rest.join("/") ? decodeURIComponent(rest.join("/")) : null;
+  const key = tab === "packages" && rest.length > 0 && rest.join("/") ? decoded(rest.join("/")) : null;
   const q = mark < 0 ? "" : new URLSearchParams(fragment.slice(mark + 1)).get("q")?.trim() ?? "";
   return !key && q ? { tab: "packages", key, q } : { tab: "packages", key };
 }

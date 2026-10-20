@@ -102,9 +102,9 @@ emulator that is fine, because an emulator accepts any signature.
 The app writes none of the Firebase documents. Every one is written by report-service's
 functions, the runner or the watchdog, and the app only listens.
 
-## Class activity and automatic re-runs
+## Active students and automatic re-runs
 
-The Class activity count is the number of learners whose last save falls within the window
+The header's active-student count is the number of learners whose last save falls within the window
 `ACTIVE_WINDOW_MINUTES` in `src/shell/activity.ts` sets, by the laptop's clock. It counts saved answers, so a student
 reading or thinking is not in it, and it is the same for every researcher of the class.
 

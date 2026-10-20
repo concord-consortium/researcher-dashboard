@@ -2,7 +2,10 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CONTENTS_MIN_HEADINGS, ResultMarkdown, SIDEBAR_QUERY } from "../src/components/ResultMarkdown";
 
-afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+// jsdom has no scrollIntoView, so there is one to spy on.
+Element.prototype.scrollIntoView ??= () => {};
+
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); window.history.replaceState(null, "", "/"); });
 
 const LONG = "# Overview\n\nText.\n\n# Patterns\n\n## Task 23\n\n| A |\n|---|\n| 1 |\n\n## Task 24\n\nText.\n\n# Settings\n\n## Terrain\n";
 const contents = () => screen.queryByRole("navigation", { name: "Result contents" });
@@ -34,7 +37,6 @@ describe("a result's contents", () => {
     render(<ResultMarkdown markdown={LONG} />);
     expect(contents()!.closest("details")).toBeNull();
     expect(contents()!.closest(".result-layout")!.classList.contains("sidebar")).toBe(true);
-    vi.unstubAllGlobals();
   });
 
   it("is left out of a result with fewer headings", () => {
@@ -48,7 +50,7 @@ describe("a result's contents", () => {
 
   it("scrolls to and focuses the heading an entry names, leaving the URL alone", () => {
     const scrolled: Element[] = [];
-    Element.prototype.scrollIntoView = vi.fn(function (this: Element) { scrolled.push(this); });
+    vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(function (this: Element) { scrolled.push(this); });
     window.location.hash = "#packages/official__wildfire-model-use";
     render(<ResultMarkdown markdown={LONG} />);
     fireEvent.click(within(contents()!).getByRole("button", { name: "Task 24" }));

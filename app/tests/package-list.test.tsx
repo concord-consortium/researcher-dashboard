@@ -1,13 +1,11 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { listCards, PackageList, stateText, statusPill, type StatusModel } from "../src/components/PackageList";
+import { listCards, PackageList, stateText, statusPill } from "../src/components/PackageList";
 import { unlistedTitle } from "../src/components/Unlisted";
-import { groupPackages, packageKey } from "../src/shell/packages";
+import { groupPackages, packageKey, titleOf } from "../src/shell/packages";
 import type { PackageRow } from "../src/shell/portal";
 import { formatTime, type Result, type Runner, type RunRequest } from "../src/shell/runs";
-import { row, SCOPE, stamp } from "./fixtures";
-
-const titleOfRow = (r: PackageRow) => r.current_version.title!;
+import { row, SCOPE, stamp, statusModel } from "./fixtures";
 
 afterEach(cleanup);
 
@@ -272,7 +270,7 @@ describe("PackageList", () => {
     const onOpen = vi.fn();
     list([fresh, done], { results: new Map([[packageKey(done.identity), result(done)]]), onOpen });
     for (const r of [fresh, done]) {
-      const link = screen.getByRole("link", { name: titleOfRow(r) });
+      const link = screen.getByRole("link", { name: titleOf(r) });
       expect(link.getAttribute("href")).toBe(`#packages/${encodeURIComponent(packageKey(r.identity))}`);
       fireEvent.click(link);
       expect(onOpen).toHaveBeenLastCalledWith(packageKey(r.identity));
@@ -322,9 +320,7 @@ describe("a re-run on the row", () => {
 });
 
 describe("statusPill", () => {
-  const model = (over: Partial<StatusModel>): StatusModel => ({
-    state: { kind: "not-run" }, line: "", pending: false, refusal: null, finished: null, outdated: false, versionNote: null, ...over
-  });
+  const model = statusModel;
   const finished = { package: { identity: "x", version: "1.0.0", checksum: "c" } };
 
   it.each([

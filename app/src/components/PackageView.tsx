@@ -5,6 +5,7 @@ import { formatTime, millis, type Finished } from "../shell/runs";
 import { Callout } from "./Callout";
 import { RowProblems, RowStatus, statusPill, type Status, type StatusModel } from "./PackageList";
 import { ResultActions, ResultView, ResultWhen } from "./ResultView";
+import { usePublishedHeight } from "./usePublishedHeight";
 
 // What a newer run is doing while the view shows an earlier run's result. A failed re-run is left out:
 // its error panel already says which result is showing.
@@ -54,14 +55,7 @@ export function PackageView({ title, description, status, note, run, warning, me
     document.scrollingElement?.scrollTo?.({ top: 0 });
     heading.current?.focus({ preventScroll: true });
   }, []);
-  useEffect(() => {
-    const bar = subheader.current;
-    if (!bar || typeof ResizeObserver === "undefined") return;
-    const root = document.documentElement.style;
-    const observer = new ResizeObserver(() => root.setProperty("--subheader-height", `${bar.offsetHeight}px`));
-    observer.observe(bar);
-    return () => { observer.disconnect(); root.removeProperty("--subheader-height"); };
-  }, []);
+  usePublishedHeight(subheader, "--subheader-height");
   return (
     <div className="package-view">
       <div className="package-subheader" ref={subheader}>

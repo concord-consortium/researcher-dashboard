@@ -11,4 +11,10 @@ describe("parseRoute and routeHash", () => {
     expect(routeHash({ tab: "packages", key: "official__x", q: "ignored" })).toBe("#packages/official__x");
     expect(parseRoute("#packages/official__x?q=ignored")).toEqual({ tab: "packages", key: "official__x" });
   });
+
+  it("opens no package for a key that is not valid percent-encoding", () => {
+    expect(parseRoute("#packages/%")).toEqual({ tab: "packages", key: null });
+    expect(parseRoute("#packages/%E0")).toEqual({ tab: "packages", key: null });
+    expect(parseRoute("#packages/official__x%2Fy")).toEqual({ tab: "packages", key: "official__x/y" });
+  });
 });

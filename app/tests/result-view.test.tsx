@@ -22,15 +22,16 @@ describe("ResultView", () => {
     const read = `Includes every save before ${fullTime(500)}, when this run began reading the class's data.`;
     render(<ResultWhen finished={{ ...FINISHED, started_at: stamp(500) }} />);
     const line = document.querySelector(".result-when")!;
-    expect(line.getAttribute("title")).toBe(read);
+    expect(line.getAttribute("title")).toBe(`Finished ${fullTime(1000)}. ${read}`);
+    expect(line.querySelector("[title]:not(.result-when)")).toBeNull();
     expect(line.querySelector(".visually-hidden")!.textContent).toBe(` ${read}`);
     expect(line.textContent).toBe(`Version 1.0.0 · Finished ${formatTime(1000)} ${read}`);
   });
 
-  it("says nothing of what it read for a run with no start time", () => {
+  it("says nothing of what it read for a run with no start time, giving the finish time alone as the title", () => {
     render(<ResultWhen finished={FINISHED} />);
     const line = document.querySelector(".result-when")!;
-    expect(line.hasAttribute("title")).toBe(false);
+    expect(line.getAttribute("title")).toBe(`Finished ${fullTime(1000)}.`);
     expect(line.textContent).toBe(`Version 1.0.0 · Finished ${formatTime(1000)}`);
   });
 

@@ -2,7 +2,7 @@ import Markdown, { type Components, type UrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeSanitize, { type Options as SanitizeSchema } from "rehype-sanitize";
 import { ArrowDownTrayIcon } from "@heroicons/react/16/solid";
-import { createContext, memo, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { createContext, memo, useContext, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { saveText, tableFileName } from "../shell/download";
 import { toCsv, toHtml, toTsv } from "../shell/tables";
 import { CopyButton } from "./CopyButton";
@@ -64,12 +64,16 @@ function headingBefore(block: Element): string | null {
 }
 
 // A table, with Copy table and Download CSV under it. Both read the cells' text as rendered. The table
-// and its buttons are named after the heading above it, found once it is in the page.
+// and its buttons are named after the heading above it, looked up after each render, since a new result
+// can reuse the table in place.
 function ResultTable({ children }: { children?: ReactNode }) {
   const table = useRef<HTMLTableElement>(null);
   const base = useContext(FileBase);
   const [heading, setHeading] = useState<string | null>(null);
-  useEffect(() => { setHeading(headingBefore(table.current!.parentElement!)); }, []);
+  useLayoutEffect(() => {
+    const found = headingBefore(table.current!.parentElement!);
+    setHeading((was) => (was === found ? was : found));
+  });
   const rows = () => [...table.current!.rows].map((row) => [...row.cells].map((cell) => cell.textContent ?? ""));
   const copy = () => {
     const tsv = toTsv(rows());

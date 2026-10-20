@@ -1,5 +1,7 @@
 import { formatTime, fullTime } from "../shell/runs";
 
+const UNKNOWN = "Finished at an unknown time";
+
 // A time in its short form, with the full date and time to the second as its tooltip.
 export function Time({ ms, capitalized = false }: { ms: number; capitalized?: boolean }) {
   const short = formatTime(ms);
@@ -10,7 +12,9 @@ export function Time({ ms, capitalized = false }: { ms: number; capitalized?: bo
   );
 }
 
-// When a result finished, or that it is not known.
+// When a result finished, or that it is not known, as text and with the time's tooltip.
+export const finishedText = (ms: number | null) => (ms === null ? UNKNOWN : `Finished ${formatTime(ms)}`);
+
 export function FinishedWhen({ ms }: { ms: number | null }) {
-  return ms === null ? <>Finished at an unknown time</> : <>Finished <Time ms={ms} /></>;
+  return ms === null ? <>{UNKNOWN}</> : <>Finished <Time ms={ms} /></>;
 }

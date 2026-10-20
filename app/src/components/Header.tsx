@@ -1,5 +1,5 @@
 import { CloudIcon, QuestionMarkCircleIcon, XCircleIcon } from "@heroicons/react/16/solid";
-import { useEffect, useRef, type ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
 import logo from "../assets/cc-logo.png";
 import { APP_VERSION } from "../build-info";
 import type { Activity } from "../shell/activity";
@@ -7,6 +7,7 @@ import type { TokenUser } from "../shell/oauth";
 import type { Scope } from "../shell/portal";
 import { Brand, UserInfo } from "./Brand";
 import { ActiveCount } from "./ClassActivity";
+import { usePublishedHeight } from "./usePublishedHeight";
 import { CONTACT_URL } from "./PackageList";
 
 // The bar that stays at the top of the page: the class, the page's tabs, how many of the class's
@@ -25,14 +26,7 @@ export function Header({ scope, user, demo, tabs, activity, now, session, runner
 }) {
   const about = useRef<HTMLDialogElement>(null);
   const bar = useRef<HTMLElement>(null);
-  useEffect(() => {
-    const header = bar.current;
-    if (!header || typeof ResizeObserver === "undefined") return;
-    const root = document.documentElement.style;
-    const observer = new ResizeObserver(() => root.setProperty("--header-height", `${header.offsetHeight}px`));
-    observer.observe(header);
-    return () => { observer.disconnect(); root.removeProperty("--header-height"); };
-  }, []);
+  usePublishedHeight(bar, "--header-height");
   const lines = session.map((line, i) => (
     <p key={line} className={`badge session${runnerFailed && i === 0 ? " error" : ""}`} title={line}>
       <span className="badge-icon" aria-hidden="true"><CloudIcon /></span>

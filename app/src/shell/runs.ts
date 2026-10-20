@@ -1,4 +1,3 @@
-
 export interface Stamp { toMillis(): number }
 export interface QueueEntry { class_hash: string; package_key: string }
 
@@ -168,10 +167,9 @@ export function formatTime(ms: number, now = Date.now()): string {
 // A sentence from text that may already end in one.
 export const sentence = (text: string) => (/[.!?…]$/.test(text) ? text : `${text}.`);
 
-// The lines above the list. `titleOf` names a package of this class by its key, or returns null while
-// the page cannot name it yet;
-// `requesting` is whether any run request from the page is in flight.
-// `runner` is null when the researcher has no runner yet, and undefined before it has been read.
+// What the researcher's runner is doing, for the header and Current Status. `titleOf` names a package of
+// this class by its key, or returns null while the page cannot name it; `requesting` is whether any run
+// request from the page is in flight; `runner` is null with no runner yet and undefined before it is read.
 export function sessionLines(runner: Runner | null | undefined, classHash: string, results: Map<string, Result>,
   titleOf: (key: string) => string | null, requesting: boolean): string[] {
   const waiting = () => ([...results.values()].some((r) => r.status === "queued") && !requesting ? [WAITING] : []);

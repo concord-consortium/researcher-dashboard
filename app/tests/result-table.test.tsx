@@ -37,6 +37,14 @@ async function downloaded(block: HTMLElement) {
 }
 
 describe("a result's tables", () => {
+  it("are named again after their heading when a new result reuses them in place", () => {
+    const { rerender } = render(<ResultMarkdown markdown={"### Task 23\n\n| A |\n|---|\n| 1 |\n"} />);
+    expect(blocks()[0].querySelector("table")!.getAttribute("aria-label")).toBe("Task 23");
+    rerender(<ResultMarkdown markdown={"### Task 24\n\n| A |\n|---|\n| 2 |\n"} />);
+    expect(blocks()[0].querySelector("table")!.getAttribute("aria-label")).toBe("Task 24");
+    expect(within(blocks()[0]).getByRole("button", { name: "Download CSV: Task 24" })).toBeDefined();
+  });
+
   it("each have Copy table and Download CSV under them", () => {
     render(<ResultMarkdown markdown={MARKDOWN} fileBase="use-p2" />);
     expect(blocks()).toHaveLength(2);

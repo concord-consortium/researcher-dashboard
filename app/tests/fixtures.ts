@@ -1,3 +1,4 @@
+import type { StatusModel } from "../src/components/PackageList";
 import type { PackageRow, Scope } from "../src/shell/portal";
 
 export const SCOPE: Scope = {
@@ -25,3 +26,8 @@ export function row(over: Partial<PackageRow> & { title?: string }): PackageRow 
     ...rest
   };
 }
+
+// A package's status with nothing known of it, changed by `over`.
+export const statusModel = (over: Partial<StatusModel>): StatusModel => ({
+  state: { kind: "not-run" }, line: "", pending: false, refusal: null, finished: null, outdated: false, versionNote: null, ...over
+});

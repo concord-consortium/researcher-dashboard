@@ -62,10 +62,10 @@ export function StateRegion({ line, children }: { line: string; children?: React
   );
 }
 
-// What a row knows of its package's state, shared by its card in the list and the open package's
-// subheader. `outdated` and `versionNote` are false and null where they cannot apply.
 export interface Refusal { message: string; refusedAt: number; retry: boolean }
 
+// What a row knows of its package's state, shared by its card in the list and the open package's
+// subheader. `outdated` and `versionNote` are false and null where they cannot apply.
 export interface StatusModel {
   state: RowState;
   line: string;
@@ -183,7 +183,7 @@ export function statusPill(model: StatusModel): { status: Status; label: string;
   }
 }
 
-// A package's state in a word or two. When its kept result finished is shown in words beside it.
+// A package's state in a word or two.
 export function StatusPill({ model }: { model: StatusModel }) {
   const { label, tone } = statusPill(model);
   return (
@@ -224,10 +224,8 @@ export function RunButton({ row, model, onRun, before, held = false }: {
 export const COMMUNITY_WARNING = "Community packages are not reviewed by Concord. Running one runs a stranger's code with "
   + "your access to student data, and nothing stops it sending that data elsewhere.";
 
-// Asked before a community package runs, with the warning as the group's description. Cancel takes
-// focus, so pressing Enter twice does not run a stranger's code, and Escape cancels. Focus goes back
-// to where it was when the warning first showed, the Run that asked, when either answer removes it;
-// that is read as it renders, before another warning's removal moves focus.
+// Cancel takes focus so a double Enter cannot run a stranger's code; focus returns to the element focused
+// when the warning first rendered.
 export function CommunityConfirm({ onConfirm, onCancel }: { onConfirm: () => void; onCancel: () => void }) {
   const cancel = useRef<HTMLButtonElement>(null);
   const [before] = useState(() => document.activeElement as HTMLElement | null);
