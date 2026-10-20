@@ -6,7 +6,7 @@ No student opened Tasks 46 and 55, so they are left out below.
 
 ## Simulation-use patterns
 
-Best is each student's highest level, as a share of the students who opened the model. First and Last count the students who clicked Hazbot by the level Hazbot gave feedback on at their first and last click. Last can be lower than Best: the level starts over when the page is reloaded and, in newer versions of the model, follows the student's latest runs. Hazbot clicks and Show me clicks count every click by that level. Finished tutorial counts, of the students who clicked Show me at a level, those who reached the last step of its tutorial on some click; Tutorial completion is the mean of each such student's furthest share of the steps. A "–" marks a level that never offers Show me, and "n/a" one that offers it where no student took it.
+Best is each student's highest level, as a share of the students who opened the model. First and Last count the students who clicked Hazbot by the level Hazbot gave feedback on at their first and last click. Last can be lower than Best: the level starts over when the page is reloaded and, in newer versions of the model, follows the student's latest runs. Hazbot clicks and Show me clicks count every click by that level. Finished tutorial counts, of the students whose Show me tutorial at a level has a recorded end, those who reached its last step on some click; Tutorial completion is the mean of each such student's furthest share of the steps. A "–" marks a level that never offers Show me, and "n/a" one that offers it where no student took it.
 
 ### Task 23: Not all wildfires behave the same way
 
