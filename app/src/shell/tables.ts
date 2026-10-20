@@ -20,9 +20,9 @@ export function toTsv(rows: string[][]): string {
 
 const escaped = (text: string) => text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 
-// A plain table of the cells' text, its first `headerRows` rows as headers, which a document pastes
-// as a table.
+// A plain table of the cells' text, its first `headerRows` rows as headers, with formulas made inert, since a
+// spreadsheet can paste this over the tab-separated text.
 export function toHtml(rows: string[][], headerRows: number): string {
-  const row = (cells: string[], tag: "th" | "td") => `<tr>${cells.map((c) => `<${tag}>${escaped(c)}</${tag}>`).join("")}</tr>`;
+  const row = (cells: string[], tag: "th" | "td") => `<tr>${cells.map((c) => `<${tag}>${escaped(inert(c))}</${tag}>`).join("")}</tr>`;
   return `<table>${rows.map((cells, i) => row(cells, i < headerRows ? "th" : "td")).join("")}</table>`;
 }

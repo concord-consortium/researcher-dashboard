@@ -2,15 +2,16 @@ import { packageKey } from "../shell/packages";
 import { latestFinished, millis, rowState, type Result, type Runner, type SessionMark } from "../shell/runs";
 import { CardTitle, GroupTag, Highlight, OpenLink, rowLine, RowProblems, RowStatus, StatusPill, ViewResult, type StatusModel } from "./PackageList";
 
-// A result whose package the page does not list any more. It has no Run control, so its state is
-// worded without the instruction to press one.
-export function unlistedModel(result: Result, runner: Runner | null, mark: SessionMark | null, classHash: string): StatusModel {
+// A result whose package the page does not list any more, named by `title` as its card is. It has no Run
+// control, so its state is worded without the instruction to press one.
+export function unlistedModel(result: Result, runner: Runner | null, mark: SessionMark | null, classHash: string,
+  title: string): StatusModel {
   const identity = result.package.identity;
   const finished = latestFinished(result);
   const state = rowState(result, runner, mark, classHash, packageKey(identity));
   return {
     state, finished, pending: false, refusal: null, outdated: false, versionNote: null,
-    line: rowLine(state, identity, false, finished ? millis(finished.finished_at) : undefined)
+    line: rowLine(state, title, false, finished ? millis(finished.finished_at) : undefined)
   };
 }
 
@@ -41,8 +42,8 @@ export function Unlisted({ results, search, titles, notes, runner, mark, classHa
           const identity = result.package.identity;
           const key = packageKey(identity);
           const note = notes.get(identity);
-          const model = unlistedModel(result, runner, mark, classHash);
           const title = unlistedTitle(identity, titles);
+          const model = unlistedModel(result, runner, mark, classHash, title);
           return (
             <li key={key} className="card">
               <div className="card-main">
@@ -58,7 +59,7 @@ export function Unlisted({ results, search, titles, notes, runner, mark, classHa
                   <ViewResult model={model} title={title} onOpen={() => onOpen(key)} />
                 </div>
               </div>
-              <RowProblems model={model} />
+              <RowProblems model={model} runnable={false} />
             </li>
           );
         })}

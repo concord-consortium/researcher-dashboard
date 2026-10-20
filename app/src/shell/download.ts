@@ -2,8 +2,12 @@ const slug = (text: string) => text.toLowerCase().replace(/[^a-z0-9]+/g, "-").re
 
 // `<package>-<class>-<date>`, from the package identity's last segment, the class name and the local
 // date the run finished; a part with nothing left after slugging is left out.
+// The local date as YYYY-MM-DD, built from its parts rather than a locale's date format.
+const localDate = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
 export function resultFileBase(identity: string, classTitle: string, finishedAt: number | null): string {
-  const date = finishedAt === null ? "" : new Date(finishedAt).toLocaleDateString("en-CA");
+  const date = finishedAt === null ? "" : localDate(new Date(finishedAt));
   return [slug(identity.split("/").pop() ?? ""), slug(classTitle), date].filter(Boolean).join("-") || "result";
 }
 

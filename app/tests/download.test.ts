@@ -8,6 +8,10 @@ describe("resultFileName", () => {
     expect(resultFileName("official/wildfire-responses", "Wildfire, period 2", AT)).toBe("wildfire-responses-wildfire-period-2-2026-10-17.md");
   });
 
+  it("pads a single-digit month and day", () => {
+    expect(resultFileName("official/x", "P", new Date(2026, 0, 5, 9).getTime())).toBe("x-p-2026-01-05.md");
+  });
+
   it("leaves out the date when the run has no finish time", () => {
     expect(resultFileName("official/runner-smoke", "Period 2", null)).toBe("runner-smoke-period-2.md");
   });

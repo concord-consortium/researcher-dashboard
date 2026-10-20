@@ -31,7 +31,7 @@ export function olderResult(status: StatusModel, finished: Finished | null): str
 // any failure or refusal, which scroll away with the result. Each opening mounts it afresh, at the top
 // of the page with its title focused. The subheader's height is published as --subheader-height, so
 // what takes focus scrolls clear of it.
-export function PackageView({ title, description, status, note, run, warning, messages, classTitle, finished, filter, onAll }: {
+export function PackageView({ title, description, status, note, run, runnable, warning, messages, classTitle, finished, filter, onAll }: {
   title: string;
   description: string | null;
   status: StatusModel;
@@ -47,6 +47,8 @@ export function PackageView({ title, description, status, note, run, warning, me
   // The package's group, whose link goes back to the list filtered to it.
   filter: { label: string; onSelect: () => void } | null;
   onAll: () => void;
+  // Whether the package can be run from here, for the advice under a failed run.
+  runnable: boolean;
 }) {
   const heading = useRef<HTMLHeadingElement>(null);
   const older = olderResult(status, finished);
@@ -94,7 +96,7 @@ export function PackageView({ title, description, status, note, run, warning, me
         </div>
         {warning}
       </div>
-      <RowProblems model={status} />
+      <RowProblems model={status} runnable={runnable} />
       {messages}
       {older && <Callout tone="notice">{older}</Callout>}
       {finished

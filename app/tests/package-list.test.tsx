@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { listCards, PackageList, stateText, statusPill } from "../src/components/PackageList";
-import { unlistedTitle } from "../src/components/Unlisted";
+import { unlistedModel, unlistedTitle } from "../src/components/Unlisted";
 import { groupPackages, packageKey, titleOf } from "../src/shell/packages";
 import type { PackageRow } from "../src/shell/portal";
 import { formatTime, type Result, type Runner, type RunRequest } from "../src/shell/runs";
@@ -332,6 +332,15 @@ describe("statusPill", () => {
     ["a failed first run", model({ state: { kind: "failed", error: "x", finishedAt: 1 } }), "Failed", "Failed", "error"]
   ] as const)("says %s", (_name, m, status, label, tone) => {
     expect(statusPill(m)).toEqual({ status, label, tone });
+  });
+});
+
+describe("unlistedModel", () => {
+  it("names a running package by the title its card shows, not its identity", () => {
+    const pkg = { identity: "users/7/hidden", version: "1.0.0", checksum: "c" };
+    const result: Result = { status: "running", stage: "run_package", microvm_id: "vm-1", package: pkg, updated_at: stamp(2) };
+    const runner: Runner = { state: "running", microvm_id: "vm-1", updated_at: stamp(1) };
+    expect(unlistedModel(result, runner, null, H, "Hidden").line).toBe("Running Hidden: running the package.");
   });
 });
 

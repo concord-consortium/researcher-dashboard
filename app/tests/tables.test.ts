@@ -13,11 +13,11 @@ describe("result table exports", () => {
     expect(toTsv(ROWS)).toBe('Level\tPattern, in words\tStudents\n1\tSaid "no"\t0 of 14 (0%)\n2\tTwo lines\t3 of 14');
   });
 
-  it("starts a cell a spreadsheet would run as a formula with a quote, in the CSV and the tab-separated copy, and leaves numbers and text alone", () => {
+  it("starts a cell a spreadsheet would run as a formula with a quote, in the CSV, the tab-separated copy and the HTML copy, and leaves numbers and text alone", () => {
     const rows = [["=1+1", "+1", "@SUM(A1)", "-cmd", "\tx"], ["-5", "-0.25", "-12%", "- 3", "a = b"]];
     expect(toCsv(rows)).toBe("\uFEFF'=1+1,'+1,'@SUM(A1),'-cmd,'\tx\r\n-5,-0.25,-12%,- 3,a = b\r\n");
     expect(toTsv(rows)).toBe("'=1+1\t'+1\t'@SUM(A1)\t'-cmd\t' x\n-5\t-0.25\t-12%\t- 3\ta = b");
-    expect(toHtml([["=1+1"]], 0)).toBe("<table><tr><td>=1+1</td></tr></table>");
+    expect(toHtml([["=1+1", "-5"]], 0)).toBe("<table><tr><td>'=1+1</td><td>-5</td></tr></table>");
   });
 
   it("writes a plain HTML table, its header rows as th, with the text escaped", () => {

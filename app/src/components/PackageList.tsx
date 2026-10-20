@@ -76,6 +76,11 @@ export interface StatusModel {
   versionNote: string | null;
 }
 
+// A package's state when the page cannot read it, as while its runs listener is refused.
+export const UNREAD_STATUS: StatusModel = {
+  state: { kind: "not-run" }, line: "", pending: false, refusal: null, finished: null, outdated: false, versionNote: null
+};
+
 export interface RowModel extends StatusModel {
   key: string;
   title: string;
@@ -134,14 +139,15 @@ export const CONTACT_URL = "https://concord.org/about/contact/";
 
 // A failed run, with what to do next and when it failed, and a refused Run, with when it was refused and,
 // where pressing Run again may help, what to do next, as error panels the full width of what holds them.
-export function RowProblems({ model }: { model: StatusModel }) {
+// `runnable` false, for a package with no Run here, leaves out the advice to run it again.
+export function RowProblems({ model, runnable = true }: { model: StatusModel; runnable?: boolean }) {
   const { state, line, refusal } = model;
   const detail = state.kind === "failed" ? plainError(state.error).detail : null;
   return (
     <div className="row-problems">
       {state.kind === "failed" && (
         <Callout tone="error">
-          {line} Run it again; if it keeps failing, <a href={CONTACT_URL} target="_blank" rel="noopener noreferrer">contact Concord</a>.
+          {line} {runnable ? <>Run it again; if it keeps failing, <a href={CONTACT_URL} target="_blank" rel="noopener noreferrer">contact Concord</a>.</> : <>If you need this result, <a href={CONTACT_URL} target="_blank" rel="noopener noreferrer">contact Concord</a>.</>}
           {detail && <>{" "}<span className="detail">Details: <code>{detail}</code></span></>}
           {" "}{state.finishedAt !== null && <span className="when">Failed <Time ms={state.finishedAt} /></span>}
         </Callout>
@@ -332,7 +338,7 @@ function Row({ row, group, tag, model, search, onRun, onOpen, linkRef, confirmin
         <RunButton row={row} model={model} onRun={onRun} held={asking}
           before={<><StatusPill model={model} /><ViewResult model={model} title={model.title} onOpen={() => onOpen(model.key)} /></>} />
       </div>
-      <RowProblems model={model} />
+      <RowProblems model={model} runnable={row.runnable} />
       {asking && <CommunityConfirm onConfirm={() => onConfirm(row)} onCancel={onCancel} />}
     </li>
   );

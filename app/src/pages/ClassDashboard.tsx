@@ -6,7 +6,7 @@ import { ClassCard } from "../components/ClassCard";
 import { Counts } from "../components/Counts";
 import { Header } from "../components/Header";
 import {
-  CommunityConfirm, listCards, PackageFilters, PackageList, PackageSearch, rowModel, RunButton, StatusFilter, StatusPill, statusPill,
+  CommunityConfirm, listCards, PackageFilters, PackageList, PackageSearch, rowModel, RunButton, StatusFilter, StatusPill, statusPill, UNREAD_STATUS,
   type FilterOption, type Status
 } from "../components/PackageList";
 import { PackageView } from "../components/PackageView";
@@ -358,12 +358,16 @@ export function ClassDashboard({ services, onExpired, user = null, portal = null
   }
 
   const selectedRow = selectedKey && listShown ? grouped.find((r) => packageKey(r.identity) === selectedKey) ?? null : null;
-  const selectedUnlisted = selectedKey && !selectedRow ? unlisted.find((r) => packageKey(r.package.identity) === selectedKey) ?? null : null;
+  // An open package the list no longer shows keeps its view while its runs cannot be read, with no state shown.
+  const selectedUnlisted = selectedKey && !selectedRow
+    ? unlisted.find((r) => packageKey(r.package.identity) === selectedKey) ?? (runsProblem && listShown ? received.get(selectedKey) : null) ?? null
+    : null;
   const selectedModel = selectedRow && rowModel({
     row: selectedRow, result: results.get(selectedKey!), runner, mark, classHash: scope.class_hash,
     request: requests.get(selectedKey!), newest, behind
   });
-  const selectedUnlistedModel = selectedUnlisted && unlistedModel(selectedUnlisted, runner, mark, scope.class_hash);
+  const selectedUnlistedModel = selectedUnlisted && (runsProblem ? UNREAD_STATUS : unlistedModel(selectedUnlisted, runner, mark, scope.class_hash,
+    unlistedTitle(selectedUnlisted.package.identity, allTitles)));
   const allNotes = new Map([...notes, ...rowNotes]);
   const searchGroups = search
     ? groups.map((g) => ({ ...g, rows: g.rows.filter((r) => matchesSearch(search, [titleOf(r), r.current_version.description, r.identity, g.tag(r)])) }))
@@ -383,7 +387,7 @@ export function ClassDashboard({ services, onExpired, user = null, portal = null
   const context = { classHash: scope.class_hash, results, runner, mark, requests, newest, behind };
   const cards = filter === "search" ? listCards(searchGroups, "all", context) : filter === "unlisted" ? [] : listCards(groups, filter, context);
   const pillUnlisted = filter === "search" ? searchUnlisted : filter === "all" || filter === "unlisted" ? unlisted : [];
-  const unlistedStatus = new Map(pillUnlisted.map((r) => [r, statusPill(unlistedModel(r, runner, mark, scope.class_hash)).status]));
+  const unlistedStatus = new Map(pillUnlisted.map((r) => [r, statusPill(unlistedModel(r, runner, mark, scope.class_hash, unlistedTitle(r.package.identity, allTitles))).status]));
   const statusCounts = new Map<Status, number>();
   for (const s of [...cards.map((c) => statusPill(c.model).status), ...unlistedStatus.values()]) statusCounts.set(s, (statusCounts.get(s) ?? 0) + 1);
   const keeps = (s: Status) => statusFilter === "all" || s === statusFilter;
@@ -428,7 +432,6 @@ export function ClassDashboard({ services, onExpired, user = null, portal = null
       )}
       {listProblem && <Callout tone="error">{listProblem}</Callout>}
       {runsProblem && <Callout tone="error">{runsProblem}</Callout>}
-      {countsProblem && <Callout tone="error">{countsProblem}</Callout>}
       {stopped && <Callout tone="error">{STOPPED[stopped]}</Callout>}
       {profile && !rows && !listProblem && !profileProblem && <p>Listing the packages that apply…</p>}
     </div>
@@ -447,14 +450,14 @@ export function ClassDashboard({ services, onExpired, user = null, portal = null
             <PackageView key={selectedKey} title={selectedModel.title} description={selectedRow.current_version.description} status={selectedModel} note={null}
               run={<RunButton row={selectedRow} model={selectedModel} onRun={press} held={confirming === selectedKey} before={<StatusPill model={selectedModel} />} />}
               warning={confirming === selectedKey && <CommunityConfirm onConfirm={() => confirm(selectedRow)} onCancel={() => setConfirming(null)} />}
-              classTitle={scope.name} finished={opened} filter={filterCrumb} onAll={allPackages}
+              classTitle={scope.name} finished={opened} filter={filterCrumb} onAll={allPackages} runnable={selectedRow.runnable}
               messages={messages(false)} />
           ) : selectedUnlisted && selectedUnlistedModel ? (
             <PackageView key={selectedKey} title={unlistedTitle(selectedUnlisted.package.identity, allTitles)} description={null}
               status={selectedUnlistedModel}
               note={allNotes.get(selectedUnlisted.package.identity) ?? null}
               run={<StatusPill model={selectedUnlistedModel} />}
-              classTitle={scope.name} finished={opened} filter={filterCrumb} onAll={allPackages}
+              classTitle={scope.name} finished={opened} filter={filterCrumb} onAll={allPackages} runnable={false}
               messages={messages(false)} />
           ) : listShown && rows && (
             <section className="all-packages" aria-labelledby="packages-heading">
@@ -499,7 +502,7 @@ export function ClassDashboard({ services, onExpired, user = null, portal = null
                 ))}
               </ul>
             </section>
-            <Counts counts={counts} session={session} activity={activity} now={services.now} />
+            <Counts counts={counts} problem={countsProblem} session={session} activity={activity} now={services.now} />
             <ClassActivity activity={activity} problem={activityProblem} stopped={stopped} />
           </div>
         </div>

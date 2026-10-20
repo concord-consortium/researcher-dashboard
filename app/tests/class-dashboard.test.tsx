@@ -597,7 +597,9 @@ describe("ClassDashboard", () => {
     await s.refuseRuns("runner");
     expect(screen.getByText("Your runs could not be read.").closest("[aria-live]")).not.toBeNull();
     await s.refuseCounts();
-    expect(screen.getByText("Your current status could not be read.").closest("[aria-live]")).not.toBeNull();
+    const countsError = screen.getByText("Your current status could not be read.");
+    expect(countsError.closest("[aria-live]")).not.toBeNull();
+    expect(countsError.closest("section")!.querySelector("h2")!.textContent).toBe("Current Status");
     expect(await screen.findByText("Wildfire open responses")).toBeDefined();
     cleanup();
     const results = services();
@@ -1123,6 +1125,30 @@ describe("opening a package", () => {
     expect(within(unlistedRow(gone.identity)).getByRole("link").textContent).toBe("Gone");
     expect(within(section).getAllByRole("listitem")).toHaveLength(2);
     expect(s.resolve).not.toHaveBeenCalled();
+  });
+
+  it("advises no re-run under a failure of a package the list no longer shows, which has no Run here", async () => {
+    const gone = row({ title: "Gone", official: true, applies: false, identity: "projects/20/gone" });
+    const s = services({ list: async () => [WILDFIRE, gone] });
+    await listed(s);
+    await s.results(new Map([["projects__20__gone", { ...done(gone.identity, "Gone summary", 1000), status: "failed", error: "boom", finished_at: stamp(2000) }]]));
+    const panel = unlistedRow(gone.identity).querySelector(".row-problems .callout")!;
+    expect(panel.textContent).toMatch(/If you need this result, contact Concord\./);
+    expect(panel.textContent).not.toMatch(/Run it again/);
+  });
+
+  it("keeps an open package the list no longer shows when its runs cannot be read, showing no state", async () => {
+    const gone = row({ title: "Gone", official: true, applies: false, identity: "projects/20/gone" });
+    const s = services({ list: async () => [WILDFIRE, gone] });
+    await listed(s);
+    await s.results(new Map([["projects__20__gone", done(gone.identity, "Gone summary", 1000)]]));
+    fireEvent.click(within(unlistedRow(gone.identity)).getByRole("link", { name: "Gone" }));
+    expect(view().querySelector("h2")!.textContent).toBe("Gone");
+    await s.refuseRuns("results");
+    expect(view()).not.toBeNull();
+    expect(view().querySelector("h2")!.textContent).toBe("Gone");
+    expect(view().querySelector(".status-pill")!.textContent).toBe("Not run");
+    expect(within(view()).getByRole("heading", { name: "Gone summary" })).toBeDefined();
   });
 
   it("asks about packages the list did not return, once each, and notes the archived and the gone", async () => {

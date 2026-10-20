@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { COPIED_MS } from "../src/components/CopyButton";
 import { ResultActions, ResultView, ResultWhen } from "../src/components/ResultView";
+import { resultFileName } from "../src/shell/download";
 import { formatTime, fullTime } from "../src/shell/runs";
 import { stamp } from "./fixtures";
 
@@ -71,7 +72,7 @@ describe("ResultView", () => {
     const revokeObjectURL = vi.fn();
     vi.stubGlobal("URL", { createObjectURL: (blob: Blob) => { saved = blob; return "blob:result"; }, revokeObjectURL });
     const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
-      expect(this.download).toBe(`w-period-2-${new Date(1000).toLocaleDateString("en-CA")}.md`);
+      expect(this.download).toBe(resultFileName(FINISHED.package.identity, "Period 2", 1000));
       expect(this.getAttribute("href")).toBe("blob:result");
     });
     render(<ResultActions classTitle="Period 2" finished={FINISHED} />);
