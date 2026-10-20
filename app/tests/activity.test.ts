@@ -102,8 +102,8 @@ describe("behindRows", () => {
   });
 
   it("leaves out a row whose refusal is still showing, and keeps one whose refusal was for an older result", () => {
-    expect(behind({ requests: new Map([[key, { message: "No.", at: 5000 }]]) }).size).toBe(0);
-    expect(behind({ requests: new Map([[key, { message: "No.", at: 4000 }]]) }).size).toBe(1);
+    expect(behind({ requests: new Map([[key, { message: "No.", at: 5000, refusedAt: 0, retry: false }]]) }).size).toBe(0);
+    expect(behind({ requests: new Map([[key, { message: "No.", at: 4000, refusedAt: 0, retry: false }]]) }).size).toBe(1);
   });
 
   it("leaves out a row whose accepted Run is still tied to its result, lapsed or not, and keeps one tied to an older result", () => {

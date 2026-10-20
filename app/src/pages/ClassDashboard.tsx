@@ -1,18 +1,29 @@
+import { ClipboardDocumentListIcon, CubeIcon, UserGroupIcon } from "@heroicons/react/16/solid";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ClassActivity, type Stopped } from "../components/ClassActivity";
+import { Callout } from "../components/Callout";
+import { ClassActivity, RERUNS, STOPPED, type Stopped } from "../components/ClassActivity";
+import { ClassCard } from "../components/ClassCard";
 import { Counts } from "../components/Counts";
-import { PackageList } from "../components/PackageList";
-import { ResultView } from "../components/ResultView";
-import { Unlisted } from "../components/Unlisted";
-import { groupPackages, needsRefresh, packageKey, scopeUrls, titleOf, type Profile } from "../shell/packages";
+import { Header } from "../components/Header";
+import {
+  CommunityConfirm, listCards, PackageFilters, PackageList, PackageSearch, rowModel, RunButton, StatusFilter, StatusPill, statusPill, UNREAD_STATUS,
+  type FilterOption, type Status
+} from "../components/PackageList";
+import { PackageView } from "../components/PackageView";
+import { panelId, tabId, Tabs } from "../components/Tabs";
+import { Unlisted, unlistedModel, unlistedTitle } from "../components/Unlisted";
+import { runNews } from "../shell/announce";
+import { groupPackages, identityOfKey, matchesSearch, needsRefresh, packageKey, projectNames, scopeUrls, titleOf, type Profile } from "../shell/packages";
 import { ApiError, SessionExpired, type PackageRow, type Scope } from "../shell/portal";
 import { PROFILE_MAX_AGE_MS } from "../shell/portals";
 import {
-  ACCEPTED_WAIT_MS, latestFinished, millis, nextMark, sessionLines,
+  ACCEPTED_WAIT_MS, latestFinished, millis, nextMark, sentence, sessionLines,
   type Counts as CountsDoc, type Result, type Runner, type RunRequest, type SessionMark
 } from "../shell/runs";
 import { behindRows, newestActivity, type Activity } from "../shell/activity";
 import { useAutoRerun } from "../shell/rerun";
+import type { TokenUser } from "../shell/oauth";
+import { ALL_PACKAGES, plainClick, routeHash, useRoute } from "../shell/route";
 import type { DashboardServices } from "../shell/services";
 import type { InfoReason } from "../shell/start";
 import { Info } from "./Info";
@@ -22,17 +33,25 @@ type Source = "portal" | "report-server" | "firebase";
 // What to say when a call fails with no message of its own to show.
 const UNREACHABLE: Record<Source, string> = {
   portal: "The portal could not be reached.",
-  "report-server": "The package catalog could not be reached.",
+  "report-server": "The analysis catalog could not be reached.",
   firebase: "This class's profile, your runs and your counts could not be read."
 };
 
 const PROFILE_REFUSED = "This class's profile could not be read.";
 const ACTIVITY_REFUSED = "Class activity could not be read.";
 
+// The page's own title, as its HTML gave it, read once: a dashboard mounted again sees it unchanged.
+let firstTitle: string | null = null;
+const pageTitle = () => (firstTitle ??= document.title);
+
 // The dashboard for the class the token is bound to, never the one the launch link asked for.
-export function ClassDashboard({ services, onExpired }: {
+// `portal` is the origin of the portal that launched the page, the class's home.
+export function ClassDashboard({ services, onExpired, user = null, portal = null, demo = false }: {
   services: DashboardServices;
   onExpired: () => void;
+  user?: TokenUser | null;
+  portal?: string | null;
+  demo?: boolean;
 }) {
   const [scope, setScope] = useState<Scope | null>(null);
   const [info, setInfo] = useState<InfoReason | null>(null);
@@ -41,17 +60,18 @@ export function ClassDashboard({ services, onExpired }: {
   const [profile, setProfile] = useState<Profile | null | undefined>(undefined);
   const [profileProblem, setProfileProblem] = useState<string | null>(null);
   const [refreshProblem, setRefreshProblem] = useState<string | null>(null);
-  const [runner, setRunner] = useState<Runner | null>(null);
+  // undefined until the first snapshot or after the listener is refused; null while the researcher has no runner.
+  const [runnerDoc, setRunner] = useState<Runner | null | undefined>(undefined);
+  const runner = runnerDoc ?? null;
   const [mark, setMark] = useState<SessionMark | null>(null);
   // undefined until the first snapshot; null while the document does not exist.
   const [counts, setCounts] = useState<CountsDoc | null | undefined>(undefined);
   const [received, setReceived] = useState<Map<string, Result>>(new Map());
   const [requests, setRequests] = useState<Map<string, RunRequest>>(new Map());
-  // The open result, by package key, and the finish time of the result it opened on. Each opening
-  // is numbered, so opening the result already open mounts its view again and takes focus to it.
-  const [open, setOpen] = useState<{ key: string; shownAt: number | null; opening: number } | null>(null);
-  const showButtons = useRef(new Map<string, HTMLButtonElement>());
-  const resultsHeading = useRef<HTMLHeadingElement>(null);
+  const [route, navigate] = useRoute();
+  const selectedKey = route.tab === "packages" ? route.key : null;
+  const search = route.tab === "packages" && route.q ? route.q : null;
+  const openLinks = useRef(new Map<string, HTMLAnchorElement>());
   // What the page says of a result whose package it no longer lists, by identity.
   const [notes, setNotes] = useState<Map<string, string | null>>(new Map());
   const asked = useRef(new Set<string>());
@@ -126,9 +146,9 @@ export function ClassDashboard({ services, onExpired }: {
         }
         if (which === "counts") {
           setCounts(undefined);
-          return setCountsProblem("Your counts could not be read.");
+          return setCountsProblem("Your current status could not be read.");
         }
-        if (which === "runner") setRunner(null);
+        if (which === "runner") setRunner(undefined);
         setRunsProblem("Your runs could not be read.");
       }
     })
@@ -211,22 +231,65 @@ export function ClassDashboard({ services, onExpired }: {
       }
       // Keyed to the result as the refusal finds it: the queued write lands before a VM step fails.
       const at = millis(latestResults.current.get(key)?.updated_at);
-      refused(error, (message) => setRequests((r) => new Map(r).set(key, { message, at })), "portal");
+      const retry = !(error instanceof ApiError) || error.status >= 500;
+      refused(error, (message) => setRequests((r) => new Map(r).set(key, { message, at, refusedAt: services.now(), retry })), "portal");
       return true;
     }
   }
 
   const listShown = Boolean(profile && rows && !listProblem && !profileProblem);
-  const grouped = useMemo(() => (rows && scope ? groupPackages(rows, scope).flatMap((g) => g.rows) : []), [rows, scope]);
+  const groups = useMemo(() => (rows && scope ? groupPackages(rows, scope) : []), [rows, scope]);
+  const grouped = useMemo(() => groups.flatMap((g) => g.rows), [groups]);
+  // The list's filter pill, by group key; "all" when the group it named has gone.
+  const [filterKey, setFilter] = useState(() => (search ? "search" : "all"));
+  const [statusFilter, setStatus] = useState<Status | "all">("all");
+  // A search that arrives in the URL, as on Back, presses Search Results.
+  const [seenSearch, setSeenSearch] = useState(search);
+  if (search !== seenSearch) {
+    setSeenSearch(search);
+    if (search) setFilter("search");
+  }
+  // The community package whose warning is showing, which runs only on Confirm.
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const community = useMemo(() => new Set(groups.find((g) => g.key === "community")?.rows.map((r) => packageKey(r.identity))), [groups]);
   const listedTitles = useMemo(() => new Map(grouped.map((r) => [packageKey(r.identity), titleOf(r)])), [grouped]);
+  // Every title the list returned, applicable or not, for results the page no longer lists.
+  const allTitles = useMemo(() => new Map((rows ?? []).map((r) => [r.identity, titleOf(r)])), [rows]);
+  const namedProjects = useMemo(() => projectNames(rows ?? []), [rows]);
+
+  // The page's one announcement of how runs move on: a run starting, finishing or failing, a refused
+  // Run, the runner failing, and the counts becoming unreadable, each said once; a run's news names its
+  // package. It sits outside both tab panels, so it is heard whichever tab is showing. Rows and the
+  // header say nothing.
+  const [announcement, setAnnouncement] = useState("");
+  const heard = useRef<{ results: Map<string, Result> | null; requests: Map<string, RunRequest>; runnerState: string | null; countsProblem: string | null }>(
+    { results: null, requests: new Map(), runnerState: null, countsProblem: null });
+  useEffect(() => {
+    const titleAt = (key: string) => listedTitles.get(key) ?? unlistedTitle(identityOfKey(key), allTitles);
+    const before = heard.current;
+    const news = runNews(before.results, results, titleAt);
+    for (const [key, request] of requests) {
+      if ("message" in request && before.requests.get(key) !== request) news.push(`${titleAt(key)} could not be run: ${sentence(request.message)}`);
+    }
+    const runnerState = runnerDoc?.state ?? null;
+    if (runnerState === "failed" && before.runnerState !== "failed" && before.results) {
+      news.push(`Runs stopped with an error: ${sentence(runnerDoc?.error ?? "no reason was given")}`);
+    }
+    if (countsProblem && countsProblem !== before.countsProblem) news.push(countsProblem);
+    heard.current = { results: listShown ? results : before.results, requests, runnerState, countsProblem };
+    // The same words again change by a trailing space, so they are still announced.
+    if (news.length > 0) setAnnouncement((was) => (news.join(" ") === was ? `${was}\u00a0` : news.join(" ")));
+  }, [results, requests, runnerDoc, countsProblem, listShown, listedTitles, allTitles]);
 
   const newest = activity ? newestActivity(activity) : null;
+  // A community package runs only when pressed, after its warning, so it never re-runs on its own.
+  const rerunnable = useMemo(() => grouped.filter((r) => !community.has(packageKey(r.identity))), [grouped, community]);
   // An info page re-runs nothing: its listeners have stopped, but a list answered late still lands.
   const behind = useMemo(
     () => listShown && scope && !stopped && !info
-      ? behindRows({ listed: grouped, results, runner, mark, classHash: scope.class_hash, newest, requests })
+      ? behindRows({ listed: rerunnable, results, runner, mark, classHash: scope.class_hash, newest, requests })
       : new Map<string, { row: PackageRow; at: number | null }>(),
-    [listShown, stopped, info, grouped, results, runner, mark, scope, newest, requests]
+    [listShown, stopped, info, rerunnable, results, runner, mark, scope, newest, requests]
   );
   useAutoRerun(behind, stopped !== null, (_key, row) => run(row, false, true));
 
@@ -238,8 +301,8 @@ export function ClassDashboard({ services, onExpired }: {
 
   // A package the list returned says why from its own row; any other is asked about once.
   const rowNotes = useMemo(() => new Map((rows ?? []).map((r) => [r.identity, r.applies
-    ? "This package is not offered in any of this class's groups."
-    : "This package no longer applies to this class."])), [rows]);
+    ? "This analysis is not offered in any of this class's groups."
+    : "This analysis no longer applies to this class."])), [rows]);
 
   useEffect(() => {
     for (const result of unlisted) {
@@ -248,51 +311,53 @@ export function ClassDashboard({ services, onExpired }: {
       asked.current.add(identity);
       const note = (text: string | null) => setNotes((n) => new Map(n).set(identity, text));
       services.reportServer.resolve(identity, version)
-        .then((resolved) => note(resolved.archived ? "This package has been archived." : null))
+        .then((resolved) => note(resolved.archived ? "This analysis has been archived." : null))
         .catch((error) => {
           if (error instanceof SessionExpired) return refused(error, () => {}, "report-server");
-          note(error instanceof ApiError && error.status === 404 ? "This package is no longer available to you." : null);
+          note(error instanceof ApiError && error.status === 404 ? "This analysis is no longer available to you." : null);
         });
     }
   }, [unlisted, rowNotes, services]);
 
-  // A result queued before the function kept the last finished run has nothing left to show.
+  // Leaving a package for the list puts focus back on the package's link there.
+  const left = useRef<string | null>(null);
   useEffect(() => {
-    if (open && !latestFinished(received.get(open.key))) {
-      setOpen(null);
-      resultsHeading.current?.focus();
-    }
-  }, [open, received]);
+    const key = left.current;
+    left.current = selectedKey;
+    if (!key || selectedKey) return;
+    openLinks.current.get(key)?.focus();
+  }, [selectedKey]);
 
-  const showRef = (key: string, button: HTMLButtonElement | null) => {
-    if (button) showButtons.current.set(key, button);
-    else showButtons.current.delete(key);
+  const linkRef = (key: string, link: HTMLAnchorElement | null) => {
+    if (link) openLinks.current.set(key, link);
+    else openLinks.current.delete(key);
   };
-  const show = (key: string) => setOpen((o) => ({
-    key, shownAt: millis(latestFinished(results.get(key))?.finished_at), opening: (o?.opening ?? 0) + 1
-  }));
-  const close = () => {
-    const key = open?.key;
-    setOpen(null);
-    const button = key ? showButtons.current.get(key) : undefined;
-    // A Community row's button is hidden while its disclosure is closed, and cannot take focus.
-    const disclosure = button?.closest("details");
-    if (disclosure) disclosure.open = true;
-    (button ?? resultsHeading.current)?.focus();
-  };
+  const openPackage = (key: string) => navigate({ tab: "packages", key });
   // The open view keeps the result it read even if a listener is refused later.
-  const opened = open ? latestFinished(received.get(open.key)) : null;
-  const openedAt = millis(opened?.finished_at);
+  const opened = selectedKey ? latestFinished(received.get(selectedKey)) : null;
 
-  const session = scope ? sessionLines(runner, scope.class_hash, results, (key) => listedTitles.get(key) ?? null,
-    [...requests.values()].some((r) => "pending" in r)).map((line) => <p key={line} className="session">{line}</p>) : null;
-  // While the machine runs a package that already has a finished result, the session lines stay out
-  // of the live region; the package's row announces the outcome.
-  const current = runner?.state === "running" ? runner.current_package : null;
-  const rerunning = Boolean(current && scope && current.class_hash === scope.class_hash
-    && latestFinished(results.get(current.package_key)));
+  // Before the list arrives a running package has no title, so the line names none.
+  const session = scope ? sessionLines(runnerDoc, scope.class_hash, results,
+    (key) => (rows ? listedTitles.get(key) ?? unlistedTitle(identityOfKey(key), allTitles) : null),
+    [...requests.values()].some((r) => "pending" in r)) : [];
 
-  if (info) return <Info reason={info} />;
+  const selectedRow = selectedKey && listShown ? grouped.find((r) => packageKey(r.identity) === selectedKey) ?? null : null;
+  // An open package the list no longer shows keeps its view while its runs cannot be read, with no state shown.
+  const selectedUnlisted = selectedKey && !selectedRow
+    ? unlisted.find((r) => packageKey(r.package.identity) === selectedKey) ?? (runsProblem && listShown ? received.get(selectedKey) : null) ?? null
+    : null;
+
+  // The browser tab names the view, the open package or the tab, then the class, before the page's own title.
+  const baseTitle = pageTitle();
+  const viewTitle = route.tab === "info" ? "Info"
+    : selectedRow ? titleOf(selectedRow) : selectedUnlisted ? unlistedTitle(selectedUnlisted.package.identity, allTitles) : "Analytics";
+  const className = scope?.name ?? null;
+  useEffect(() => {
+    document.title = className && !info ? `${viewTitle} - ${className} - ${baseTitle}` : baseTitle;
+    return () => { document.title = baseTitle; };
+  }, [viewTitle, className, info, baseTitle]);
+
+  if (info) return <Info reason={info} demo={demo} user={user} portal={portal} />;
   if (!scope) {
     return (
       <main className="loading">
@@ -301,71 +366,158 @@ export function ClassDashboard({ services, onExpired }: {
     );
   }
 
+  const selectedModel = selectedRow && rowModel({
+    row: selectedRow, result: results.get(selectedKey!), runner, mark, classHash: scope.class_hash,
+    request: requests.get(selectedKey!), newest, behind
+  });
+  const selectedUnlistedModel = selectedUnlisted && (runsProblem ? UNREAD_STATUS : unlistedModel(selectedUnlisted, runner, mark, scope.class_hash,
+    unlistedTitle(selectedUnlisted.package.identity, allTitles)));
+  const allNotes = new Map([...notes, ...rowNotes]);
+  const searchGroups = search
+    ? groups.map((g) => ({ ...g, rows: g.rows.filter((r) => matchesSearch(search, [titleOf(r), r.current_version.description, r.identity, g.tag(r)])) }))
+    : [];
+  const searchUnlisted = search
+    ? unlisted.filter((r) => matchesSearch(search, [unlistedTitle(r.package.identity, allTitles), r.package.identity]))
+    : [];
+  const searchFound = searchGroups.reduce((n, g) => n + g.rows.length, 0) + searchUnlisted.length;
+  const filters: FilterOption[] = [
+    ...(search ? [{ key: "search", label: "Search Results", count: searchFound }] : []),
+    { key: "all", label: "All", count: grouped.length + unlisted.length },
+    ...groups.map((g) => ({ key: g.key, label: g.heading, count: g.rows.length })),
+    ...(unlisted.length > 0 ? [{ key: "unlisted", label: "No longer listed", count: unlisted.length }] : [])
+  ];
+  const filter = filters.some((f) => f.key === filterKey) ? filterKey : "all";
+  // The cards the filter pill keeps, which the status menu counts and then narrows to one status.
+  const context = { classHash: scope.class_hash, results, runner, mark, requests, newest, behind };
+  const cards = filter === "search" ? listCards(searchGroups, "all", context) : filter === "unlisted" ? [] : listCards(groups, filter, context);
+  const pillUnlisted = filter === "search" ? searchUnlisted : filter === "all" || filter === "unlisted" ? unlisted : [];
+  const unlistedStatus = new Map(pillUnlisted.map((r) => [r, statusPill(unlistedModel(r, runner, mark, scope.class_hash, unlistedTitle(r.package.identity, allTitles))).status]));
+  const statusCounts = new Map<Status, number>();
+  for (const s of [...cards.map((c) => statusPill(c.model).status), ...unlistedStatus.values()]) statusCounts.set(s, (statusCounts.get(s) ?? 0) + 1);
+  const keeps = (s: Status) => statusFilter === "all" || s === statusFilter;
+  const shownCards = cards.filter((c) => keeps(statusPill(c.model).status));
+  const shownUnlisted = pillUnlisted.filter((r) => keeps(unlistedStatus.get(r)!));
+  // A pressed Run of a community package asks first; Resume finishes a run already confirmed. Either
+  // lifts a status filter, which the run's new status would hide the card from.
+  const press = (row: PackageRow, resume: boolean) => {
+    setStatus("all");
+    if (!resume && community.has(packageKey(row.identity))) setConfirming(packageKey(row.identity));
+    else void run(row, resume);
+  };
+  const confirm = (row: PackageRow) => { setConfirming(null); void run(row, false); };
+  const anyListed = grouped.length + unlisted.length > 0;
+  const anyRerunnable = rerunnable.some((r) => latestFinished(results.get(packageKey(r.identity))));
+  const emptyList = filter === "search" && searchFound === 0 ? `No analyses match “${search}”.` : `No analyses here have the run status ${statusFilter}.`;
+  // What the list's pills and menu leave, said when a search or a filter changes it.
+  const listNews = filter === "search" && searchFound > 0
+    ? `${searchFound} ${searchFound === 1 ? "analysis matches" : "analyses match"} “${search}”.`
+    : anyListed && shownCards.length === 0 && shownUnlisted.length === 0 && (filter === "search" || statusFilter !== "all") ? emptyList : "";
+  // Any pill but Search Results ends the search.
+  const selectFilter = (key: string) => { setFilter(key); if (key !== "search" && search) navigate(ALL_PACKAGES); };
+  const searchFor = (q: string | null) => { setFilter(q ? "search" : "all"); navigate(q ? { tab: "packages", key: null, q } : ALL_PACKAGES); };
+  const allPackages = () => { setFilter("all"); navigate(ALL_PACKAGES); };
+  // The open package's own group for its breadcrumb, whatever filter it was opened from; its link filters the list to it.
+  const crumbKey = selectedRow ? groups.find((g) => g.rows.includes(selectedRow))?.key : selectedUnlisted ? "unlisted" : undefined;
+  const crumbOption = filters.find((f) => f.key === crumbKey);
+  const filterCrumb = crumbOption ? { label: crumbOption.label, onSelect: () => { setFilter(crumbOption.key); navigate(ALL_PACKAGES); } } : null;
+  const tab = route.tab;
+  // What the page could not read, and in the list what may be missing from it. A package's view shows
+  // these under its subheader, leaving out the list's own warning.
+  const inView = Boolean((selectedRow && selectedModel) || selectedUnlisted);
+  const messages = (inList: boolean) => (
+    <div className="status" aria-live="polite">
+      {profileProblem && <Callout tone="error">{profileProblem}</Callout>}
+      {!profileProblem && !profile && !refreshProblem && <p>Reading this class's activities…</p>}
+      {refreshProblem && <Callout tone="error">{refreshProblem}</Callout>}
+      {inList && profile?.truncated && (
+        <Callout tone="notice">
+          This class's content was too large to read completely, so an analysis may be missing from this list.
+        </Callout>
+      )}
+      {listProblem && <Callout tone="error">{listProblem}</Callout>}
+      {runsProblem && <Callout tone="error">{runsProblem}</Callout>}
+      {stopped && <Callout tone="error">{STOPPED[stopped]}</Callout>}
+      {profile && !rows && !listProblem && !profileProblem && <p>Listing the analyses that apply…</p>}
+    </div>
+  );
+
   return (
-    <main className="class-dashboard">
-      <header>
-        <h1>{scope.name}</h1>
-        <p className="meta">
-          {scope.teachers.map((t) => t.name).join(", ")}
-          {scope.cohorts.length > 0 && <> · {scope.cohorts.map((c) => c.name).join(", ")}</>}
-        </p>
-        <p className="ownership">
-          Your results and counts on this page are your own: another researcher of this class sees their own runs. Class activity is the same for every researcher of this class.
-        </p>
-      </header>
-
-      <ClassActivity activity={activity} problem={activityProblem} stopped={stopped} now={services.now} />
-
-      <section aria-labelledby="assignments-heading">
-        <h2 id="assignments-heading">Assignments</h2>
-        <ul className="assignments">
-          {scope.assignments.map((a) => (
-            <li key={a.offering_id}>
-              {a.name ?? "Untitled"}
-              {a.tool && <span className="tool"> · {a.tool}</span>}
-            </li>
-          ))}
-        </ul>
-      </section>
-
-      <Counts counts={counts} />
-
-      <section aria-labelledby="packages-heading">
-        <h2 id="packages-heading">Packages</h2>
-        <div className="status" aria-live="polite">
-          {profileProblem && <p className="error">{profileProblem}</p>}
-          {!profileProblem && !profile && !refreshProblem && <p>Reading this class's activities…</p>}
-          {refreshProblem && <p className="error">{refreshProblem}</p>}
-          {profile?.truncated && (
-            <p className="notice">
-              This class's content was too large to read completely, so a package may be missing from this list.
-            </p>
+    <>
+      <Header scope={scope} user={user} demo={demo} activity={activity} now={services.now} session={session} runnerFailed={runner?.state === "failed"}
+        tabs={<Tabs label="Dashboard sections" selected={tab} tabs={[{ key: "info", label: "Info", icon: UserGroupIcon }, { key: "packages", label: "Analytics", icon: CubeIcon }]}
+          onSelect={(key) => navigate(key === "info" ? { tab: "info" } : ALL_PACKAGES)} />} />
+      <p role="status" className="visually-hidden">{announcement}</p>
+      <main className="class-dashboard">
+        <div role="tabpanel" id={panelId("packages")} aria-labelledby={tabId("packages")} hidden={tab !== "packages"}>
+          {!inView && messages(true)}
+          {selectedRow && selectedModel ? (
+            <PackageView key={selectedKey} title={selectedModel.title} description={selectedRow.current_version.description} status={selectedModel} note={null}
+              run={<RunButton row={selectedRow} model={selectedModel} onRun={press} held={confirming === selectedKey} before={<StatusPill model={selectedModel} />} />}
+              warning={confirming === selectedKey && <CommunityConfirm onConfirm={() => confirm(selectedRow)} onCancel={() => setConfirming(null)} />}
+              classTitle={scope.name} finished={opened} filter={filterCrumb} onAll={allPackages} runnable={selectedRow.runnable}
+              messages={messages(false)} />
+          ) : selectedUnlisted && selectedUnlistedModel ? (
+            <PackageView key={selectedKey} title={unlistedTitle(selectedUnlisted.package.identity, allTitles)} description={null}
+              status={selectedUnlistedModel}
+              note={allNotes.get(selectedUnlisted.package.identity) ?? null}
+              run={<StatusPill model={selectedUnlistedModel} />}
+              classTitle={scope.name} finished={opened} filter={filterCrumb} onAll={allPackages} runnable={false}
+              messages={messages(false)} />
+          ) : listShown && rows && (
+            <section className="all-packages" aria-labelledby="packages-heading">
+              <h2 id="packages-heading" className="visually-hidden">All Analyses</h2>
+              {anyListed && <PackageSearch search={search} onSearch={searchFor} />}
+              {anyListed && (
+                <div className="list-filters">
+                  <PackageFilters options={filters} selected={filter} onSelect={selectFilter} />
+                  <StatusFilter counts={statusCounts} selected={statusFilter} onSelect={setStatus} />
+                </div>
+              )}
+              {anyRerunnable && !stopped && <p className="list-note">{RERUNS}</p>}
+              {filter !== "unlisted" && groups.length === 0 && <p>No analyses apply to this class yet.</p>}
+              {anyListed && shownCards.length === 0 && shownUnlisted.length === 0 && (filter === "search" || statusFilter !== "all") && (
+                <p>{emptyList}</p>
+              )}
+              <p role="status" className="visually-hidden">{listNews}</p>
+              {shownCards.length > 0 && (
+                <PackageList cards={shownCards} search={filter === "search" ? search : null} onRun={press} onOpen={openPackage} linkRef={linkRef}
+                  confirming={confirming} onConfirm={confirm} onCancel={() => setConfirming(null)} />
+              )}
+              {shownUnlisted.length > 0 && (
+                <Unlisted results={shownUnlisted} search={filter === "search" ? search : null} titles={allTitles} notes={allNotes} runner={runner} mark={mark}
+                  classHash={scope.class_hash} onOpen={openPackage} linkRef={linkRef} />
+              )}
+            </section>
           )}
-          {listProblem && <p className="error">{listProblem}</p>}
-          {runsProblem && <p className="error">{runsProblem}</p>}
-          {countsProblem && <p className="error">{countsProblem}</p>}
-          {!rerunning && session}
-          {profile && !rows && !listProblem && !profileProblem && <p>Listing the packages that apply…</p>}
         </div>
-        {rerunning && session}
-        {listShown && rows && (
-          <PackageList rows={rows} scope={scope} results={results} runner={runner} mark={mark} requests={requests}
-            newest={newest} behind={behind} onRun={run} onShow={show} showRef={showRef} />
-        )}
-      </section>
 
-      <section aria-labelledby="results-heading">
-        <h2 id="results-heading" ref={resultsHeading} tabIndex={-1}>Results</h2>
-        {open && opened && (
-          <ResultView key={`${open.key}:${open.opening}`} title={listedTitles.get(open.key) ?? opened.package.identity} finished={opened}
-            updated={openedAt !== null && open.shownAt !== null && openedAt > open.shownAt ? openedAt : null} onClose={close} />
-        )}
-        {unlisted.length > 0 && (
-          <Unlisted results={unlisted} notes={new Map([...notes, ...rowNotes])} runner={runner} mark={mark}
-            classHash={scope.class_hash} onShow={show} showRef={showRef} />
-        )}
-        {!(open && opened) && unlisted.length === 0 && <p>Open a finished package's result to read it here.</p>}
-      </section>
-    </main>
+        <div role="tabpanel" id={panelId("info")} aria-labelledby={tabId("info")} hidden={tab !== "info"}>
+          {tab === "info" && messages(false)}
+          <div className="info-grid">
+            <section className="info-card wide" aria-labelledby="analyses-heading">
+              <h2 id="analyses-heading"><CubeIcon aria-hidden="true" />Analyses</h2>
+              <p>
+                Pick analyses to run from the{" "}
+                <a href={routeHash(ALL_PACKAGES)} onClick={(e) => { if (!plainClick(e)) return; e.preventDefault(); allPackages(); }}>Analytics tab</a>.
+              </p>
+            </section>
+            <ClassCard scope={scope} projectNames={namedProjects} portal={portal} />
+            <section className="info-card wide" aria-labelledby="assignments-heading">
+              <h2 id="assignments-heading"><ClipboardDocumentListIcon aria-hidden="true" />Assignments</h2>
+              <ul className="assignments">
+                {scope.assignments.map((a) => (
+                  <li key={a.offering_id}>
+                    {a.name ?? "Untitled"}
+                    {a.tool && <span className="tool"> · {a.tool === "ActivityPlayer" ? "Activity Player" : a.tool}</span>}
+                  </li>
+                ))}
+              </ul>
+            </section>
+            <Counts counts={counts} problem={countsProblem} session={session} activity={activity} now={services.now} />
+            <ClassActivity activity={activity} problem={activityProblem} stopped={stopped} />
+          </div>
+        </div>
+      </main>
+    </>
   );
 }

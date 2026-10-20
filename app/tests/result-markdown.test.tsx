@@ -1,4 +1,4 @@
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import Markdown from "react-markdown";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize from "rehype-sanitize";
@@ -52,6 +52,12 @@ describe.each([true, false])("ResultMarkdown with the sanitizer %s", (sanitize) 
     for (const href of hrefs) expect(href).toMatch(LINK);
   });
 
+  it("is a named region the keyboard can reach, to scroll what is too wide", () => {
+    render(<ResultMarkdown markdown="Text" />);
+    const region = screen.getByRole("region", { name: "Result text" });
+    expect(region.tabIndex).toBe(0);
+  });
+
   it("shows the HTML as text", () => {
     const { container } = render(<ResultMarkdown markdown={HOSTILE} sanitize={sanitize} />);
     expect(container.textContent).toContain("<script>");
@@ -76,9 +82,9 @@ describe.each([true, false])("ResultMarkdown with the sanitizer %s", (sanitize) 
     expect(cells.map((c) => c.style.textAlign)).toEqual(["left", "right"]);
     const boxes = [...container.querySelectorAll("input[type=checkbox]")] as HTMLInputElement[];
     expect(boxes.map((b) => [b.disabled, b.checked])).toEqual([[true, true], [true, false]]);
-    expect(container.querySelector("h4")!.textContent).toBe("Title");
-    expect(container.querySelector("h5")!.textContent).toBe("Section");
-    expect(container.querySelector("h1, h2, h3")).toBeNull();
+    expect(container.querySelector("h3")!.textContent).toBe("Title");
+    expect(container.querySelector("h4")!.textContent).toBe("Section");
+    expect(container.querySelector("h1, h2")).toBeNull();
   });
 
   it("keeps every allowed data image type and a mailto link", () => {

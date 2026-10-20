@@ -1,3 +1,4 @@
+import type { StatusModel } from "../src/components/PackageList";
 import type { PackageRow, Scope } from "../src/shell/portal";
 
 export const SCOPE: Scope = {
@@ -6,6 +7,10 @@ export const SCOPE: Scope = {
   project_ids: [20, 21], assignment_fingerprint: "v1:abc",
   assignments: [{ offering_id: 9, runnable_id: 8, name: "Wildfire", url: "https://ap.test/?activity=1", tool: "ActivityPlayer" }]
 };
+
+// An access token's shape carrying `claims`, with a placeholder signature.
+export const jwt = (claims: Record<string, unknown>) =>
+  `${Buffer.from('{"alg":"RS256"}').toString("base64url")}.${Buffer.from(JSON.stringify(claims)).toString("base64url")}.sig`;
 
 // A Firestore Timestamp, as the page reads it.
 export const stamp = (ms: number) => ({ toMillis: () => ms });
@@ -21,3 +26,8 @@ export function row(over: Partial<PackageRow> & { title?: string }): PackageRow 
     ...rest
   };
 }
+
+// A package's status with nothing known of it, changed by `over`.
+export const statusModel = (over: Partial<StatusModel>): StatusModel => ({
+  state: { kind: "not-run" }, line: "", pending: false, refusal: null, finished: null, outdated: false, versionNote: null, ...over
+});

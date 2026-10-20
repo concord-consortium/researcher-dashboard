@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { authorizeUrl, challengeFor, exchangeCode, randomValue, redirectUriFor, takePending, TokenError } from "../src/shell/oauth";
+import { authorizeUrl, challengeFor, exchangeCode, randomValue, redirectUriFor, takePending, TokenError, tokenUser } from "../src/shell/oauth";
+import { jwt } from "./fixtures";
 
 const LAUNCH = { authDomain: "https://portal.test/", classId: "223", loginHint: "200" };
 
@@ -76,5 +77,29 @@ describe("exchangeCode", () => {
       const fetchImpl = vi.fn(async () => ({ ok: true, status: 200, json: async () => body }));
       await expect(exchangeCode("https://p", "c", "v", "r", fetchImpl as unknown as typeof fetch, 0)).rejects.toBeInstanceOf(TokenError);
     }
+  });
+});
+
+describe("tokenUser", () => {
+  it("names the user from the portal JWT's keys, with the username", () => {
+    expect(tokenUser(jwt({ uid: 1, first_name: "Dana", last_name: "Researcher", username: "dresearcher" })))
+      .toEqual({ name: "Dana Researcher", username: "dresearcher" });
+  });
+
+  it("reads a name outside ASCII", () => {
+    expect(tokenUser(jwt({ first_name: "Zoë", last_name: "Ñúñez" }))?.name).toBe("Zoë Ñúñez");
+  });
+
+  it("names the user from whichever name it has, with no username", () => {
+    expect(tokenUser(jwt({ first_name: " Dana ", last_name: "" }))).toEqual({ name: "Dana", username: null });
+  });
+
+  it("names nobody from a token with no name, even with a username", () => {
+    expect(tokenUser(jwt({ uid: 1, username: "dresearcher" }))).toBeNull();
+  });
+
+  it("names nobody from a token that is not a JWT", () => {
+    expect(tokenUser("opaque")).toBeNull();
+    expect(tokenUser("a.not-json.b")).toBeNull();
   });
 });

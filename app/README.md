@@ -8,6 +8,7 @@ the result the package wrote.
 ```sh
 npm ci
 npm run dev      # vite dev server
+npm run demo     # the dev server, opened on the demo page below
 npm test         # vitest
 npm run build    # tsc --noEmit && vite build
 ```
@@ -28,6 +29,20 @@ and `context=class:<classId>`, redeems the code it is sent back with at `/oauth/
 holds the access token in memory only. The class it shows is the one the token is bound to.
 A token about to expire, or refused with a 401, sends the browser through the authorization
 again, unless the refused token is under a minute old, which renders the info page instead.
+
+## The demo page
+
+`demo/index.html`, served by the dev server at `/demo/`, mounts the real `App` and its pages
+over canned services (`demo/world.ts`), for working on the page's look with hot reload. It signs
+in nowhere and reaches no portal, report-server or Firebase. A panel picks the scenario (several
+packages, a package running, a failed run, a long result, no active students, the info pages and
+more, from `demo/scenarios.ts`), and the scenario is kept in the URL's `scenario` parameter (`/demo/?scenario=failed`). Run presses
+and a "Student saves" button drive a simulated runner through the queued, running and finished
+writes the real one makes, at a step time the panel sets.
+
+The build ships it beside the dashboard, at `demo/` under every deployment, and the info page a
+visit with no launch shows links to it. It is marked as sample data in its header throughout,
+and the dashboard itself never shows invented results (see `src/pages/Info.tsx`).
 
 ## Running against a local portal
 
@@ -87,9 +102,9 @@ emulator that is fine, because an emulator accepts any signature.
 The app writes none of the Firebase documents. Every one is written by report-service's
 functions, the runner or the watchdog, and the app only listens.
 
-## Class activity and automatic re-runs
+## Active students and automatic re-runs
 
-The Class activity count is the number of learners whose last save falls within the window
+The header's active-student count is the number of learners whose last save falls within the window
 `ACTIVE_WINDOW_MINUTES` in `src/shell/activity.ts` sets, by the laptop's clock. It counts saved answers, so a student
 reading or thinking is not in it, and it is the same for every researcher of the class.
 
@@ -97,12 +112,12 @@ While the page is open, a package whose result is done and whose run started bef
 learner's last save is re-run on its own, with the same request Run sends. Both times are the
 server's. The page asks once per finished result, so saves made while a re-run is queued or
 running give one more run after it, not a loop. A failed result, a package never run by hand,
-and a package the page cannot run are not re-run on their own. An automatic request that finds
+a community package, and a package the page cannot run are not re-run on their own. An automatic request that finds
 the sign-in expired stops automatic re-runs for the page's life rather than signing in again.
 
 ## Content-Security-Policy
 
-The built `index.html` carries a Content-Security-Policy as its first `<head>` element, a
+The built `index.html` and `demo/index.html` carry a Content-Security-Policy as their first `<head>` element, a
 `<meta http-equiv>` added by a build-only plugin in `vite.config.ts`. A package's result is
 markdown written by fetched code, and the policy bounds what the page can load and reach
 whatever that markdown says: images only from the page or `data:`, and connections only to

@@ -17,10 +17,28 @@ export interface Token {
   issuedAt: number;
 }
 
-function base64url(bytes: Uint8Array): string {
+export function base64url(bytes: Uint8Array): string {
   let s = "";
   bytes.forEach((b) => { s += String.fromCharCode(b); });
   return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+// Who the token was issued to, from its own claims: the portal JWT's `first_name` and `last_name`,
+// and `username`. Read for display only; the token is never verified here, since every server it
+// is sent to verifies it.
+export interface TokenUser { name: string; username: string | null }
+
+export function tokenUser(accessToken: string): TokenUser | null {
+  try {
+    const part = accessToken.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    const bytes = Uint8Array.from(atob(part), (c) => c.charCodeAt(0));
+    const claims = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>;
+    const text = (key: string) => (typeof claims[key] === "string" ? (claims[key] as string).trim() : "");
+    const name = [text("first_name"), text("last_name")].filter(Boolean).join(" ");
+    return name ? { name, username: text("username") || null } : null;
+  } catch {
+    return null;
+  }
 }
 
 export function randomValue(): string {

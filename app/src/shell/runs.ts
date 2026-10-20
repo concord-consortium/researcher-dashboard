@@ -1,5 +1,3 @@
-import { identityOfKey } from "./packages";
-
 export interface Stamp { toMillis(): number }
 export interface QueueEntry { class_hash: string; package_key: string }
 
@@ -88,10 +86,10 @@ export function latestFinished(result: Result | undefined): Finished | null {
 export type RowState =
   | { kind: "not-run" }
   | { kind: "queued"; position: number | null; waiting: boolean }
-  | { kind: "running"; stage: string }
+  | { kind: "running"; stage: string; startedAt: number | null }
   | { kind: "stuck"; resumable: boolean }
   | { kind: "done"; summary: string | null; finishedAt: number | null }
-  | { kind: "failed"; error: string; finishedAt: number | null };
+  | { kind: "failed"; error: string | null; finishedAt: number | null };
 
 export function rowState(result: Result | undefined, runner: Runner | null, mark: SessionMark | null,
   classHash: string, key: string): RowState {
@@ -100,23 +98,25 @@ export function rowState(result: Result | undefined, runner: Runner | null, mark
     case "queued":
       return { kind: "queued", position: queuePosition(runner, classHash, key), waiting: !sessionTakes(runner) };
     case "running":
-      if (!isStuck(result, runner, mark)) return { kind: "running", stage: result.stage ?? "starting" };
+      if (!isStuck(result, runner, mark)) return { kind: "running", stage: result.stage ?? "starting", startedAt: millis(result.started_at) };
       // A paused VM finishes the run when a request wakes it; any other stuck run waits for the watchdog.
       return { kind: "stuck", resumable: runner?.state === "suspended" && runner.microvm_id === result.microvm_id };
     case "done":
       return { kind: "done", summary: result.summary ?? null, finishedAt: millis(result.finished_at) };
     default:
-      return { kind: "failed", error: result.error ?? "No reason was given.", finishedAt: millis(result.finished_at) };
+      return { kind: "failed", error: result.error ?? null, finishedAt: millis(result.finished_at) };
   }
 }
 
 const STAGES: Record<string, string> = {
   starting: "starting",
-  prepare_package: "preparing the package",
-  run_package: "running the package"
+  pull: "reading the class's data",
+  prepare_package: "preparing the analysis",
+  run_package: "running the analysis"
 };
 
-export const stageWords = (stage: string) => STAGES[stage] ?? stage;
+// A stage the page has no words for reads as working, never as the runner's own name for it.
+export const stageWords = (stage: string) => STAGES[stage] ?? "working";
 
 // How long an accepted Run or Resume holds its row without a write to its result. The function can
 // accept a package it already counts as queued and write nothing, so the hold has to end on its own.
@@ -124,60 +124,84 @@ export const ACCEPTED_WAIT_MS = 3 * 60_000;
 
 // Whether the row offers Run, and the reason when it does not and the state alone does not say why.
 export function runOffer(runnable: boolean, state: RowState): { enabled: boolean; reason?: string } {
-  if (!runnable) return { enabled: false, reason: "Only official packages can be run here for now." };
+  if (!runnable) return { enabled: false, reason: "Only official analyses can be run here for now." };
   if (state.kind === "running") return { enabled: false };
   if (state.kind === "stuck" && !state.resumable) return { enabled: false, reason: "It can be run again once it is marked failed." };
   if (state.kind === "queued" && !state.waiting) return { enabled: false };
   return { enabled: true };
 }
 
-export const WAITING = "Queued, waiting for a machine: run it to start one.";
+export const WAITING = "Queued and waiting to start: run it to start it.";
 
 // A run request from one row: in flight, refused with a message, an accepted Resume, or an
 // accepted Run whose queued result has not arrived yet. `at` is the row's result `updated_at` when
 // the request was sent, for an accepted Run, or when the answer arrived, for the others; each entry
 // but pending applies only while the result's `updated_at` is still `at`. An accepted Run that
 // waited ACCEPTED_WAIT_MS with no new result is `lapsed`: the row no longer reads as requested, and
-// is still not requested again on its own.
+// is still not requested again on its own. A refusal keeps when it came, and whether Run may fix it:
+// true for no answer or a server error, false for a refusal the portal will give again.
 export type RunRequest =
   | { pending: true }
-  | { message: string; at: number | null }
+  | { message: string; at: number | null; refusedAt: number; retry: boolean }
   | { resuming: true; at: number | null }
   | { requested: true; at: number | null; lapsed?: true };
 
-export const formatTime = (ms: number) => new Date(ms).toLocaleString();
+// The full local date and time, to the second, where the exact moment matters.
+export const fullTime = (ms: number) => new Date(ms).toLocaleString();
+
+const DAY_MS = 24 * 3600 * 1000;
+const dayStart = (ms: number) => new Date(ms).setHours(0, 0, 0, 0);
+
+// How long a run has been going, as m:ss, or h:mm:ss from an hour; a start ahead of this clock reads 0:00.
+export function elapsedText(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(total / 3600), m = Math.floor((total % 3600) / 60), s = total % 60;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+}
+
+// A time as short as it reads: "today, 10:11 AM", "yesterday, 4:02 PM", "Oct 14, 9:12 AM", with the
+// year only when it is not this one. The day is told against the clock when it is called.
+export function formatTime(ms: number, now = Date.now()): string {
+  const time = new Date(ms).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  const days = Math.round((dayStart(now) - dayStart(ms)) / DAY_MS);
+  if (days === 0) return `today, ${time}`;
+  if (days === 1) return `yesterday, ${time}`;
+  const sameYear = new Date(ms).getFullYear() === new Date(now).getFullYear();
+  const date = new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric", ...(sameYear ? {} : { year: "numeric" }) });
+  return `${date}, ${time}`;
+}
 
 // A sentence from text that may already end in one.
 export const sentence = (text: string) => (/[.!?…]$/.test(text) ? text : `${text}.`);
 
-export const finishedWhen = (ms: number | null) => `Finished ${ms !== null ? formatTime(ms) : "at an unknown time"}`;
-
-// The lines above the list. `titleOf` names a package of this class by its key, or returns null;
-// `requesting` is whether any run request from the page is in flight.
-export function sessionLines(runner: Runner | null, classHash: string, results: Map<string, Result>,
+// What the researcher's runner is doing, for the header and Current Status. `titleOf` names a package of
+// this class by its key, or returns null while the page cannot name it; `requesting` is whether any run
+// request from the page is in flight; `runner` is null with no runner yet and undefined before it is read.
+export function sessionLines(runner: Runner | null | undefined, classHash: string, results: Map<string, Result>,
   titleOf: (key: string) => string | null, requesting: boolean): string[] {
   const waiting = () => ([...results.values()].some((r) => r.status === "queued") && !requesting ? [WAITING] : []);
+  if (runner === null) return ["Idle until you run an analysis.", ...waiting()];
   switch (runner?.state) {
     case "starting":
-      return ["Starting a machine for your runs…"];
+      return ["Starting up for your runs…"];
     case "ready":
-      return ["Your machine is ready."];
+      return ["Ready to run analyses."];
     case "running": {
       const current = runner.current_package;
       if (!current) return [];
-      if (current.class_hash !== classHash) return ["Running a package for another of your classes."];
+      if (current.class_hash !== classHash) return ["Running an analysis for another of your classes."];
       const status = results.get(current.package_key)?.status;
-      if (status && status !== "running") return ["Your machine is starting its next package."];
-      return [`Running ${titleOf(current.package_key) ?? identityOfKey(current.package_key)}.`];
+      if (status && status !== "running") return ["Starting your next analysis."];
+      return [`Running ${titleOf(current.package_key) ?? "an analysis"}.`];
     }
     case "suspending":
     case "suspended":
-      return ["Your machine is paused.",
-        ...((runner.queue ?? []).length > 0 ? ["Queued packages will start within a couple of minutes."] : [])];
+      return [(runner.queue ?? []).length > 0 ? "Idle; queued analyses will start within a couple of minutes." : "Idle until you run an analysis."];
     case "terminated":
-      return ["Your machine has stopped.", ...waiting()];
+      return ["Stopped until you run an analysis.", ...waiting()];
     case "failed":
-      return [`Your machine stopped with an error: ${sentence(runner.error ?? "no reason was given")}`, ...waiting()];
+      return [`Stopped with an error: ${sentence(runner.error ?? "no reason was given")}`, ...waiting()];
     default:
       return [];
   }
