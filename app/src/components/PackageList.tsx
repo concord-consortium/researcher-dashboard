@@ -7,7 +7,7 @@ import { byTitle, packageKey, searchWords, titleOf, type Group } from "../shell/
 import type { PackageRow } from "../shell/portal";
 import { useEffect, useId, useRef, useState, type ComponentType, type ReactNode, type SVGProps } from "react";
 import { plainError } from "../shell/errors";
-import { routeHash } from "../shell/route";
+import { plainClick, routeHash } from "../shell/route";
 import { Callout } from "./Callout";
 import { FinishedWhen, Time } from "./Time";
 import { useNow } from "./useNow";
@@ -277,7 +277,7 @@ export function OpenLink({ resultKey, children, onOpen, linkRef }: {
 }) {
   return (
     <a className="title" href={routeHash({ tab: "packages", key: resultKey })} ref={(a) => linkRef(resultKey, a)}
-      onClick={(e) => { e.preventDefault(); onOpen(resultKey); }}><CubeIcon aria-hidden="true" />{children}</a>
+      onClick={(e) => { if (!plainClick(e)) return; e.preventDefault(); onOpen(resultKey); }}><CubeIcon aria-hidden="true" />{children}</a>
   );
 }
 

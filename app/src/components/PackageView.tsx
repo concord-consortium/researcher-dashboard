@@ -1,6 +1,6 @@
 import { ChevronRightIcon } from "@heroicons/react/16/solid";
 import { useEffect, useRef, type ReactNode } from "react";
-import { ALL_PACKAGES, routeHash } from "../shell/route";
+import { ALL_PACKAGES, plainClick, routeHash } from "../shell/route";
 import { formatTime, millis, type Finished } from "../shell/runs";
 import { Callout } from "./Callout";
 import { RowProblems, RowStatus, statusPill, type Status, type StatusModel } from "./PackageList";
@@ -67,12 +67,12 @@ export function PackageView({ title, description, status, note, run, runnable, w
               <nav aria-label="Breadcrumb">
                 <ol>
                   <li>
-                    <a href={routeHash(ALL_PACKAGES)} onClick={(e) => { e.preventDefault(); onAll(); }}>All Analyses</a>
+                    <a href={routeHash(ALL_PACKAGES)} onClick={(e) => { if (!plainClick(e)) return; e.preventDefault(); onAll(); }}>All Analyses</a>
                     <ChevronRightIcon aria-hidden="true" />
                   </li>
                   {filter && (
                     <li>
-                      <a href={routeHash(ALL_PACKAGES)} onClick={(e) => { e.preventDefault(); filter.onSelect(); }}>{filter.label}</a>
+                      <a href={routeHash(ALL_PACKAGES)} onClick={(e) => { if (!plainClick(e)) return; e.preventDefault(); filter.onSelect(); }}>{filter.label}</a>
                       <ChevronRightIcon aria-hidden="true" />
                     </li>
                   )}

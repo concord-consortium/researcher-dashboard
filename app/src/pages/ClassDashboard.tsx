@@ -23,7 +23,7 @@ import {
 import { behindRows, newestActivity, type Activity } from "../shell/activity";
 import { useAutoRerun } from "../shell/rerun";
 import type { TokenUser } from "../shell/oauth";
-import { ALL_PACKAGES, routeHash, useRoute } from "../shell/route";
+import { ALL_PACKAGES, plainClick, routeHash, useRoute } from "../shell/route";
 import type { DashboardServices } from "../shell/services";
 import type { InfoReason } from "../shell/start";
 import { Info } from "./Info";
@@ -258,10 +258,12 @@ export function ClassDashboard({ services, onExpired, user = null, portal = null
   const namedProjects = useMemo(() => projectNames(rows ?? []), [rows]);
 
   // The page's one announcement of how runs move on: a run starting, finishing or failing, a refused
-  // Run, and the runner failing, each said once, naming its package. Rows and the header say nothing.
+  // Run, the runner failing, and the counts becoming unreadable, each said once; a run's news names its
+  // package. It sits outside both tab panels, so it is heard whichever tab is showing. Rows and the
+  // header say nothing.
   const [announcement, setAnnouncement] = useState("");
-  const heard = useRef<{ results: Map<string, Result> | null; requests: Map<string, RunRequest>; runnerState: string | null }>(
-    { results: null, requests: new Map(), runnerState: null });
+  const heard = useRef<{ results: Map<string, Result> | null; requests: Map<string, RunRequest>; runnerState: string | null; countsProblem: string | null }>(
+    { results: null, requests: new Map(), runnerState: null, countsProblem: null });
   useEffect(() => {
     const titleAt = (key: string) => listedTitles.get(key) ?? unlistedTitle(identityOfKey(key), allTitles);
     const before = heard.current;
@@ -271,12 +273,13 @@ export function ClassDashboard({ services, onExpired, user = null, portal = null
     }
     const runnerState = runnerDoc?.state ?? null;
     if (runnerState === "failed" && before.runnerState !== "failed" && before.results) {
-      news.push(`Your runner stopped with an error: ${sentence(runnerDoc?.error ?? "no reason was given")}`);
+      news.push(`Runs stopped with an error: ${sentence(runnerDoc?.error ?? "no reason was given")}`);
     }
-    heard.current = { results: listShown ? results : before.results, requests, runnerState };
+    if (countsProblem && countsProblem !== before.countsProblem) news.push(countsProblem);
+    heard.current = { results: listShown ? results : before.results, requests, runnerState, countsProblem };
     // The same words again change by a trailing space, so they are still announced.
     if (news.length > 0) setAnnouncement((was) => (news.join(" ") === was ? `${was}\u00a0` : news.join(" ")));
-  }, [results, requests, runnerDoc, listShown, listedTitles, allTitles]);
+  }, [results, requests, runnerDoc, countsProblem, listShown, listedTitles, allTitles]);
 
   const newest = activity ? newestActivity(activity) : null;
   // A community package runs only when pressed, after its warning, so it never re-runs on its own.
@@ -338,10 +341,16 @@ export function ClassDashboard({ services, onExpired, user = null, portal = null
     (key) => (rows ? listedTitles.get(key) ?? unlistedTitle(identityOfKey(key), allTitles) : null),
     [...requests.values()].some((r) => "pending" in r)) : [];
 
+  const selectedRow = selectedKey && listShown ? grouped.find((r) => packageKey(r.identity) === selectedKey) ?? null : null;
+  // An open package the list no longer shows keeps its view while its runs cannot be read, with no state shown.
+  const selectedUnlisted = selectedKey && !selectedRow
+    ? unlisted.find((r) => packageKey(r.package.identity) === selectedKey) ?? (runsProblem && listShown ? received.get(selectedKey) : null) ?? null
+    : null;
+
   // The browser tab names the view, the open package or the tab, then the class, before the page's own title.
   const baseTitle = pageTitle();
   const viewTitle = route.tab === "info" ? "Info"
-    : selectedKey ? listedTitles.get(selectedKey) ?? unlistedTitle(identityOfKey(selectedKey), allTitles) : "Analytics";
+    : selectedRow ? titleOf(selectedRow) : selectedUnlisted ? unlistedTitle(selectedUnlisted.package.identity, allTitles) : "Analytics";
   const className = scope?.name ?? null;
   useEffect(() => {
     document.title = className && !info ? `${viewTitle} - ${className} - ${baseTitle}` : baseTitle;
@@ -357,11 +366,6 @@ export function ClassDashboard({ services, onExpired, user = null, portal = null
     );
   }
 
-  const selectedRow = selectedKey && listShown ? grouped.find((r) => packageKey(r.identity) === selectedKey) ?? null : null;
-  // An open package the list no longer shows keeps its view while its runs cannot be read, with no state shown.
-  const selectedUnlisted = selectedKey && !selectedRow
-    ? unlisted.find((r) => packageKey(r.package.identity) === selectedKey) ?? (runsProblem && listShown ? received.get(selectedKey) : null) ?? null
-    : null;
   const selectedModel = selectedRow && rowModel({
     row: selectedRow, result: results.get(selectedKey!), runner, mark, classHash: scope.class_hash,
     request: requests.get(selectedKey!), newest, behind
@@ -494,7 +498,7 @@ export function ClassDashboard({ services, onExpired, user = null, portal = null
               <h2 id="analyses-heading"><CubeIcon aria-hidden="true" />Analyses</h2>
               <p>
                 Pick analyses to run from the{" "}
-                <a href={routeHash(ALL_PACKAGES)} onClick={(e) => { e.preventDefault(); allPackages(); }}>Analytics tab</a>.
+                <a href={routeHash(ALL_PACKAGES)} onClick={(e) => { if (!plainClick(e)) return; e.preventDefault(); allPackages(); }}>Analytics tab</a>.
               </p>
             </section>
             <ClassCard scope={scope} projectNames={namedProjects} portal={portal} />

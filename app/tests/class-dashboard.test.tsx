@@ -615,9 +615,12 @@ describe("ClassDashboard", () => {
     await s.refuseRuns("runner");
     expect(screen.getByText("Your runs could not be read.").closest("[aria-live]")).not.toBeNull();
     await s.refuseCounts();
-    const countsError = screen.getByText("Your current status could not be read.");
-    expect(countsError.closest("[aria-live]")).not.toBeNull();
+    const countsError = screen.getByText("Your current status could not be read.", { selector: ".callout span" });
+    expect(countsError.closest("[aria-live]")).toBeNull();
     expect(countsError.closest("section")!.querySelector("h2")!.textContent).toBe("Current Status");
+    // Said on the Analytics tab, where the Current Status card is hidden.
+    expect(screen.getByRole("tab", { name: "Analytics" }).getAttribute("aria-selected")).toBe("true");
+    expect(announced()).toBe("Your current status could not be read.");
     expect(await screen.findByText("Wildfire open responses")).toBeDefined();
     cleanup();
     const results = services();
@@ -877,6 +880,7 @@ describe("what the page says of the researcher's own runs", () => {
     const badge = () => screen.getByRole("banner").querySelector(".badge.session")!;
     await s.runner({ state: "failed", error: "no capacity" });
     expect(badge().classList.contains("error")).toBe(true);
+    expect(announced()).toBe("Runs stopped with an error: no capacity.");
     await s.runner({ state: "suspended" });
     expect(badge().classList.contains("error")).toBe(false);
   });
@@ -1021,6 +1025,7 @@ describe("opening a package", () => {
     await listed(services());
     expect(view()).toBeNull();
     expect(screen.getByRole("heading", { level: 2, name: "All Analyses" })).toBeDefined();
+    expect(document.title).toBe(`Analytics - ${SCOPE.name} - Researcher Dashboard`);
   });
 
   it("runs a package from its subheader, and says it has no result until one lands", async () => {

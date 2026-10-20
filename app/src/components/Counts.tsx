@@ -23,7 +23,7 @@ export function Counts({ counts, problem, session, activity, now }: {
   return (
     <section className="info-card" aria-labelledby="counts-heading">
       <h2 id="counts-heading"><ChartBarIcon aria-hidden="true" />Current Status</h2>
-      <div aria-live="polite">{problem && <Callout tone="error">{problem}</Callout>}</div>
+      {problem && <Callout tone="error">{problem}</Callout>}
       <dl className="facts">
         {session.length > 0 && <div><dt>Runs</dt><dd>{session.join(" ")}</dd></div>}
         {active !== null && <div><dt>Active students</dt><dd>{active} <span className="when">({windowLabel(ACTIVE_WINDOW_MINUTES)})</span></dd></div>}

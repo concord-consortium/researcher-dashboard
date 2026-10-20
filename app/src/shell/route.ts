@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type MouseEvent } from "react";
 
 // Where the page is, kept in the URL's fragment so the browser's Back returns to All Analyses. The page
 // opens on Info. `key` is a package key, the result document's id; `q` is the list's search, as
@@ -27,6 +27,10 @@ export function routeHash(route: Route): string {
   if (route.key) return `#analytics/${encodeURIComponent(route.key)}`;
   return route.q ? `#analytics?${new URLSearchParams({ q: route.q })}` : "#analytics";
 }
+
+// Whether the page handles a link's click itself: a modified or other-button click, as for a new tab,
+// is left to the browser.
+export const plainClick = (e: MouseEvent) => e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey;
 
 // The route, and a navigate that takes effect at once and adds a history entry; Back and Forward
 // arrive through hashchange.

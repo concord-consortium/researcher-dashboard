@@ -298,6 +298,19 @@ describe("PackageList", () => {
     expect(onOpen).toHaveBeenCalledTimes(2);
   });
 
+  it("leaves a modified or other-button click on a title to the browser, as for a new tab", () => {
+    const r = row({ title: "Fresh", official: true });
+    const onOpen = vi.fn();
+    list([r], { onOpen });
+    const link = screen.getByRole("link", { name: "Fresh" });
+    for (const click of [{ ctrlKey: true }, { metaKey: true }, { shiftKey: true }, { altKey: true }, { button: 1 }]) {
+      expect(fireEvent.click(link, click), JSON.stringify(click)).toBe(true);
+    }
+    expect(onOpen).not.toHaveBeenCalled();
+    expect(fireEvent.click(link)).toBe(false);
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+
   it("shows an error the page has no words for as the package failing, with the error as its detail", () => {
     const r = row({ title: "Broke", official: true });
     list([r], { results: new Map([[packageKey(r.identity), result(r, { status: "failed", error: "cc-data reports exited 3: NOT_AUTHENTICATED", finished_at: stamp(5000) })]]) });
