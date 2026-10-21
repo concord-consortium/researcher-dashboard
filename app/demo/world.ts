@@ -57,7 +57,7 @@ export class World {
           if (world.state.scopeRefused) throw new ApiError("refused", world.state.scopeRefused);
           return world.state.scope;
         },
-        user: async () => ({ name: "Demo Researcher", username: "dresearcher" }),
+        user: async () => ({ name: "Demo Researcher", username: "dresearcher", provider: null }),
         refreshProfile: async () => { world.log("portal refresh_profile"); return { queued: true }; },
         firebaseToken: async () => "demo",
         runPackage: async (identity: string, version: string) => {

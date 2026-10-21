@@ -27,7 +27,7 @@ export function UserInfo({ user }: { user: User }) {
   return (
     <div className="user">
       <p className="user-name">{user.name}</p>
-      {user.username && <p className="meta">{user.username}</p>}
+      {user.provider ? <p className="meta">Signed in with {user.provider}</p> : user.username && <p className="meta">{user.username}</p>}
     </div>
   );
 }

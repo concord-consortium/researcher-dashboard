@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Api, ApiError, Portal, ReportServer } from "../src/shell/portal";
+import { Api, ApiError, Portal, ReportServer, signInProvider } from "../src/shell/portal";
 
 const TOKEN = { accessToken: "at-1", issuedAt: 0, expiresAt: 8 * 3600 * 1000 };
 
@@ -60,7 +60,7 @@ describe("Api", () => {
 describe("Portal", () => {
   it("asks /auth/user who signed in, and names them from its first and last names, with the username", async () => {
     const { api, fetchImpl } = apiWith(respond({ provider: "concord_id", id: "1", extra: { first_name: "Dana", last_name: "Researcher", full_name: "Full Name", username: "dresearcher" } }));
-    expect(await new Portal(api).user()).toEqual({ name: "Dana Researcher", username: "dresearcher" });
+    expect(await new Portal(api).user()).toEqual({ name: "Dana Researcher", username: "dresearcher", provider: null });
     const [url, init] = call(fetchImpl);
     expect(url).toBe("https://portal.test/auth/user");
     expect(init.method).toBeUndefined();
@@ -72,8 +72,14 @@ describe("Portal", () => {
   });
 
   it("names the user from whichever name it has, with no username", async () => {
-    expect(await new Portal(apiWith(respond({ extra: { first_name: " Dana ", last_name: "" } })).api).user()).toEqual({ name: "Dana", username: null });
+    expect(await new Portal(apiWith(respond({ extra: { first_name: " Dana ", last_name: "" } })).api).user()).toEqual({ name: "Dana", username: null, provider: null });
   });
+
+  it.each([["google-112233445566778899", "Google"], ["schoology-4455", "Schoology"]])(
+    "says which provider signed in an account whose login %s the portal generated, in place of the login", async (login, provider) => {
+      expect(await new Portal(apiWith(respond({ extra: { first_name: "Dana", last_name: "Researcher", username: login } })).api).user())
+        .toEqual({ name: "Dana Researcher", username: null, provider });
+    });
 
   it("names nobody from an answer with no name, even with a username", async () => {
     expect(await new Portal(apiWith(respond({ extra: { username: "dresearcher" } })).api).user()).toBeNull();
@@ -141,5 +147,18 @@ describe("the default fetch", () => {
     vi.stubGlobal("fetch", stub);
     await new Api("https://portal.test", TOKEN, undefined, () => 0).request("/x");
     expect(stub).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("signInProvider", () => {
+  it("names the provider of a login the portal generated at a Google or Schoology sign-in", () => {
+    expect(signInProvider("google-112233445566778899")).toBe("Google");
+    expect(signInProvider("schoology-4455")).toBe("Schoology");
+  });
+
+  it("names none for a login a person chose, even one that starts like a generated one", () => {
+    for (const login of ["dresearcher", "google", "google-", "google-dana", "googlefan-123", "github-123", "xgoogle-123", "google-123x", ""]) {
+      expect(signInProvider(login), login).toBeNull();
+    }
   });
 });

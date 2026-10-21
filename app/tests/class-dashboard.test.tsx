@@ -116,14 +116,21 @@ describe("ClassDashboard", () => {
   });
 
   it("names the signed-in user in the header, with their username, as the portal gives them", async () => {
-    mount(services({ user: async () => ({ name: "Dana Researcher", username: "dresearcher" }) }));
+    mount(services({ user: async () => ({ name: "Dana Researcher", username: "dresearcher", provider: null }) }));
     const banner = await screen.findByRole("banner");
     expect(await within(banner).findByText("Dana Researcher")).toBeDefined();
     expect(within(banner).getByText("dresearcher")).toBeDefined();
   });
 
+  it("says which provider signed the user in, under their name, in place of a login the portal generated", async () => {
+    mount(services({ user: async () => ({ name: "Dana Researcher", username: null, provider: "Google" }) }));
+    const banner = await screen.findByRole("banner");
+    expect(await within(banner).findByText("Dana Researcher")).toBeDefined();
+    expect(within(banner).getByText("Signed in with Google")).toBeDefined();
+  });
+
   it("names the signed-in user on the info page it turns into", async () => {
-    const s = services({ scope: async () => { throw new ApiError("forbidden", 403); }, user: async () => ({ name: "Dana Researcher", username: "dresearcher" }) });
+    const s = services({ scope: async () => { throw new ApiError("forbidden", 403); }, user: async () => ({ name: "Dana Researcher", username: "dresearcher", provider: null }) });
     render(<ClassDashboard services={s.fake} onExpired={vi.fn()} />);
     const banner = await screen.findByRole("banner");
     expect(await within(banner).findByText("Dana Researcher")).toBeDefined();
