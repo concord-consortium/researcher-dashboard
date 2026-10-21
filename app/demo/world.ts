@@ -97,7 +97,10 @@ export class World {
 
   // A learner saves an answer now, which is what makes a finished result fall behind.
   save(learner = `learner-${1 + Math.floor(Math.random() * 6)}`) {
-    this.state.activity = new Map(this.state.activity).set(learner, { lastActivityAt: stamp(Date.now()) });
+    const offering = this.state.scope.assignments[Math.floor(Math.random() * this.state.scope.assignments.length)].offering_id;
+    const was = this.state.activity.get(learner);
+    this.state.activity = new Map(this.state.activity).set(learner,
+      { lastActivityAt: stamp(Date.now()), changed: { ...was?.changed, [String(offering)]: stamp(Date.now()) } });
     this.on?.activity(this.state.activity);
   }
 

@@ -481,3 +481,13 @@ button.copy-ok, button.copy-ok:hover { border-color: var(--ok); background: var(
   .tabs [role="tab"][aria-selected="true"] { border-top: 3px solid CanvasText; }
   .status-pill, .tag, .badge, button { border: 1px solid CanvasText; }
 }
+
+.assignment-activity { width: 100%; border-collapse: collapse; }
+.assignment-activity th { text-align: left; font-size: 0.8rem; font-weight: 700; color: var(--muted); padding: 0.25rem 0.5rem; border-bottom: 1px solid var(--line); }
+.assignment-activity td { padding: 0.35rem 0.5rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+.assignment-activity tr:last-child td { border-bottom: 0; }
+.assignment-activity td:nth-child(2) { width: 12rem; }
+.assignment-activity td:nth-child(3) { width: 12rem; white-space: nowrap; }
+.assignment-activity abbr[title] { text-decoration: none; }
+.info-card .footnote { margin: 0.5rem 0 0; font-size: 0.8rem; color: var(--muted); }
+.info-card .footnote abbr { text-decoration: none; font-weight: 700; }

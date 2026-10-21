@@ -81,7 +81,7 @@ describe("ClassDashboard", () => {
     expect(within(banner).getByText(/T\. Teacher · Spike cohort/)).toBeDefined();
     expect(within(banner).getByRole("img", { name: "Concord Consortium" })).toBeDefined();
     infoTab();
-    expect(screen.getByRole("listitem").textContent).toBe("Wildfire · Activity Player");
+    expect(firstAssignmentCell().textContent).toBe("Wildfire · Activity Player");
   });
 
   it("leaves the Info panel out of the tab order, since it always holds a link, with or without the portal's", async () => {
@@ -150,7 +150,8 @@ describe("ClassDashboard", () => {
   it("names an untitled assignment", async () => {
     mount(services({ scope: async () => ({ ...SCOPE, assignments: [{ ...SCOPE.assignments[0], name: null, tool: null }] }) }));
     fireEvent.click(await screen.findByRole("tab", { name: "Info" }));
-    expect((await screen.findByRole("listitem")).textContent).toBe("Untitled");
+    await screen.findByRole("table");
+    expect(firstAssignmentCell().textContent).toBe("Untitled");
   });
 
   it("opens on the Info tab, first of the two, and moves between tabs with the arrow keys, at their own addresses", async () => {
@@ -690,6 +691,9 @@ const countOf = (label: string) =>
   [...document.querySelectorAll("[aria-labelledby=counts-heading] .facts dt")].find((dt) => dt.textContent === label)?.nextElementSibling?.textContent ?? null;
 
 const infoTab = () => fireEvent.click(screen.getByRole("tab", { name: "Info" }));
+
+// The first assignment's name and tool, in the Assignments table's first column.
+const firstAssignmentCell = () => within(within(screen.getByRole("table")).getAllByRole("row")[1]).getAllByRole("cell")[0];
 
 async function listed(s: ReturnType<typeof services>, onExpired = vi.fn()) {
   await mounted(s, onExpired);

@@ -1,6 +1,7 @@
 import { AcademicCapIcon, UsersIcon } from "@heroicons/react/16/solid";
 import { useEffect, useState } from "react";
-import { activeCount, ACTIVE_WINDOW_MINUTES, nextChangeIn, windowLabel, type Activity } from "../shell/activity";
+import { activeCount, ACTIVE_WINDOW_MINUTES, newestActivity, nextChangeIn, windowLabel, type Activity } from "../shell/activity";
+import { Time } from "./Time";
 
 // setTimeout's longest delay; a longer one fires at once.
 const MAX_TIMEOUT_MS = 2 ** 31 - 1;
@@ -55,6 +56,10 @@ export function ClassActivity({ activity, problem, stopped }: {
       <h2 id="activity-heading"><UsersIcon aria-hidden="true" />Student Saves</h2>
       <div aria-live="polite">{problem && <p className="error">{problem}</p>}</div>
       {activity && <>
+        {activity.size > 0 && <dl className="facts">
+          <div><dt>Students who have saved work</dt><dd>{activity.size}</dd></div>
+          <div><dt>Latest save</dt><dd>{(() => { const at = newestActivity(activity); return at === null ? "unknown" : <Time ms={at} capitalized />; })()}</dd></div>
+        </dl>}
         <p>The student count in the header is how many students saved an answer in this class's Activity Player assignments {windowLabel(ACTIVE_WINDOW_MINUTES)}.</p>
         <p>A student reading or thinking saves nothing, so it is not a count of who is logged in. It is the same for every researcher of this class.</p>
         {!stopped && <p>{RERUNS}</p>}
