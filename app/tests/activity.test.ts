@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  activeCount, behindRows, isBehind, newestActivity, nextChangeIn, outOfDate, windowLabel, type Activity
+  activeCount, assignmentActivity, behindRows, isBehind, newestActivity, nextChangeIn, outOfDate, windowLabel, type Activity
 } from "../src/shell/activity";
 import { packageKey } from "../src/shell/packages";
 import type { PackageRow } from "../src/shell/portal";
@@ -150,5 +150,34 @@ describe("outOfDate", () => {
 
   it("is true for a done result that is not behind or pending", () => {
     expect(outOfDate(key, done(r), 2000, new Map(), false)).toBe(true);
+  });
+});
+
+describe("assignmentActivity", () => {
+  it("counts each assignment's learners and takes its latest change", () => {
+    const learners = new Map<string, Activity>([
+      ["a", { changed: { "9": stamp(300), "10": stamp(100) } }],
+      ["b", { changed: { "9": stamp(200) } }],
+      ["c", { changed: { "10": stamp(500) } }]
+    ]);
+    expect(assignmentActivity(learners, [9, 10, 11])).toEqual([
+      { offeringId: 9, students: 2, last: 300 },
+      { offeringId: 10, students: 2, last: 500 },
+      { offeringId: 11, students: 0, last: null }
+    ]);
+  });
+
+  it("counts nothing for a learner with no changed map, or none for the assignment", () => {
+    const learners = new Map<string, Activity>([
+      ["a", { lastActivityAt: stamp(100) }],
+      ["b", { changed: { "10": stamp(200) } }]
+    ]);
+    expect(assignmentActivity(learners, [9])).toEqual([{ offeringId: 9, students: 0, last: null }]);
+  });
+
+  it("gives every assignment, in the order asked, with no learners", () => {
+    expect(assignmentActivity(new Map(), [10, 9])).toEqual([
+      { offeringId: 10, students: 0, last: null }, { offeringId: 9, students: 0, last: null }
+    ]);
   });
 });

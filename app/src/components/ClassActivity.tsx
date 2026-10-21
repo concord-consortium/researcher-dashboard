@@ -47,19 +47,23 @@ export function ActiveCount({ activity, now }: { activity: Map<string, Activity>
   );
 }
 
-// What the count in the header means, and whether finished packages re-run on their own.
+// What the count in the header means, how many students have saved work and when, and whether
+// finished packages re-run on their own.
 export function ClassActivity({ activity, problem, stopped }: {
   activity: Map<string, Activity> | undefined; problem: string | null; stopped: Stopped | null;
 }) {
+  const latest = activity ? newestActivity(activity) : null;
   return (
     <section className="info-card" aria-labelledby="activity-heading">
       <h2 id="activity-heading"><UsersIcon aria-hidden="true" />Student Saves</h2>
       <div aria-live="polite">{problem && <p className="error">{problem}</p>}</div>
       {activity && <>
-        {activity.size > 0 && <dl className="facts">
-          <div><dt>Students who have saved work</dt><dd>{activity.size}</dd></div>
-          <div><dt>Latest save</dt><dd>{(() => { const at = newestActivity(activity); return at === null ? "unknown" : <Time ms={at} capitalized />; })()}</dd></div>
-        </dl>}
+        {activity.size > 0 && (
+          <dl className="facts">
+            <div><dt>Students who have saved work</dt><dd>{activity.size}</dd></div>
+            <div><dt>Latest save</dt><dd>{latest === null ? "unknown" : <Time ms={latest} capitalized />}</dd></div>
+          </dl>
+        )}
         <p>The student count in the header is how many students saved an answer in this class's Activity Player assignments {windowLabel(ACTIVE_WINDOW_MINUTES)}.</p>
         <p>A student reading or thinking saves nothing, so it is not a count of who is logged in. It is the same for every researcher of this class.</p>
         {!stopped && <p>{RERUNS}</p>}

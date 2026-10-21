@@ -709,6 +709,60 @@ const wildfireProblems = () => wildfireRow().querySelector(".row-problems")!;
 const announced = () => document.querySelector("main.class-dashboard")!.previousElementSibling!.textContent;
 const runButton = () => within(wildfireRow()).getByRole("button", { name: /^(Run|Resume) Wildfire open responses$/ });
 
+describe("the Assignments card's activity numbers", () => {
+  const TWO = { ...SCOPE, assignments: [...SCOPE.assignments, { offering_id: 10, runnable_id: 11, name: "Hazard Bot", url: "https://ap.test/?activity=2", tool: "ActivityPlayer" }] };
+  const cells = (name: string) =>
+    within(within(screen.getByRole("table")).getAllByRole("row").find((r) => r.textContent?.startsWith(name))!).getAllByRole("cell").map((c) => c.textContent);
+  const footnote = () => document.querySelector(".footnote")?.textContent ?? null;
+  const capitalized = (ms: number) => formatTime(ms).replace(/^./, (c) => c.toUpperCase());
+
+  async function shown() {
+    const s = services({ scope: async () => TWO });
+    await mounted(s);
+    infoTab();
+    return s;
+  }
+
+  it("says so before the first snapshot, and after the listener is refused", async () => {
+    const s = await shown();
+    expect(cells("Wildfire")).toEqual(["Wildfire · Activity Player", "…", "…"]);
+    await s.refuseActivity();
+    expect(cells("Wildfire")).toEqual(["Wildfire · Activity Player", "unknown", "unknown"]);
+    expect(footnote()).toBeNull();
+  });
+
+  it("counts each assignment's students and its last change, with n/a and the footnote for one with none", async () => {
+    const s = await shown();
+    await s.activity(new Map<string, Activity>([
+      ["a", { lastActivityAt: stamp(NOW - 60_000), changed: { "9": stamp(NOW - 60_000) } }],
+      ["b", { lastActivityAt: stamp(NOW - 120_000), changed: { "9": stamp(NOW - 120_000) } }]
+    ]));
+    expect(cells("Wildfire")).toEqual(["Wildfire · Activity Player", "2", capitalized(NOW - 60_000)]);
+    expect(cells("Hazard Bot")).toEqual(["Hazard Bot · Activity Player", "n/a", "n/a"]);
+    const titles = [...document.querySelectorAll(".assignment-activity abbr")].map((a) => a.getAttribute("title"));
+    expect(titles).toEqual(["No student saves have been recorded for that assignment.", "No student saves have been recorded for that assignment."]);
+    expect(footnote()).toBe("n/a: No student saves have been recorded for that assignment.");
+  });
+
+  it("shows no n/a and no footnote when every assignment has saves", async () => {
+    const s = await shown();
+    await s.activity(new Map<string, Activity>([
+      ["a", { lastActivityAt: stamp(NOW - 60_000), changed: { "9": stamp(NOW - 60_000), "10": stamp(NOW - 90_000) } }]
+    ]));
+    expect(cells("Hazard Bot")).toEqual(["Hazard Bot · Activity Player", "1", capitalized(NOW - 90_000)]);
+    expect(document.querySelector(".assignment-activity abbr")).toBeNull();
+    expect(footnote()).toBeNull();
+  });
+
+  it("shows n/a on every assignment, with the footnote, when nothing is recorded", async () => {
+    const s = await shown();
+    await s.activity(new Map());
+    expect(cells("Wildfire")).toEqual(["Wildfire · Activity Player", "n/a", "n/a"]);
+    expect(cells("Hazard Bot")).toEqual(["Hazard Bot · Activity Player", "n/a", "n/a"]);
+    expect(footnote()).toBe("n/a: No student saves have been recorded for that assignment.");
+  });
+});
+
 describe("running a package", () => {
   it("asks the portal to run the row's package at its current version, and says so while it asks", async () => {
     const answer = deferred<unknown>();

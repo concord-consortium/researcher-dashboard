@@ -5,6 +5,7 @@ import { ClassActivity, RERUNS, STOPPED, type Stopped } from "../components/Clas
 import { ClassCard } from "../components/ClassCard";
 import { Counts } from "../components/Counts";
 import { Header } from "../components/Header";
+import { Time } from "../components/Time";
 import {
   CommunityConfirm, listCards, PackageFilters, PackageList, PackageSearch, rowModel, RunButton, StatusFilter, StatusPill, statusPill, UNREAD_STATUS,
   type FilterOption, type Status
@@ -21,7 +22,6 @@ import {
   type Counts as CountsDoc, type Result, type Runner, type RunRequest, type SessionMark
 } from "../shell/runs";
 import { assignmentActivity, behindRows, newestActivity, type Activity } from "../shell/activity";
-import { Time } from "../components/Time";
 import { useAutoRerun } from "../shell/rerun";
 import { ALL_PACKAGES, plainClick, routeHash, useRoute } from "../shell/route";
 import type { DashboardServices } from "../shell/services";
@@ -298,10 +298,13 @@ export function ClassDashboard({ services, onExpired, portal = null, demo = fals
   }, [results, requests, runnerDoc, countsProblem, listShown, listedTitles, allTitles]);
 
   const newest = activity ? newestActivity(activity) : null;
-  const perAssignment = useMemo(() => new Map((activity && scope ? assignmentActivity(activity, scope.assignments.map((a) => a.offering_id)) : []).map((a) => [a.offeringId, a])), [activity, scope]);
+  const perAssignment = useMemo(() => new Map((activity && scope ? assignmentActivity(activity, scope.assignments.map((a) => a.offering_id)) : [])
+    .map((a) => [a.offeringId, a])), [activity, scope]);
   // An assignment with no recorded saves, as for one worked on only before activity was recorded,
   // shows n/a rather than a zero.
   const unrecorded = Boolean(activity && scope?.assignments.some((a) => !perAssignment.get(a.offering_id)?.students));
+  // Before the first snapshot, and after the listener is refused, the activity columns say so.
+  const pending = activityProblem ? "unknown" : "…";
   // A community package runs only when pressed, after its warning, so it never re-runs on its own.
   const rerunnable = useMemo(() => grouped.filter((r) => !community.has(packageKey(r.identity))), [grouped, community]);
   // An info page re-runs nothing: its listeners have stopped, but a list answered late still lands.
@@ -532,8 +535,8 @@ export function ClassDashboard({ services, onExpired, portal = null, demo = fals
                     return (
                       <tr key={a.offering_id}>
                         <td>{a.name ?? "Untitled"}<AssignmentTool tool={a.tool} /></td>
-                        <td>{!activity ? "…" : worked?.students ? worked.students : <NotRecorded />}</td>
-                        <td>{!activity ? "…" : worked?.last != null ? <Time ms={worked.last} capitalized /> : <NotRecorded />}</td>
+                        <td>{!activity ? pending : worked?.students ? worked.students : <NotRecorded />}</td>
+                        <td>{!activity ? pending : worked?.last != null ? <Time ms={worked.last} capitalized /> : <NotRecorded />}</td>
                       </tr>
                     );
                   })}
