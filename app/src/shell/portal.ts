@@ -46,11 +46,11 @@ export interface User { name: string; username: string | null; provider: string 
 
 // The portal makes a login `<provider>-<uid>` for an account created by signing in with one of these,
 // and calls each provider by its titleized name.
-const SIGN_IN_PROVIDERS: Record<string, string> = { google: "Google", schoology: "Schoology" };
+const SIGN_IN_PROVIDERS = new Map([["google", "Google"], ["schoology", "Schoology"]]);
 
 export function signInProvider(login: string): string | null {
   const match = /^([a-z]+)-\d+$/.exec(login);
-  return match ? SIGN_IN_PROVIDERS[match[1]] ?? null : null;
+  return match ? SIGN_IN_PROVIDERS.get(match[1]) ?? null : null;
 }
 
 // `reason` is the server's own message, and null when its answer carried none (a proxy's HTML

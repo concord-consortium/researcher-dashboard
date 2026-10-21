@@ -157,7 +157,7 @@ describe("signInProvider", () => {
   });
 
   it("names none for a login a person chose, even one that starts like a generated one", () => {
-    for (const login of ["dresearcher", "google", "google-", "google-dana", "googlefan-123", "github-123", "xgoogle-123", "google-123x", ""]) {
+    for (const login of ["dresearcher", "google", "google-", "google-dana", "googlefan-123", "github-123", "xgoogle-123", "google-123x", "constructor-123", ""]) {
       expect(signInProvider(login), login).toBeNull();
     }
   });
