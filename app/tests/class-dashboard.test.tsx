@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RERUNS } from "../src/components/ClassActivity";
 import { ClassDashboard } from "../src/pages/ClassDashboard";
 import { packageKey, type Profile } from "../src/shell/packages";
-import { ApiError, SessionExpired, type PackageRow, type Portal, type ReportServer, type Resolved, type Scope } from "../src/shell/portal";
+import { ApiError, SessionExpired, type PackageRow, type Portal, type ReportServer, type Resolved, type Scope, type User } from "../src/shell/portal";
 import type { Activity } from "../src/shell/activity";
 import { formatTime, fullTime, type Counts, type Result, type Runner } from "../src/shell/runs";
 import type { ClassListeners, DashboardServices } from "../src/shell/services";
@@ -28,6 +28,7 @@ const CURRENT: Profile = {
 
 function services(over: {
   scope?: () => Promise<Scope>;
+  user?: () => Promise<User | null>;
   refresh?: () => Promise<unknown>;
   watch?: () => Promise<() => void>;
   list?: (urls: string[]) => Promise<PackageRow[]>;
@@ -41,7 +42,7 @@ function services(over: {
   const runPackage = vi.fn(over.run ?? (async () => ({ queue: [], appended: [], vm: "launched" })));
   const resolve = vi.fn(over.resolve ?? (async () => ({ archived: false })));
   const fake: DashboardServices = {
-    portal: { scope: over.scope ?? (async () => SCOPE), refreshProfile, runPackage } as unknown as Portal,
+    portal: { scope: over.scope ?? (async () => SCOPE), user: over.user ?? (async () => null), refreshProfile, runPackage } as unknown as Portal,
     reportServer: { listPackages, resolve } as unknown as ReportServer,
     watchClass: vi.fn(over.watch ?? (async (_scope, listeners) => { on = listeners; return unsubscribe; })),
     now: () => NOW
@@ -114,12 +115,36 @@ describe("ClassDashboard", () => {
     expect(document.title).toBe(`Analytics - ${SCOPE.name} - Researcher Dashboard`);
   });
 
+  it("names the signed-in user in the header, with their username, as the portal gives them", async () => {
+    mount(services({ user: async () => ({ name: "Dana Researcher", username: "dresearcher", provider: null }) }));
+    const banner = await screen.findByRole("banner");
+    expect(await within(banner).findByText("Dana Researcher")).toBeDefined();
+    expect(within(banner).getByText("dresearcher")).toBeDefined();
+  });
+
+  it("says which provider signed the user in, under their name, in place of a login the portal generated", async () => {
+    mount(services({ user: async () => ({ name: "Dana Researcher", username: null, provider: "Google" }) }));
+    const banner = await screen.findByRole("banner");
+    expect(await within(banner).findByText("Dana Researcher")).toBeDefined();
+    expect(within(banner).getByText("Signed in with Google")).toBeDefined();
+  });
+
   it("names the signed-in user on the info page it turns into", async () => {
-    const s = services({ scope: async () => { throw new ApiError("forbidden", 403); } });
-    render(<ClassDashboard services={s.fake} onExpired={vi.fn()} user={{ name: "Dana Researcher", username: "dresearcher" }} />);
+    const s = services({ scope: async () => { throw new ApiError("forbidden", 403); }, user: async () => ({ name: "Dana Researcher", username: "dresearcher", provider: null }) });
+    render(<ClassDashboard services={s.fake} onExpired={vi.fn()} />);
     const banner = await screen.findByRole("banner");
     expect(await within(banner).findByText("Dana Researcher")).toBeDefined();
     expect(screen.getByRole("status").textContent).toMatch(/withdrawn/);
+  });
+
+  it("shows the class with no name in the header when the portal will not say who signed in", async () => {
+    let refuse!: (error: unknown) => void;
+    mount(services({ user: () => new Promise((_, reject) => { refuse = reject; }) }));
+    await screen.findByRole("heading", { level: 1, name: SCOPE.name });
+    await act(async () => refuse(new ApiError("refused", 403)));
+    expect(screen.getByRole("heading", { level: 1, name: SCOPE.name })).toBeDefined();
+    expect(document.querySelector(".app-header .user")).toBeNull();
+    expect(document.body.textContent).not.toMatch(/withdrawn/);
   });
 
   it("names an untitled assignment", async () => {

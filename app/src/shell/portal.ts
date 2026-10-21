@@ -40,6 +40,19 @@ export interface PackageRow {
 
 export interface Resolved { archived: boolean }
 
+// `provider` names the sign-in service for an account whose login the portal generated from it, and
+// `username` is then null, since that login means nothing to its owner.
+export interface User { name: string; username: string | null; provider: string | null }
+
+// The portal makes a login `<provider>-<uid>` for an account created by signing in with one of these,
+// and calls each provider by its titleized name.
+const SIGN_IN_PROVIDERS = new Map([["google", "Google"], ["schoology", "Schoology"]]);
+
+export function signInProvider(login: string): string | null {
+  const match = /^([a-z]+)-\d+$/.exec(login);
+  return match ? SIGN_IN_PROVIDERS.get(match[1]) ?? null : null;
+}
+
 // `reason` is the server's own message, and null when its answer carried none (a proxy's HTML
 // error page, say), which the page then words for itself.
 export class ApiError extends Error {
@@ -100,6 +113,18 @@ export class Portal {
 
   scope(): Promise<Scope> {
     return this.api.request<Scope>("/api/v1/researcher_dashboard/scope");
+  }
+
+  // The token's `profile` capability, whose answer carries only the user's id and names. Null for an
+  // answer with no name.
+  async user(): Promise<User | null> {
+    const body = await this.api.request<{ extra?: Record<string, unknown> } | null>("/auth/user");
+    const text = (key: string) => (typeof body?.extra?.[key] === "string" ? (body.extra[key] as string).trim() : "");
+    const name = [text("first_name"), text("last_name")].filter(Boolean).join(" ");
+    if (!name) return null;
+    const login = text("username");
+    const provider = signInProvider(login);
+    return { name, username: provider ? null : login || null, provider };
   }
 
   refreshProfile(): Promise<unknown> {

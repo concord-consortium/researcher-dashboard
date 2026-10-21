@@ -3,7 +3,6 @@ import { ArrowPathIcon, BeakerIcon, ChevronDownIcon, PencilSquareIcon } from "@h
 import { createRoot } from "react-dom/client";
 import { App } from "../src/App";
 import { DEMO_LABEL } from "../src/components/Brand";
-import { base64url } from "../src/shell/oauth";
 import type { Start } from "../src/shell/start";
 import { SCENARIOS, type Scenario } from "./scenarios";
 import { World } from "./world";
@@ -16,15 +15,8 @@ const READY: Start = {
   kind: "ready",
   portal: { origin: "https://portal.example.com", reportServer: "https://report-server.demo.invalid", firebaseProject: "demo" },
   launch: { authDomain: "https://portal.example.com", classId: "590", loginHint: null },
-  token: { accessToken: unsignedJwt({ uid: 200, first_name: "Demo", last_name: "Researcher", username: "dresearcher" }), issuedAt: 0, expiresAt: Number.MAX_SAFE_INTEGER }
+  token: { accessToken: "demo", issuedAt: 0, expiresAt: Number.MAX_SAFE_INTEGER }
 };
-
-// An access token's shape with the claims the page reads, and no signature, since nothing here
-// sends it anywhere.
-function unsignedJwt(claims: Record<string, unknown>): string {
-  const part = (value: unknown) => base64url(new TextEncoder().encode(JSON.stringify(value)));
-  return `${part({ alg: "none", typ: "JWT" })}.${part(claims)}.`;
-}
 
 function chosen(): Scenario {
   const key = new URLSearchParams(window.location.search).get("scenario");

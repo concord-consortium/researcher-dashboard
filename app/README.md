@@ -53,7 +53,7 @@ The local rigse needs:
 - `RESEARCHER_DASHBOARD_FUNCTION_URL` naming a report-service functions deployment, or the
   profile refresh and the run request answer 503 and no class gets a profile to list from;
 - a `Client` with app id `researcher-dashboard`, type `public`, scopes
-  `class:researcher-read class:researcher-run packages:read`, and the dev server's
+  `class:researcher-read class:researcher-run packages:read profile`, and the dev server's
   `http://localhost:5173/index.html` among its redirect URIs, which the portal matches exactly;
 - an `ExternalReport` for classes, supporting researchers, whose URL is that page and whose
   client is that `Client`.
@@ -95,7 +95,7 @@ emulator that is fine, because an emulator accepts any signature.
 
 | | |
 |---|---|
-| the portal | the class's scope, a Firebase token for the class, a profile refresh when the profile is missing or stale, and a run request for one package when Run or Resume is pressed, or on its own for a finished package students have saved work since |
+| the portal | the signed-in researcher's name and username from `/auth/user` (or, for an account the portal made at a Google or Schoology sign-in, "Signed in with Google" or "Signed in with Schoology" in place of its generated login), the class's scope, a Firebase token for the class, a profile refresh when the profile is missing or stale, and a run request for one package when Run or Resume is pressed, or on its own for a finished package students have saved work since |
 | report-server | the package list, each package marked as applying to the class or not, and a resolve of a package a result names that the list no longer returns |
 | the portal's report-service Firebase project | the class's authored URL profile document; the researcher's session (`runners/<platform user id>`); their scope document with its counts; their results for the class, one per package; and the class's learner activity (`activity/<class hash>/users`), one document per learner with the server time of their last save |
 

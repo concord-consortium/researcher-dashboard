@@ -3,8 +3,7 @@ import { useRef, type ReactNode } from "react";
 import logo from "../assets/cc-logo.png";
 import { APP_VERSION } from "../build-info";
 import type { Activity } from "../shell/activity";
-import type { TokenUser } from "../shell/oauth";
-import type { Scope } from "../shell/portal";
+import type { Scope, User } from "../shell/portal";
 import { Brand, UserInfo } from "./Brand";
 import { ActiveCount } from "./ClassActivity";
 import { usePublishedHeight } from "./usePublishedHeight";
@@ -18,7 +17,7 @@ export function Header({ scope, user, demo, tabs, activity, now, session, runner
   scope: Scope;
   demo: boolean;
   tabs: ReactNode;
-  user: TokenUser | null;
+  user: User | null;
   activity: Map<string, Activity> | undefined;
   now: () => number;
   session: string[];

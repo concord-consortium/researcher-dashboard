@@ -14,7 +14,7 @@ import { panelId, tabId, Tabs } from "../components/Tabs";
 import { Unlisted, unlistedModel, unlistedTitle } from "../components/Unlisted";
 import { runNews } from "../shell/announce";
 import { groupPackages, identityOfKey, matchesSearch, needsRefresh, packageKey, projectNames, scopeUrls, titleOf, type Profile } from "../shell/packages";
-import { ApiError, SessionExpired, type PackageRow, type Scope } from "../shell/portal";
+import { ApiError, SessionExpired, type PackageRow, type Scope, type User } from "../shell/portal";
 import { PROFILE_MAX_AGE_MS } from "../shell/portals";
 import {
   ACCEPTED_WAIT_MS, latestFinished, millis, nextMark, sentence, sessionLines,
@@ -22,7 +22,6 @@ import {
 } from "../shell/runs";
 import { behindRows, newestActivity, type Activity } from "../shell/activity";
 import { useAutoRerun } from "../shell/rerun";
-import type { TokenUser } from "../shell/oauth";
 import { ALL_PACKAGES, plainClick, routeHash, useRoute } from "../shell/route";
 import type { DashboardServices } from "../shell/services";
 import type { InfoReason } from "../shell/start";
@@ -46,14 +45,14 @@ const pageTitle = () => (firstTitle ??= document.title);
 
 // The dashboard for the class the token is bound to, never the one the launch link asked for.
 // `portal` is the origin of the portal that launched the page, the class's home.
-export function ClassDashboard({ services, onExpired, user = null, portal = null, demo = false }: {
+export function ClassDashboard({ services, onExpired, portal = null, demo = false }: {
   services: DashboardServices;
   onExpired: () => void;
-  user?: TokenUser | null;
   portal?: string | null;
   demo?: boolean;
 }) {
   const [scope, setScope] = useState<Scope | null>(null);
+  const [user, setUser] = useState<User | null>(null);
   const [info, setInfo] = useState<InfoReason | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   // undefined until the first snapshot; null while the document does not exist.
@@ -120,6 +119,15 @@ export function ClassDashboard({ services, onExpired, user = null, portal = null
         else setScope(loaded);
       })
       .catch((error) => { if (!canceled) refused(error, setFailure, "portal"); });
+    return () => { canceled = true; };
+  }, [services]);
+
+  // For display only, so a refusal leaves the header without a name rather than changing the page.
+  useEffect(() => {
+    let canceled = false;
+    services.portal.user()
+      .then((loaded) => { if (!canceled) setUser(loaded); })
+      .catch(() => {});
     return () => { canceled = true; };
   }, [services]);
 
