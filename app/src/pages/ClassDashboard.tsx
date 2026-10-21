@@ -300,10 +300,8 @@ export function ClassDashboard({ services, onExpired, portal = null, demo = fals
   const newest = activity ? newestActivity(activity) : null;
   const perAssignment = useMemo(() => new Map((activity && scope ? assignmentActivity(activity, scope.assignments.map((a) => a.offering_id)) : [])
     .map((a) => [a.offeringId, a])), [activity, scope]);
-  // An assignment with no recorded saves, as for one worked on only before activity was recorded,
-  // shows n/a rather than a zero.
+  // Whether any assignment shows n/a, which brings the footnote; activity is recorded only since its trigger was deployed.
   const unrecorded = Boolean(activity && scope?.assignments.some((a) => !perAssignment.get(a.offering_id)?.students));
-  // Before the first snapshot, and after the listener is refused, the activity columns say so.
   const pending = activityProblem ? "unknown" : "…";
   // A community package runs only when pressed, after its warning, so it never re-runs on its own.
   const rerunnable = useMemo(() => grouped.filter((r) => !community.has(packageKey(r.identity))), [grouped, community]);
@@ -542,7 +540,7 @@ export function ClassDashboard({ services, onExpired, portal = null, demo = fals
                   })}
                 </tbody>
               </table>
-              {unrecorded && <p className="footnote"><abbr>n/a</abbr>: {NOT_RECORDED}</p>}
+              {unrecorded && <p className="footnote"><strong>n/a</strong>: {NOT_RECORDED}</p>}
             </section>
             <Counts counts={counts} problem={countsProblem} session={session} activity={activity} now={services.now} />
             <ClassActivity activity={activity} problem={activityProblem} stopped={stopped} />

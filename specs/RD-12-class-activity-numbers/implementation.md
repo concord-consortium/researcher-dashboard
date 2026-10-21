@@ -78,10 +78,8 @@ After `const newest = …`:
 ```tsx
   const perAssignment = useMemo(() => new Map((activity && scope ? assignmentActivity(activity, scope.assignments.map((a) => a.offering_id)) : [])
     .map((a) => [a.offeringId, a])), [activity, scope]);
-  // An assignment with no recorded saves, as for one worked on only before activity was recorded,
-  // shows n/a rather than a zero.
+  // Whether any assignment shows n/a, which brings the footnote; activity is recorded only since its trigger was deployed.
   const unrecorded = Boolean(activity && scope?.assignments.some((a) => !perAssignment.get(a.offering_id)?.students));
-  // Before the first snapshot, and after the listener is refused, the activity columns say so.
   const pending = activityProblem ? "unknown" : "…";
 ```
 
@@ -103,7 +101,7 @@ The Assignments card's `<ul className="assignments">` becomes:
                   })}
                 </tbody>
               </table>
-              {unrecorded && <p className="footnote"><abbr>n/a</abbr>: {NOT_RECORDED}</p>}
+              {unrecorded && <p className="footnote"><strong>n/a</strong>: {NOT_RECORDED}</p>}
 ```
 
 `ClassActivity.tsx` imports `newestActivity` and `Time`; inside the component, before the return, `const latest = activity ? newestActivity(activity) : null;`, and at the top of the `activity &&` fragment:
@@ -131,7 +129,6 @@ The component's comment ("What the count in the header means, and whether finish
 .assignment-activity td:nth-child(3) { width: 12rem; white-space: nowrap; }
 .assignment-activity abbr[title] { text-decoration: none; }
 .info-card .footnote { margin: 0.5rem 0 0; font-size: 0.8rem; color: var(--muted); }
-.info-card .footnote abbr { text-decoration: none; font-weight: 700; }
 ```
 
 The row hover keeps the tint the list's items had.

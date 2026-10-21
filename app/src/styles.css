@@ -245,7 +245,6 @@ section { border-top: 1px solid var(--line); padding-top: 0.5rem; }
 .assignment-activity td:nth-child(3) { width: 12rem; white-space: nowrap; }
 .assignment-activity abbr[title] { text-decoration: none; }
 .info-card .footnote { margin: 0.5rem 0 0; font-size: 0.8rem; color: var(--muted); }
-.info-card .footnote abbr { text-decoration: none; font-weight: 700; }
 
 .notice { color: var(--warn); }
 .callout {
