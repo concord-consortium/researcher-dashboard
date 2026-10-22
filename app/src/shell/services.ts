@@ -52,6 +52,8 @@ export function makeServices(config: PortalConfig, token: Token): DashboardServi
       };
       void (async () => {
         const token = await portal.firebaseToken(config.clue.firebaseApp, scope.class_hash);
+        // signIn reuses the project's app, so a stopped watch must not sign in over a newer one.
+        if (stopped) return;
         const db = await signIn(config.clue.projectId, token, emulators);
         if (stopped) return;
         stops.push(watchCollection<Activity>(db, path, (docs) => sources.value("clue-activity", docs), () => refuse("clue-activity")));

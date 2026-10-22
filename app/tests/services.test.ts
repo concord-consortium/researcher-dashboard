@@ -136,7 +136,7 @@ describe("makeServices", () => {
     await settle();
 
     expect(on.refused).toHaveBeenCalledWith("clue-activity");
-    expect(signIn).not.toHaveBeenCalledWith(CLUE_PROJECT, expect.anything(), expect.anything());
+    expect(signIn.mock.calls.map(([project]) => project)).toEqual([RS]);
     expect([...kinds.keys()].sort()).toEqual(Object.values(RS_KEYS).sort());
     listeners.get(RS_KEYS.activity)![2](new Map([["301", {}]]));
     expect(on.activity).toHaveBeenCalledWith(new Map([["301", {}]]));
@@ -161,6 +161,29 @@ describe("makeServices", () => {
     await settle();
 
     expect(watch).not.toHaveBeenCalled();
+    expect(on.refused).not.toHaveBeenCalled();
+  });
+
+  it("does not sign in to CLUE when its token arrives after report-service's sign-in has failed", async () => {
+    let mint!: () => void;
+    const fetchImpl = vi.fn(async (url: string) => {
+      const app = new URL(url).searchParams.get("firebase_app");
+      if (app === CLUE_APP) await new Promise<void>((resolve) => { mint = resolve; });
+      return { ok: true, status: 201, json: async () => ({ token: `token-${app}` }) };
+    });
+    vi.stubGlobal("fetch", fetchImpl);
+    signIn.mockImplementation(async (project: string) => {
+      if (project === RS) throw new Error("auth/network-request-failed");
+      return { db: project };
+    });
+    const { makeServices } = await import("../src/shell/services");
+    const on = listenersOn();
+    await expect(makeServices(CONFIG, TOKEN).watchClass(SCOPE, on)).rejects.toThrow("auth/network-request-failed");
+    mint();
+    await settle();
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(signIn.mock.calls.map(([project]) => project)).toEqual([RS]);
     expect(on.refused).not.toHaveBeenCalled();
   });
 
