@@ -5,6 +5,7 @@ import { ClassActivity, RERUNS, STOPPED, type Stopped } from "../components/Clas
 import { ClassCard } from "../components/ClassCard";
 import { Counts } from "../components/Counts";
 import { Header } from "../components/Header";
+import { Time } from "../components/Time";
 import {
   CommunityConfirm, listCards, PackageFilters, PackageList, PackageSearch, rowModel, RunButton, StatusFilter, StatusPill, statusPill, UNREAD_STATUS,
   type FilterOption, type Status
@@ -20,7 +21,7 @@ import {
   ACCEPTED_WAIT_MS, latestFinished, millis, nextMark, sentence, sessionLines,
   type Counts as CountsDoc, type Result, type Runner, type RunRequest, type SessionMark
 } from "../shell/runs";
-import { behindRows, newestActivity, type Activity } from "../shell/activity";
+import { assignmentActivity, behindRows, newestActivity, type Activity } from "../shell/activity";
 import { useAutoRerun } from "../shell/rerun";
 import { ALL_PACKAGES, plainClick, routeHash, useRoute } from "../shell/route";
 import type { DashboardServices } from "../shell/services";
@@ -38,6 +39,13 @@ const UNREACHABLE: Record<Source, string> = {
 
 const PROFILE_REFUSED = "This class's profile could not be read.";
 const ACTIVITY_REFUSED = "Class activity could not be read.";
+
+const NOT_RECORDED = "No student saves have been recorded for that assignment.";
+
+const NotRecorded = () => <abbr title={NOT_RECORDED}>n/a</abbr>;
+
+const AssignmentTool = ({ tool }: { tool: string | null }) =>
+  tool ? <span className="tool"> · {tool === "ActivityPlayer" ? "Activity Player" : tool}</span> : null;
 
 // The page's own title, as its HTML gave it, read once: a dashboard mounted again sees it unchanged.
 let firstTitle: string | null = null;
@@ -290,6 +298,11 @@ export function ClassDashboard({ services, onExpired, portal = null, demo = fals
   }, [results, requests, runnerDoc, countsProblem, listShown, listedTitles, allTitles]);
 
   const newest = activity ? newestActivity(activity) : null;
+  const perAssignment = useMemo(() => new Map((activity && scope ? assignmentActivity(activity, scope.assignments.map((a) => a.offering_id)) : [])
+    .map((a) => [a.offeringId, a])), [activity, scope]);
+  // Whether any assignment shows n/a, which brings the footnote; activity is recorded only since its trigger was deployed.
+  const unrecorded = Boolean(activity && scope?.assignments.some((a) => !perAssignment.get(a.offering_id)?.students));
+  const pending = activityProblem ? "unknown" : "…";
   // A community package runs only when pressed, after its warning, so it never re-runs on its own.
   const rerunnable = useMemo(() => grouped.filter((r) => !community.has(packageKey(r.identity))), [grouped, community]);
   // An info page re-runs nothing: its listeners have stopped, but a list answered late still lands.
@@ -512,14 +525,22 @@ export function ClassDashboard({ services, onExpired, portal = null, demo = fals
             <ClassCard scope={scope} projectNames={namedProjects} portal={portal} />
             <section className="info-card wide" aria-labelledby="assignments-heading">
               <h2 id="assignments-heading"><ClipboardDocumentListIcon aria-hidden="true" />Assignments</h2>
-              <ul className="assignments">
-                {scope.assignments.map((a) => (
-                  <li key={a.offering_id}>
-                    {a.name ?? "Untitled"}
-                    {a.tool && <span className="tool"> · {a.tool === "ActivityPlayer" ? "Activity Player" : a.tool}</span>}
-                  </li>
-                ))}
-              </ul>
+              <table className="assignment-activity">
+                <thead><tr><th scope="col">Assignment</th><th scope="col">Students who saved work</th><th scope="col">Last change</th></tr></thead>
+                <tbody>
+                  {scope.assignments.map((a) => {
+                    const worked = perAssignment.get(a.offering_id);
+                    return (
+                      <tr key={a.offering_id}>
+                        <td>{a.name ?? "Untitled"}<AssignmentTool tool={a.tool} /></td>
+                        <td>{!activity ? pending : worked?.students ? worked.students : <NotRecorded />}</td>
+                        <td>{!activity ? pending : worked?.last != null ? <Time ms={worked.last} capitalized /> : <NotRecorded />}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              {unrecorded && <p className="footnote"><strong>n/a</strong>: {NOT_RECORDED}</p>}
             </section>
             <Counts counts={counts} problem={countsProblem} session={session} activity={activity} now={services.now} />
             <ClassActivity activity={activity} problem={activityProblem} stopped={stopped} />

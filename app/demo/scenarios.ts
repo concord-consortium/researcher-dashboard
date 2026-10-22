@@ -64,9 +64,18 @@ function done(identity: string, startedAgoMin: number, now: number, display?: st
   return [packageKey(identity), { ...f, status: "done", microvm_id: "vm-demo-1", updated_at: f.finished_at! }];
 }
 
+// Learners whose last saves were the given minutes ago, in the first assignment, with every other
+// learner also saving in the second 20 minutes before that.
 function activity(now: number, minutesAgo: number[]): Map<string, Activity> {
-  return new Map(minutesAgo.map((m, i) => [`learner-${i + 1}`, { lastActivityAt: stamp(now - m * MIN) }]));
+  return new Map(minutesAgo.map((m, i) => {
+    const last = now - m * MIN;
+    const changed = { "1255": stamp(last), ...(i % 2 ? { "1256": stamp(last - 20 * MIN) } : {}) };
+    return [`learner-${i + 1}`, { lastActivityAt: stamp(last), changed }];
+  }));
 }
+
+const DAY = 24 * 60 * MIN;
+const minutes = (count: number, from: number, step: number) => Array.from({ length: count }, (_, i) => from + i * step);
 
 function base(now: number): WorldState {
   return {
@@ -79,7 +88,7 @@ function base(now: number): WorldState {
     results: new Map(),
     runner: { state: "suspended", queue: [], microvm_id: "vm-demo-1", updated_at: stamp(now - 30 * MIN) },
     counts: { data: { answers: 117, logs: 18195, last_pull_at: stamp(now - 40 * MIN), log_freshness_at: stamp(now - 6 * 60 * MIN) } },
-    activity: activity(now, [45, 50, 70]),
+    activity: activity(now, minutes(18, 45, 37)),
     outputs: OUTPUTS,
     failing: new Map()
   };
@@ -192,6 +201,28 @@ export const SCENARIOS: Scenario[] = [
         activity: activity(now, [0.5, 12])
       };
     }
+  },
+  {
+    key: "past",
+    label: "A past class",
+    about: "A class whose students last saved work weeks ago: nobody is active, but the Info tab still shows who worked in each assignment and when.",
+    world: (now) => ({ ...base(now), activity: activity(now - 40 * DAY, minutes(22, 30, 90)),
+      results: new Map([done("official/wildfire-responses", 300, now)]) })
+  },
+  {
+    key: "before",
+    label: "A class from before activity was recorded",
+    about: "Students answered weeks ago, before the dashboard recorded activity, so there are no activity documents: the Assignments card shows n/a in each assignment's activity columns, with a footnote saying why.",
+    world: (now) => ({ ...base(now), activity: new Map(),
+      counts: { data: { answers: 117, logs: 18195, last_pull_at: stamp(now - 40 * DAY), log_freshness_at: stamp(now - 41 * DAY) } },
+      results: new Map([done("official/wildfire-responses", 40 * 24 * 60, now)]) })
+  },
+  {
+    key: "mixed",
+    label: "One assignment from before activity was recorded",
+    about: "Students saved work in the first assignment since the dashboard began recording activity; the second was worked on only before then, so its activity columns show n/a.",
+    world: (now) => ({ ...base(now),
+      activity: new Map(minutes(12, 45, 37).map((m, i) => [`learner-${i + 1}`, { lastActivityAt: stamp(now - m * MIN), changed: { "1255": stamp(now - m * MIN) } }])) })
   },
   { key: "info", label: "Info page (no launch)", about: "What a visit with no launch parameters shows.", info: "no-launch" },
   {

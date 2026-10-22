@@ -236,14 +236,15 @@ section { border-top: 1px solid var(--line); padding-top: 0.5rem; }
 .info-card h2 { display: flex; align-items: center; gap: 0.4rem; margin: 0 0 0.5rem; font-size: 1rem; color: var(--cc-teal-dark2); }
 .info-card h2 svg { width: 16px; height: 16px; }
 .info-card p { margin: 0.4rem 0; }
-/* Under .info-card's own list rules, which are for the info page's bulleted and numbered lists. */
-.info-card .assignments { list-style: none; padding: 0; margin: 0; }
-/* Each item's hover tint reaches past the text, so the line between items is drawn inset to the text's width. */
-.info-card .assignments li { margin: 0 -0.5rem; padding: 0.3rem 0.5rem; border-radius: 4px; }
-.info-card .assignments li + li {
-  background: linear-gradient(var(--line), var(--line)) top center / calc(100% - 1rem) 1px no-repeat;
-}
-.info-card .assignments li:hover { background-color: var(--cc-teal-light7); }
+.assignment-activity { width: 100%; border-collapse: collapse; }
+.assignment-activity th { text-align: left; font-size: 0.8rem; font-weight: 700; color: var(--muted); padding: 0.25rem 0.5rem; border-bottom: 1px solid var(--line); }
+.assignment-activity td { padding: 0.35rem 0.5rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+.assignment-activity tr:last-child td { border-bottom: 0; }
+.assignment-activity tbody tr:hover td { background-color: var(--cc-teal-light7); }
+.assignment-activity td:nth-child(2) { width: 12rem; }
+.assignment-activity td:nth-child(3) { width: 12rem; white-space: nowrap; }
+.assignment-activity abbr[title] { text-decoration: none; }
+.info-card .footnote { margin: 0.5rem 0 0; font-size: 0.8rem; color: var(--muted); }
 
 .notice { color: var(--warn); }
 .callout {
