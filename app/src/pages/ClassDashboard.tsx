@@ -21,7 +21,7 @@ import {
   ACCEPTED_WAIT_MS, latestFinished, millis, nextMark, sentence, sessionLines,
   type Counts as CountsDoc, type Result, type Runner, type RunRequest, type SessionMark
 } from "../shell/runs";
-import { assignmentActivity, behindRows, newestActivity, type Activity } from "../shell/activity";
+import { assignmentActivity, behindRows, newestActivity, type Activity, type ActivitySource } from "../shell/activity";
 import { useAutoRerun } from "../shell/rerun";
 import { ALL_PACKAGES, plainClick, routeHash, useRoute } from "../shell/route";
 import type { DashboardServices } from "../shell/services";
@@ -39,6 +39,8 @@ const UNREACHABLE: Record<Source, string> = {
 
 const PROFILE_REFUSED = "This class's profile could not be read.";
 const ACTIVITY_REFUSED = "Class activity could not be read.";
+const PLATFORM: Record<ActivitySource, string> = { activity: "Activity Player", "clue-activity": "CLUE" };
+const sourceRefused = (source: ActivitySource) => `${PLATFORM[source]} activity could not be read.`;
 
 const NOT_RECORDED = "No student saves have been recorded for that assignment.";
 
@@ -86,9 +88,14 @@ export function ClassDashboard({ services, onExpired, portal = null, demo = fals
   // While the session or the results listener is refused, a row's state cannot be told, so none is shown.
   const results = useMemo(() => (runsProblem ? new Map<string, Result>() : received), [runsProblem, received]);
   const [countsProblem, setCountsProblem] = useState<string | null>(null);
-  // undefined until the first snapshot, and again once the listener is refused.
-  const [activity, setActivity] = useState<Map<string, Activity> | undefined>(undefined);
-  const [activityProblem, setActivityProblem] = useState<string | null>(null);
+  // undefined until both sources have answered (activitySources); `activity` below is undefined again once both are refused.
+  const [activityDocs, setActivityDocs] = useState<Map<string, Activity> | undefined>(undefined);
+  const [refusedSources, setRefusedSources] = useState<ActivitySource[]>([]);
+  // A failed sign-in, which leaves neither source.
+  const [signInProblem, setSignInProblem] = useState<string | null>(null);
+  const activity = refusedSources.length === 2 ? undefined : activityDocs;
+  const activityProblem = signInProblem
+    ?? (refusedSources.length === 2 ? ACTIVITY_REFUSED : refusedSources.length === 1 ? sourceRefused(refusedSources[0]) : null);
   // Set when an automatic request finds the sign-in expired or not renewable. A Run that succeeds
   // ends it; one that has to sign in again leaves the page, and the new page starts with it unset.
   const [stopped, setStopped] = useState<Stopped | null>(null);
@@ -145,6 +152,8 @@ export function ClassDashboard({ services, onExpired, portal = null, demo = fals
     if (!scope || info) return;
     let stop: (() => void) | null = null;
     let canceled = false;
+    setRefusedSources([]);
+    setSignInProblem(null);
     services.watchClass(scope, {
       profile: setProfile,
       runner: (next) => {
@@ -153,12 +162,11 @@ export function ClassDashboard({ services, onExpired, portal = null, demo = fals
       },
       counts: setCounts,
       results: setReceived,
-      activity: setActivity,
+      activity: setActivityDocs,
       refused: (which) => {
         if (which === "profile") return setProfileProblem(PROFILE_REFUSED);
-        if (which === "activity") {
-          setActivity(undefined);
-          return setActivityProblem(ACTIVITY_REFUSED);
+        if (which === "activity" || which === "clue-activity") {
+          return setRefusedSources((was) => (was.includes(which) ? was : [...was, which]));
         }
         if (which === "counts") {
           setCounts(undefined);
@@ -173,7 +181,7 @@ export function ClassDashboard({ services, onExpired, portal = null, demo = fals
         if (canceled) return;
         refused(error, (message) => {
           setProfileProblem(message);
-          setActivityProblem(ACTIVITY_REFUSED);
+          setSignInProblem(ACTIVITY_REFUSED);
         }, "firebase");
       });
     return () => { canceled = true; stop?.(); };
@@ -302,7 +310,7 @@ export function ClassDashboard({ services, onExpired, portal = null, demo = fals
     .map((a) => [a.offeringId, a])), [activity, scope]);
   // Whether any assignment shows n/a, which brings the footnote; activity is recorded only since its trigger was deployed.
   const unrecorded = Boolean(activity && scope?.assignments.some((a) => !perAssignment.get(a.offering_id)?.students));
-  const pending = activityProblem ? "unknown" : "…";
+  const pending = signInProblem || refusedSources.length === 2 ? "unknown" : "…";
   // A community package runs only when pressed, after its warning, so it never re-runs on its own.
   const rerunnable = useMemo(() => grouped.filter((r) => !community.has(packageKey(r.identity))), [grouped, community]);
   // An info page re-runs nothing: its listeners have stopped, but a list answered late still lands.
@@ -540,7 +548,9 @@ export function ClassDashboard({ services, onExpired, portal = null, demo = fals
                   })}
                 </tbody>
               </table>
-              {unrecorded && <p className="footnote"><strong>n/a</strong>: {NOT_RECORDED}</p>}
+              {unrecorded && <p className="footnote"><strong>n/a</strong>: {NOT_RECORDED}
+                {refusedSources.length === 1 && <> {PLATFORM[refusedSources[0]]} activity could not be read, so its assignments may also show n/a.</>}
+              </p>}
             </section>
             <Counts counts={counts} problem={countsProblem} session={session} activity={activity} now={services.now} />
             <ClassActivity activity={activity} problem={activityProblem} stopped={stopped} />
