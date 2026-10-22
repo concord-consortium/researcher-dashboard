@@ -308,7 +308,7 @@ export function ClassDashboard({ services, onExpired, portal = null, demo = fals
   const newest = activity ? newestActivity(activity) : null;
   const perAssignment = useMemo(() => new Map((activity && scope ? assignmentActivity(activity, scope.assignments.map((a) => a.offering_id)) : [])
     .map((a) => [a.offeringId, a])), [activity, scope]);
-  // Whether any assignment shows n/a, which brings the footnote; activity is recorded only since its trigger was deployed.
+  // Whether any assignment shows n/a, which brings the footnote; a platform records activity only from the release of its writer on.
   const unrecorded = Boolean(activity && scope?.assignments.some((a) => !perAssignment.get(a.offering_id)?.students));
   const pending = signInProblem || refusedSources.length === 2 ? "unknown" : "…";
   // A community package runs only when pressed, after its warning, so it never re-runs on its own.
