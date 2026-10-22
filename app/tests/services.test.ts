@@ -21,7 +21,7 @@ vi.mock("../src/shell/firebase", async (importOriginal) => ({
   watchCollection: (...args: Listener) => watch("collection", ...args)
 }));
 
-const CONFIG = { origin: "https://learn.portal.staging.concord.org", reportServer: "https://rs.test", firebaseProject: "report-service-dev" };
+const CONFIG = { origin: "https://learn.portal.staging.concord.org", reportServer: "https://rs.test", firebaseProject: "report-service-dev", clue: { firebaseApp: "collaborative-learning-staging", projectId: "collaborative-learning-staging" } };
 const TOKEN = { accessToken: "at", issuedAt: 0, expiresAt: Number.MAX_SAFE_INTEGER };
 const ROOT = "researcher_dashboard/learn_portal_staging_concord_org";
 const PATHS = {

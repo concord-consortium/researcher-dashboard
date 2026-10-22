@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { launchQuery, parseCallback, parseLaunch } from "../src/shell/launch";
+import { firebaseConfig } from "../src/shell/firebase";
 import { devPortal, portalFor } from "../src/shell/portals";
 
 const STAGING = "https://learn.portal.staging.concord.org";
@@ -47,6 +48,10 @@ describe("portalFor", () => {
     expect(portalFor(STAGING)?.firebaseProject).toBe("report-service-dev");
   });
 
+  it("names CLUE staging's portal row and project for the staging portal", () => {
+    expect(portalFor(STAGING)?.clue).toEqual({ firebaseApp: "collaborative-learning-staging", projectId: "collaborative-learning-staging" });
+  });
+
   // This decides where a credential is sent, so near misses are refusals.
   it("refuses anything but the exact origin", () => {
     expect(portalFor("https://learn.portal.staging.concord.org.evil.test/")).toBeNull();
@@ -57,7 +62,7 @@ describe("portalFor", () => {
   });
 
   it("adds a local portal only on a dev server", () => {
-    const env = { VITE_DEV_PORTAL: "http://localhost:3000/", VITE_DEV_REPORT_SERVER: "http://localhost:4000", VITE_DEV_FIREBASE_PROJECT: "demo" };
+    const env = { VITE_DEV_PORTAL: "http://localhost:3000/", VITE_DEV_REPORT_SERVER: "http://localhost:4000", VITE_DEV_FIREBASE_PROJECT: "demo", VITE_DEV_CLUE_FIREBASE_PROJECT: "clue-demo" };
     expect(devPortal({ ...env, DEV: false })).toBeNull();
     const local = devPortal({ ...env, DEV: true });
     expect(portalFor("http://localhost:3000/", local)?.reportServer).toBe("http://localhost:4000");
@@ -65,9 +70,23 @@ describe("portalFor", () => {
   });
 
   it("takes no local portal from a setting that is not a URL, and keeps only origins", () => {
-    const env = { DEV: true, VITE_DEV_REPORT_SERVER: "http://localhost:4000/", VITE_DEV_FIREBASE_PROJECT: "demo" };
+    const env = { DEV: true, VITE_DEV_REPORT_SERVER: "http://localhost:4000/", VITE_DEV_FIREBASE_PROJECT: "demo", VITE_DEV_CLUE_FIREBASE_PROJECT: "clue-demo" };
     expect(devPortal({ ...env, VITE_DEV_PORTAL: "localhost:3000" })).toBeNull();
     expect(devPortal({ ...env, VITE_DEV_PORTAL: "127.0.0.1:3000" })).toBeNull();
     expect(devPortal({ ...env, VITE_DEV_PORTAL: "http://localhost:3000/" })?.reportServer).toBe("http://localhost:4000");
+  });
+
+  it("names a local portal's CLUE project, and none without one or with report-service's", () => {
+    const env = { DEV: true, VITE_DEV_PORTAL: "http://localhost:3000", VITE_DEV_REPORT_SERVER: "http://localhost:4000", VITE_DEV_FIREBASE_PROJECT: "demo" };
+    expect(devPortal({ ...env, VITE_DEV_CLUE_FIREBASE_PROJECT: "clue-demo" })?.clue).toEqual({ firebaseApp: "clue-demo", projectId: "clue-demo" });
+    expect(devPortal(env)).toBeNull();
+    expect(devPortal({ ...env, VITE_DEV_CLUE_FIREBASE_PROJECT: "demo" })).toBeNull();
+  });
+});
+
+describe("firebaseConfig", () => {
+  it.each(["report-service-dev", "collaborative-learning-staging", "collaborative-learning-ec215"])("holds %s under its own project id", (id) => {
+    expect(firebaseConfig(id).projectId).toBe(id);
+    expect(firebaseConfig(id).authDomain).toBe(`${id}.firebaseapp.com`);
   });
 });

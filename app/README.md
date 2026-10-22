@@ -67,11 +67,14 @@ Then name the local portal for the dev server. A production build never reads th
 VITE_DEV_PORTAL=http://localhost:3000 \
 VITE_DEV_REPORT_SERVER=http://localhost:4000 \
 VITE_DEV_FIREBASE_PROJECT=report-service-dev \
+VITE_DEV_CLUE_FIREBASE_PROJECT=collaborative-learning-staging \
 npm run dev
 ```
 
-The Firebase project needs an entry in `src/shell/firebase.ts`'s config map unless the
-emulator below is used.
+Each of the two Firebase projects, report-service's and CLUE's, needs an entry in
+`src/shell/firebase.ts`'s config map unless the emulator below is used, and a `firebase_apps`
+row of its name in the local portal. The two must differ: the app keeps one Firebase sign-in
+per project.
 
 ## Running against the Firestore emulator
 

@@ -68,7 +68,7 @@ describe("App", () => {
 
   const signedIn = (demo = false) => {
     const token = { accessToken: "at", issuedAt: 0, expiresAt: 1 };
-    const portal = { origin: "https://p.test", reportServer: "https://r.test", firebaseProject: "f" };
+    const portal = { origin: "https://p.test", reportServer: "https://r.test", firebaseProject: "f", clue: { firebaseApp: "c", projectId: "c" } };
     const services = { portal: { scope: async () => SCOPE, user: async () => null } as unknown as Portal, reportServer: {} as ReportServer, watchClass: async () => () => {}, now: () => 0 };
     render(<App start={{ kind: "ready", portal, launch: { authDomain: "https://p.test", classId: "1", loginHint: null }, token }} reauthorize={none} services={services} demo={demo} />);
   };
