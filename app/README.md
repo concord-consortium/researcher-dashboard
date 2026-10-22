@@ -116,7 +116,7 @@ for every researcher of the class. A CLUE student is counted only when launched 
 project matching the portal's: on staging, an offering launched without `firebaseEnv=staging`
 records its activity in production CLUE, which the staging dashboard does not read.
 
-The Info tab's Assignments card shows, for each assignment, how many learners have saved work in it and when it last changed, from the same documents. An assignment with no recorded save shows n/a, since each platform records activity only from the release of its writer (REPORT-153's trigger, CLUE-693's recorder): work saved before then is not counted.
+The Info tab's Assignments card shows, for each assignment, how many learners have saved work in it and when it last changed, from the same documents. An assignment with no recorded save shows n/a, since each platform records activity only from the release of its writer (report-service's answer trigger, the CLUE app's activity recorder): work saved before then is not counted.
 
 While the page is open, a package whose result is done and whose run started before some
 learner's last save is re-run on its own, with the same request Run sends. Both times are the
