@@ -11,8 +11,8 @@ export interface ClassListeners {
   runner: (runner: Runner | null) => void;
   counts: (counts: Counts | null) => void;
   results: (results: Map<string, Result>) => void;
-  // Report-service's and CLUE's activity documents merged, once both have answered (activitySources).
-  activity: (docs: Map<string, Activity>) => void;
+  // Report-service's and CLUE's activity documents merged, and the sources they came from (activitySources).
+  activity: (docs: Map<string, Activity>, from: ActivitySource[]) => void;
   // Which listener failed, normally refused by the rules, so the page can say what it could not read.
   refused: (which: "profile" | "runner" | "counts" | "results" | ActivitySource) => void;
 }
@@ -22,11 +22,11 @@ export interface ClassListeners {
 export interface DashboardServices {
   portal: Portal;
   reportServer: ReportServer;
-  // A Firebase token and a sign-in for the scope's class in report-service's project, then the five
-  // listeners the page reads through, and a second token and sign-in in the portal's CLUE project for
-  // its activity. Resolves to a function that stops all six; a report-service listener that cannot start
-  // stops the ones already started before the promise rejects. CLUE's side never holds or stops the
-  // rest: its failure is a refused "clue-activity".
+  // A token, sign-in and five listeners for the scope's class in report-service's project, and beside
+  // them a token, sign-in and activity listener in the portal's CLUE project, which may start after the
+  // promise resolves. Resolves to a function that stops every listener started; a report-service
+  // failure stops CLUE's side too and rejects. A CLUE failure is a refused "clue-activity" and never
+  // stops or holds the other listeners.
   watchClass: (scope: Scope, on: ClassListeners) => Promise<() => void>;
   now: () => number;
 }
@@ -52,7 +52,7 @@ export function makeServices(config: PortalConfig, token: Token): DashboardServi
       };
       void (async () => {
         const token = await portal.firebaseToken(config.clue.firebaseApp, scope.class_hash);
-        // signIn reuses the project's app, so a stopped watch must not sign in over a newer one.
+        // A stopped watch starts no sign-in on the project's shared app; one already under way still completes.
         if (stopped) return;
         const db = await signIn(config.clue.projectId, token, emulators);
         if (stopped) return;

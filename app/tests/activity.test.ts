@@ -222,15 +222,17 @@ describe("mergeActivity", () => {
 describe("activitySources", () => {
   const ap = new Map([["a", { lastActivityAt: stamp(1) }]]), clue = new Map([["b", { lastActivityAt: stamp(2) }]]);
   const keys = (onValue: ReturnType<typeof vi.fn>) => [...(onValue.mock.lastCall![0] as Map<string, Activity>).keys()].sort();
+  const from = (onValue: ReturnType<typeof vi.fn>) => onValue.mock.lastCall![1];
 
-  it("hands on nothing until both sources have answered, then their merge", () => {
+  it("hands on each source as it lands, without waiting for the other, then their merge", () => {
     const onValue = vi.fn();
     const sources = activitySources(onValue);
-    sources.value("activity", ap);
-    expect(onValue).not.toHaveBeenCalled();
     sources.value("clue-activity", clue);
-    expect(onValue).toHaveBeenCalledTimes(1);
+    expect(keys(onValue)).toEqual(["b"]);
+    expect(from(onValue)).toEqual(["clue-activity"]);
+    sources.value("activity", ap);
     expect(keys(onValue)).toEqual(["a", "b"]);
+    expect(from(onValue)).toEqual(["activity", "clue-activity"]);
   });
 
   it("merges a later snapshot from either source with the other's latest", () => {
@@ -244,22 +246,26 @@ describe("activitySources", () => {
     expect(keys(onValue)).toEqual(["c"]);
   });
 
-  it("counts a refusal as an answer, handing on the other source alone, and nothing once both are refused", () => {
+  it("hands on nothing for a refusal while no source holds documents, and nothing more once both are refused", () => {
     const onValue = vi.fn();
     const sources = activitySources(onValue);
     sources.refused("clue-activity");
     expect(onValue).not.toHaveBeenCalled();
     sources.value("activity", ap);
     expect(keys(onValue)).toEqual(["a"]);
+    expect(from(onValue)).toEqual(["activity"]);
     sources.refused("activity");
     expect(onValue).toHaveBeenCalledTimes(1);
+  });
 
-    const after = vi.fn();
-    const answered = activitySources(after);
-    answered.value("activity", ap);
-    answered.value("clue-activity", clue);
-    answered.refused("clue-activity");
-    expect(after).toHaveBeenCalledTimes(2);
-    expect(keys(after)).toEqual(["a"]);
+  it("drops a source refused after it answered, handing on the other alone", () => {
+    const onValue = vi.fn();
+    const sources = activitySources(onValue);
+    sources.value("activity", ap);
+    sources.value("clue-activity", clue);
+    sources.refused("clue-activity");
+    expect(onValue).toHaveBeenCalledTimes(3);
+    expect(keys(onValue)).toEqual(["a"]);
+    expect(from(onValue)).toEqual(["activity"]);
   });
 });

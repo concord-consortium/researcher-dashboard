@@ -34,8 +34,11 @@ export function devPortal(env: Record<string, string | boolean | undefined>): Po
   if (env.DEV !== true) return null;
   const origin = env.VITE_DEV_PORTAL, reportServer = env.VITE_DEV_REPORT_SERVER;
   const firebaseProject = env.VITE_DEV_FIREBASE_PROJECT, clueProject = env.VITE_DEV_CLUE_FIREBASE_PROJECT;
-  if (typeof origin !== "string" || typeof reportServer !== "string" || typeof firebaseProject !== "string"
-    || typeof clueProject !== "string" || clueProject === firebaseProject) {
+  if (typeof origin !== "string" || typeof reportServer !== "string" || typeof firebaseProject !== "string") {
+    return null;
+  }
+  if (typeof clueProject !== "string" || clueProject === firebaseProject) {
+    console.warn("No dev portal: VITE_DEV_CLUE_FIREBASE_PROJECT must name a CLUE project other than VITE_DEV_FIREBASE_PROJECT.");
     return null;
   }
   const portal = httpOrigin(origin), server = httpOrigin(reportServer);

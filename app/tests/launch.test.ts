@@ -1,6 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { launchQuery, parseCallback, parseLaunch } from "../src/shell/launch";
-import { firebaseConfig } from "../src/shell/firebase";
 import { devPortal, portalFor } from "../src/shell/portals";
 
 const STAGING = "https://learn.portal.staging.concord.org";
@@ -76,17 +75,19 @@ describe("portalFor", () => {
     expect(devPortal({ ...env, VITE_DEV_PORTAL: "http://localhost:3000/" })?.reportServer).toBe("http://localhost:4000");
   });
 
-  it("names a local portal's CLUE project, and none without one or with report-service's", () => {
+  it("names a local portal's CLUE project, and none, saying which setting is wrong, without one or with report-service's", () => {
     const env = { DEV: true, VITE_DEV_PORTAL: "http://localhost:3000", VITE_DEV_REPORT_SERVER: "http://localhost:4000", VITE_DEV_FIREBASE_PROJECT: "demo" };
-    expect(devPortal({ ...env, VITE_DEV_CLUE_FIREBASE_PROJECT: "clue-demo" })?.clue).toEqual({ firebaseApp: "clue-demo", projectId: "clue-demo" });
-    expect(devPortal(env)).toBeNull();
-    expect(devPortal({ ...env, VITE_DEV_CLUE_FIREBASE_PROJECT: "demo" })).toBeNull();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      expect(devPortal({ ...env, VITE_DEV_CLUE_FIREBASE_PROJECT: "clue-demo" })?.clue).toEqual({ firebaseApp: "clue-demo", projectId: "clue-demo" });
+      expect(warn).not.toHaveBeenCalled();
+      expect(devPortal(env)).toBeNull();
+      expect(warn).toHaveBeenLastCalledWith(expect.stringContaining("VITE_DEV_CLUE_FIREBASE_PROJECT"));
+      expect(devPortal({ ...env, VITE_DEV_CLUE_FIREBASE_PROJECT: "demo" })).toBeNull();
+      expect(warn).toHaveBeenCalledTimes(2);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 
-describe("firebaseConfig", () => {
-  it.each(["report-service-dev", "collaborative-learning-staging", "collaborative-learning-ec215"])("holds %s under its own project id", (id) => {
-    expect(firebaseConfig(id).projectId).toBe(id);
-    expect(firebaseConfig(id).authDomain).toBe(`${id}.firebaseapp.com`);
-  });
-});

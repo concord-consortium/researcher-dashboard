@@ -51,16 +51,16 @@ export function mergeActivity(a: Map<string, Activity>, b: Map<string, Activity>
 
 // Report-service's activity listener, and CLUE's.
 export type ActivitySource = "activity" | "clue-activity";
+export const ACTIVITY_SOURCES: ActivitySource[] = ["activity", "clue-activity"];
 
-// Each source's latest documents, or null once it is refused. The page gets their merge only once both
-// have answered, so the first count never shows one platform's students alone, and nothing once both
-// are refused.
-export function activitySources(onValue: (docs: Map<string, Activity>) => void) {
+// Each source's latest documents, or null once it is refused. The page gets the merge of the sources
+// holding documents, and which they are, each time one lands, so a slow source never holds the other.
+export function activitySources(onValue: (docs: Map<string, Activity>, from: ActivitySource[]) => void) {
   const latest = new Map<ActivitySource, Map<string, Activity> | null>();
   const emit = () => {
-    const reportService = latest.get("activity"), clue = latest.get("clue-activity");
-    if (reportService === undefined || clue === undefined || (reportService === null && clue === null)) return;
-    onValue(mergeActivity(reportService ?? new Map(), clue ?? new Map()));
+    const from = ACTIVITY_SOURCES.filter((source) => latest.get(source));
+    if (from.length === 0) return;
+    onValue(mergeActivity(latest.get("activity") ?? new Map(), latest.get("clue-activity") ?? new Map()), from);
   };
   return {
     value(source: ActivitySource, docs: Map<string, Activity>) { latest.set(source, docs); emit(); },
