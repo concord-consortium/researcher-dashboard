@@ -46,11 +46,8 @@ export function packagePaths({ workRoot, dataRoot, classHash, docId }) {
   };
 }
 
-// Who fetches a package's CLUE data: the package, through cc-data.
-export const CLUE_SOURCE = "cc-data";
-
-// The file a package writes its filters from. Everything but clue_source, dataset and
-// output_dir comes from the scope block rigse sent, which /work returns: the runner holds
+// The file a package writes its filters from. Everything but dataset and output_dir
+// comes from the scope block rigse sent, which /work returns: the runner holds
 // no portal bearer and cannot build it any other way.
 export function scopeFile({ scope, dataset, outputDir }) {
   return {
@@ -58,7 +55,6 @@ export function scopeFile({ scope, dataset, outputDir }) {
     id: scope.id,
     classes: scope.classes.map(({ class_hash, class_id }) => ({ class_hash, class_id })),
     assignments: scope.assignments.map(({ offering_id, runnable_id, name, url }) => ({ offering_id, runnable_id, name, url })),
-    clue_source: CLUE_SOURCE,
     dataset,
     output_dir: outputDir
   };
