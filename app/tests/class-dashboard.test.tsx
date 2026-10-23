@@ -30,7 +30,7 @@ function services(over: {
   scope?: () => Promise<Scope>;
   user?: () => Promise<User | null>;
   refresh?: () => Promise<unknown>;
-  watch?: () => Promise<() => void>;
+  watch?: DashboardServices["watchClass"];
   list?: (urls: string[]) => Promise<PackageRow[]>;
   run?: (identity: string, version: string) => Promise<unknown>;
   resolve?: (identity: string, version: string) => Promise<Resolved>;
@@ -755,6 +755,29 @@ describe("the Assignments card's activity numbers", () => {
     expect(footnote()).toBe("n/a: No student saves have been recorded for that assignment. CLUE activity is still loading, so its assignments may also show n/a.");
     await s.activity(new Map<string, Activity>([["a", { lastActivityAt: stamp(NOW - 60_000), changed: { "9": stamp(NOW - 60_000) } }]]));
     expect(footnote()).toBe("n/a: No student saves have been recorded for that assignment.");
+  });
+
+  it("waits again when the only source shown is refused while the other can still answer", async () => {
+    const s = await shown();
+    await s.activity(new Map<string, Activity>([["a", { lastActivityAt: stamp(NOW - 60_000), changed: { "9": stamp(NOW - 60_000) } }]]), ["clue-activity"]);
+    expect(cells("Wildfire")).toEqual(["Wildfire · Activity Player", "1", capitalized(NOW - 60_000)]);
+    await s.refuseClueActivity();
+    expect(cells("Wildfire")).toEqual(["Wildfire · Activity Player", "…", "…"]);
+    expect(document.querySelector(".active-count")).toBeNull();
+  });
+
+  it("says unknown when the watch fails after a source has been shown", async () => {
+    await mounted(services({
+      scope: async () => TWO,
+      watch: async (_scope, listeners) => {
+        act(() => listeners.activity(new Map<string, Activity>([["a", { lastActivityAt: stamp(NOW - 60_000), changed: { "9": stamp(NOW - 60_000) } }]]), ["clue-activity"]));
+        throw new Error("auth/network-request-failed");
+      }
+    }));
+    infoTab();
+    await screen.findByText("Class activity could not be read.");
+    expect(cells("Wildfire")).toEqual(["Wildfire · Activity Player", "unknown", "unknown"]);
+    expect(document.querySelector(".active-count")).toBeNull();
   });
 
   it("says unknown when the sign-in fails", async () => {

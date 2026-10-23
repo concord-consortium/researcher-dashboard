@@ -88,13 +88,15 @@ export function ClassDashboard({ services, onExpired, portal = null, demo = fals
   // While the session or the results listener is refused, a row's state cannot be told, so none is shown.
   const results = useMemo(() => (runsProblem ? new Map<string, Result>() : received), [runsProblem, received]);
   const [countsProblem, setCountsProblem] = useState<string | null>(null);
-  // undefined until either source has answered; `activity` below is undefined again once both are refused.
+  // undefined until either source has answered.
   const [activityDocs, setActivityDocs] = useState<Map<string, Activity> | undefined>(undefined);
   const [activityFrom, setActivityFrom] = useState<ActivitySource[]>([]);
   const [refusedSources, setRefusedSources] = useState<ActivitySource[]>([]);
   // A watch that could not start: report-service's token, sign-in or a listener failed, which leaves neither source.
   const [watchProblem, setWatchProblem] = useState<string | null>(null);
-  const activity = refusedSources.length === 2 ? undefined : activityDocs;
+  // Shown only while the watch stands and a source the documents came from can still be read.
+  const readable = !watchProblem && activityFrom.some((s) => !refusedSources.includes(s));
+  const activity = readable ? activityDocs : undefined;
   const activityProblem = watchProblem
     ?? (refusedSources.length === 2 ? ACTIVITY_REFUSED : refusedSources.length === 1 ? sourceRefused(refusedSources[0]) : null);
   // Set when an automatic request finds the sign-in expired or not renewable. A Run that succeeds
