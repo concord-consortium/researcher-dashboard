@@ -64,7 +64,7 @@ export function ClassActivity({ activity, problem, stopped }: {
             <div><dt>Latest save</dt><dd>{latest === null ? "unknown" : <Time ms={latest} capitalized />}</dd></div>
           </dl>
         )}
-        <p>The student count in the header is how many students saved an answer in this class's Activity Player assignments {windowLabel(ACTIVE_WINDOW_MINUTES)}.</p>
+        <p>The student count in the header is how many students saved work in this class's Activity Player or CLUE assignments {windowLabel(ACTIVE_WINDOW_MINUTES)}.</p>
         <p>A student reading or thinking saves nothing, so it is not a count of who is logged in. It is the same for every researcher of this class.</p>
         {!stopped && <p>{RERUNS}</p>}
       </>}

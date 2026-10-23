@@ -67,11 +67,14 @@ Then name the local portal for the dev server. A production build never reads th
 VITE_DEV_PORTAL=http://localhost:3000 \
 VITE_DEV_REPORT_SERVER=http://localhost:4000 \
 VITE_DEV_FIREBASE_PROJECT=report-service-dev \
+VITE_DEV_CLUE_FIREBASE_PROJECT=collaborative-learning-staging \
 npm run dev
 ```
 
-The Firebase project needs an entry in `src/shell/firebase.ts`'s config map unless the
-emulator below is used.
+Each of the two Firebase projects, report-service's and CLUE's, needs an entry in
+`src/shell/firebase.ts`'s config map unless the emulator below is used, and a `firebase_apps`
+row of its name in the local portal. The two must differ: the app keeps one Firebase sign-in
+per project.
 
 ## Running against the Firestore emulator
 
@@ -95,20 +98,25 @@ emulator that is fine, because an emulator accepts any signature.
 
 | | |
 |---|---|
-| the portal | the signed-in researcher's name and username from `/auth/user` (or, for an account the portal made at a Google or Schoology sign-in, "Signed in with Google" or "Signed in with Schoology" in place of its generated login), the class's scope, a Firebase token for the class, a profile refresh when the profile is missing or stale, and a run request for one package when Run or Resume is pressed, or on its own for a finished package students have saved work since |
+| the portal | the signed-in researcher's name and username from `/auth/user` (or, for an account the portal made at a Google or Schoology sign-in, "Signed in with Google" or "Signed in with Schoology" in place of its generated login), the class's scope, a Firebase token for the class in each of the portal's report-service and CLUE projects, a profile refresh when the profile is missing or stale, and a run request for one package when Run or Resume is pressed, or on its own for a finished package students have saved work since |
 | report-server | the package list, each package marked as applying to the class or not, and a resolve of a package a result names that the list no longer returns |
 | the portal's report-service Firebase project | the class's authored URL profile document; the researcher's session (`runners/<platform user id>`); their scope document with its counts; their results for the class, one per package; and the class's learner activity (`activity/<class hash>/users`), one document per learner with the server time of their last save and of their last change in each assignment |
+| the portal's CLUE Firebase project | the class's learner activity in CLUE (`activity/<class hash>/users`), the same documents CLUE's app writes for CLUE work, merged with report-service's per learner |
 
 The app writes none of the Firebase documents. Every one is written by report-service's
-functions, the runner or the watchdog, and the app only listens.
+functions, the runner, the watchdog or, for CLUE's activity documents, the CLUE app, and the app
+only listens.
 
 ## Active students and automatic re-runs
 
 The header's active-student count is the number of learners whose last save falls within the window
-`ACTIVE_WINDOW_MINUTES` in `src/shell/activity.ts` sets, by the laptop's clock. It counts saved answers, so a student
-reading or thinking is not in it, and it is the same for every researcher of the class.
+`ACTIVE_WINDOW_MINUTES` in `src/shell/activity.ts` sets, by the laptop's clock. It counts saved
+work, in Activity Player or CLUE, so a student reading or thinking is not in it, and it is the same
+for every researcher of the class. A CLUE student is counted only when launched with CLUE's Firebase
+project matching the portal's: on staging, an offering launched without `firebaseEnv=staging`
+records its activity in production CLUE, which the staging dashboard does not read.
 
-The Info tab's Assignments card shows, for each assignment, how many learners have saved work in it and when it last changed, from the same documents. An assignment with no recorded save shows n/a, since activity is recorded only from the day its trigger was deployed: work saved before then is not counted. Only Activity Player saves are recorded until the CLUE listener is added.
+The Info tab's Assignments card shows, for each assignment, how many learners have saved work in it and when it last changed, from the same documents. An assignment with no recorded save shows n/a, since each platform records activity only from the release of its writer (report-service's answer trigger, the CLUE app's activity recorder): work saved before then is not counted.
 
 While the page is open, a package whose result is done and whose run started before some
 learner's last save is re-run on its own, with the same request Run sends. Both times are the

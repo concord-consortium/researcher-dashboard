@@ -147,7 +147,7 @@ The Info tab shows, for each of the class's assignments, how many students have 
 - A) Guard `assignmentActivity` against non-Timestamp values.
 - B) Test a `changed` without the assignment's key instead.
 
-**Decision**: B. A guard for a value the rules make impossible would be dead code.
+**Decision**: B. A guard for a value the rules make impossible would be dead code. RD-6 pass 2 adds CLUE's app as a second writer, in CLUE's project; its rule also requires every `changed` time to equal `request.time`, so the decision holds.
 
 ---
 

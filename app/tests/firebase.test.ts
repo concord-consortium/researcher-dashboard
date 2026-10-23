@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activityPath, classPath, emulatorsFromEnv, portalSegment, resultsPath, runnerPath, scopeDocPath } from "../src/shell/firebase";
+import { activityPath, classPath, emulatorsFromEnv, firebaseConfig, portalSegment, resultsPath, runnerPath, scopeDocPath } from "../src/shell/firebase";
 
 describe("portalSegment", () => {
   // The convention CLUE and report-service already use for portal-keyed collections.
@@ -57,5 +57,12 @@ describe("emulatorsFromEnv", () => {
   it("refuses to use one without the other", () => {
     expect(emulatorsFromEnv({ VITE_FIRESTORE_EMULATOR: "127.0.0.1:8080" })).toBeNull();
     expect(emulatorsFromEnv({ VITE_AUTH_EMULATOR: "127.0.0.1:9099" })).toBeNull();
+  });
+});
+
+describe("firebaseConfig", () => {
+  it.each(["report-service-dev", "collaborative-learning-staging", "collaborative-learning-ec215"])("keys the %s entry by its own project id and auth domain", (id) => {
+    expect(firebaseConfig(id).projectId).toBe(id);
+    expect(firebaseConfig(id).authDomain).toBe(`${id}.firebaseapp.com`);
   });
 });
