@@ -83,7 +83,7 @@ Researchers see the difference as behavior that used to break: a machine that sl
 
 ### What the package is handed
 
-- **R37.** **`scope.json`** is written into the package's input directory, readable and not writable by the package's uid, and named in `RD_SCOPE_FILE`. It holds `kind`, `id`, `classes` (a list), `assignments` with `{offering_id, runnable_id, name, url}`, all four from the `/work` scope block, `clue_source`, `dataset` and `output_dir`. `clue_source` is `"cc-data"`: packages read CLUE only through cc-data, and the key stays until REPORT-152 removes it from cc-data-cli's scope file, its docs and package tests, which all expect it today. Until then cc-data-cli's `package run` (`internal/packages/run.go` on `main`) and REPORT-147's test still write `"firebase"`; no package reads the value, so the two differ harmlessly. The smoke `image` command writes `"cc-data"`, as the runner does (R52).
+- **R37.** **`scope.json`** is written into the package's input directory, readable and not writable by the package's uid, and named in `RD_SCOPE_FILE`. It holds `kind`, `id`, `classes` (a list), `assignments` with `{offering_id, runnable_id, name, url}`, all four from the `/work` scope block, `dataset` and `output_dir`. The smoke `image` command writes it with the runner's own `scopeFile` (R52).
 - **R38.** `RD_CLASS_HASH` and `RD_PORTAL_CLASS_ID` are deleted from the package's environment. The rest stays: `HOME`, `PATH`, the proxy variables, `CC_DATA_ROOT`, `CC_DATA_LOCAL`, `CC_DATA_PORTAL`, `RD_DATASET`, `RD_DATA_DIR`, `RD_OUTPUT_DIR`, `RD_REPORT_SERVER_URL`, `RD_BUCKET` and `RD_STORAGE_PREFIX`, with `RD_SCOPE_FILE` added.
 - **R39.** **The dataset** is `pkg-<catalog id>`, from the catalog id `/work` handed out. `RD_DATASET` is the full ref `<portal host>/pkg-<catalog id>`, and `scope.json`'s `dataset` is the bare name `pkg-<catalog id>`, which is what `cc-data package run` writes and REPORT-147's tests encode (Q13). It is keyed to the package, so a new version reuses the last version's pulls (`final-design.md` 5.3).
 
@@ -167,7 +167,7 @@ Researchers see the difference as behavior that used to break: a machine that sl
 - The applies route, the matcher, `fixtures/url-patterns.json` and `fixtures/package-contract.json` themselves (REPORT-167).
 - `cc-data package init | run | build | publish`, the `run_answers` view and cutting the `v0.3.0-pre.1` tag (REPORT-146); `wildfire-responses` (REPORT-147).
 - A `NO_PROXY` in the package's environment: the egress proxy is the package's only way out (`netns.js`), so there is nothing to exempt. REPORT-146 R11, as closed, says the runner sets only the `HTTP(S)_PROXY` spellings.
-- Reading CLUE in a package, which is cc-data's (REPORT-108 to REPORT-111); `scope.json`'s `clue_source`, which REPORT-152 removes with cc-data-cli's; report-server's `clue_prepull` (REPORT-109); rigse's CLUE mint and its setting (RIGSE-369).
+- Reading CLUE in a package, which is cc-data's (REPORT-108 to REPORT-111); report-server's `clue_prepull` (REPORT-109); rigse's CLUE mint and its setting (RIGSE-369).
 - Running the release and the staging checks: the operator, from the PR branch before the merge (R58).
 
 ## Rollout
@@ -231,7 +231,6 @@ Staging checks named by the rollout that were not run; each is covered by the ru
 - **The cc-data pin waits for its tag** (R60): the release runs from the branch and needs the tag, so `main` never names a ref that cannot be built (Doug's rule that infrastructure rolls out before merge).
 - **While a run is outstanding, every runner-document write names it in `current_package`** (R8; Doug, 2026-10-14), so a lost claim-time write is repaired by the next hook write and REPORT-143's moved-on case cannot fail a run suspended mid-run.
 - **The runner keeps no portal row** (R56): with the CLUE lookup gone, nothing read it.
-- **`clue_source` is `"cc-data"`** (R37), though cc-data-cli and REPORT-147's test still write `"firebase"` until REPORT-152; no package reads it.
 
 ### Implementation
 

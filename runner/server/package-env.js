@@ -47,8 +47,8 @@ export function packagePaths({ workRoot, dataRoot, classHash, docId }) {
 }
 
 // The file a package writes its filters from. Everything but dataset and output_dir
-// comes from the scope block rigse sent, which /work returns: the runner holds
-// no portal bearer and cannot build it any other way.
+// comes from the scope block rigse sent, which /work returns: the runner holds no portal
+// bearer and cannot build it any other way.
 export function scopeFile({ scope, dataset, outputDir }) {
   return {
     kind: scope.kind,
