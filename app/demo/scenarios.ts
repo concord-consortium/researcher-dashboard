@@ -3,7 +3,7 @@ import { packageKey } from "../src/shell/packages";
 import type { PackageRow, Scope } from "../src/shell/portal";
 import type { Finished, Result } from "../src/shell/runs";
 import type { InfoReason } from "../src/shell/start";
-import { EXPLANATION_KEYWORDS, MODEL_USE, WILDFIRE_RESPONSES } from "./markdown";
+import { CLUE_DATAFLOW, EXPLANATION_KEYWORDS, MODEL_USE, WILDFIRE_RESPONSES } from "./markdown";
 import { stamp, type WorldState } from "./world";
 
 const MIN = 60_000;
@@ -20,12 +20,12 @@ const SCOPE: Scope = {
 };
 
 let catalog = 0;
-function pkg(identity: string, title: string, over: Partial<PackageRow> = {}, description: string | null = null): PackageRow {
+function pkg(identity: string, title: string, over: Partial<PackageRow> = {}, description: string | null = null, version = "1.2.0"): PackageRow {
   catalog += 1;
   return {
     catalog_id: catalog, identity, name: identity.split("/").pop()!, visibility: "public", official: false, mine: false,
     project: null, applies: true, runnable: true,
-    current_version: { version: "1.2.0", title, description }, ...over
+    current_version: { version, title, description }, ...over
   };
 }
 
@@ -48,10 +48,32 @@ const OUTPUTS = new Map([
   ["users/402/time-on-task", { summary: "Median 14 minutes per page across 9 pages.", display: "# Time on task\n\nMedian 14 minutes per page across 9 pages.\n\n| Page | Median minutes |\n|---|---:|\n| Activity 2, page 3 | 18 |\n| Activity 2, page 4 | 15 |\n| Activity 3, page 2 | 12 |\n" }]
 ].map(([identity, output]) => [packageKey(identity as string), output as { summary: string; display: string }]));
 
-const row = (identity: string) => ROWS.find((r) => r.identity === identity)!;
+// A CLUE class, apart from the Wildfire one: the CLUE package applies only to CLUE assignments, and
+// the Wildfire packages never to them.
+const CLUE_SCOPE: Scope = {
+  kind: "class", id: 591, name: "Dataflow, period 4", class_hash: "demo591", platform_user_id: 200,
+  teachers: [{ id: 4, name: "Jordan Teacher" }],
+  cohorts: [{ id: 5, name: "Spring 2026 pilot" }],
+  project_ids: [22], assignment_fingerprint: "v1:demo-clue",
+  assignments: [
+    { offering_id: 1301, runnable_id: 912, name: "Brain-Inspired Robotics: Dataflow", url: "https://collaborative-learning.concord.org/?unit=brain", tool: "CLUE" }
+  ]
+};
+
+// As REPORT-189's manifest (studies/clue-dataflow-systematicity in cc-data-studies) names it. The
+// class card names a project only from a catalog row's `project`, so the row carries the class's.
+const CLUE_ROW = pkg("official/clue-dataflow-systematicity", "CLUE Dataflow: trial and error vs. systematicity",
+  { official: true, project: { id: 22, name: "CLUE Demo Project" } },
+  "For one CLUE class, the Dataflow study's detection of trial-and-error and systematic editing: each stage's summary, every episode, and sampled episodes described cycle by cycle with links that open CLUE at them.",
+  "1.0.0");
+
+// The summary is the page's first totals line, which is what the package writes to summary.txt.
+const CLUE_OUTPUTS = new Map([[packageKey(CLUE_ROW.identity), { summary: "episodes: 23 (6 systematic, 17 trial-and-error)", display: CLUE_DATAFLOW }]]);
+
+const row = (identity: string) => [...ROWS, CLUE_ROW].find((r) => r.identity === identity)!;
 
 function finished(identity: string, startedAgoMin: number, now: number, display?: string): Finished {
-  const output = OUTPUTS.get(packageKey(identity))!;
+  const output = (OUTPUTS.get(packageKey(identity)) ?? CLUE_OUTPUTS.get(packageKey(identity)))!;
   return {
     package: { identity, version: row(identity).current_version.version, checksum: "sha256:demo" },
     image_version: "0.2.4", summary: output.summary, display: display ?? output.display,
@@ -82,6 +104,23 @@ function base(now: number): WorldState {
     activity: activity(now, [45, 50, 70]),
     outputs: OUTPUTS,
     failing: new Map()
+  };
+}
+
+function clue(now: number): WorldState {
+  return {
+    ...base(now),
+    scope: CLUE_SCOPE,
+    profile: {
+      assignment_urls: CLUE_SCOPE.assignments.map((a) => a.url), interactive_urls: [],
+      assignment_fingerprint: CLUE_SCOPE.assignment_fingerprint, derived_at: stamp(now - 10 * MIN)
+    },
+    rows: [CLUE_ROW],
+    outputs: CLUE_OUTPUTS,
+    counts: { data: { answers: 0, logs: 262802, last_pull_at: stamp(now - 41 * MIN), log_freshness_at: stamp(now - 6 * 60 * MIN) } },
+    // Every save predates the run, or the page would find the result behind and re-run it on open.
+    activity: activity(now, [45, 90]),
+    results: new Map([done(CLUE_ROW.identity, 40, now)])
   };
 }
 
@@ -192,6 +231,12 @@ export const SCENARIOS: Scenario[] = [
         activity: activity(now, [0.5, 12])
       };
     }
+  },
+  {
+    key: "clue",
+    label: "A CLUE class",
+    about: "A CLUE class with one CLUE assignment. Its one analysis, **CLUE Dataflow: trial and error vs. systematicity**, has finished: its result is the page the package wrote for a real class, with every student, document and other id replaced and no names or free text. Its replay links are redacted, so clicking one opens nothing. Press Run to watch it run again.",
+    world: clue
   },
   { key: "info", label: "Info page (no launch)", about: "What a visit with no launch parameters shows.", info: "no-launch" },
   {

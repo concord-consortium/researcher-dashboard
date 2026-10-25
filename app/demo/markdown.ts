@@ -1,5 +1,6 @@
-// Result markdown shaped like what the packages write: wildfire-responses' open-response tables,
-// activity-model-use's longer multi-section report, and the smaller packages' results.
+// Result markdown for the demo's packages: wildfire-responses' open-response tables, activity-model-use's
+// longer multi-section report and the smaller packages' results, shaped like what those packages write,
+// and the CLUE Dataflow package's own page for a real class, redacted.
 
 export const WILDFIRE_RESPONSES = `# Wildfire open responses
 
@@ -15,9 +16,12 @@ Questions with an open response, by assignment, in question-id order rather than
 | Explain what the wind did to the fire. | 3 |
 `;
 
-// wildfire-simulation-use's report in the layout and wording of a real run, with every number made
-// up, so nothing from a real class is in this repo.
+// wildfire-simulation-use's report in the layout and wording of a real run, with every number made up.
 export { default as MODEL_USE } from "./model-use.md?raw";
+
+// The CLUE Dataflow package's page for a real class, redacted: every id is a placeholder, and every
+// replay link points at REDACTED_HOST (redacted-links.ts).
+export { default as CLUE_DATAFLOW } from "./clue-dataflow.md?raw";
 
 export const EXPLANATION_KEYWORDS = `# Explanation keywords
 

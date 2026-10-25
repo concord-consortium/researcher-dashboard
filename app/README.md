@@ -35,10 +35,14 @@ again, unless the refused token is under a minute old, which renders the info pa
 `demo/index.html`, served by the dev server at `/demo/`, mounts the real `App` and its pages
 over canned services (`demo/world.ts`), for working on the page's look with hot reload. It signs
 in nowhere and reaches no portal, report-server or Firebase. A panel picks the scenario (several
-packages, a package running, a failed run, a long result, no active students, the info pages and
-more, from `demo/scenarios.ts`), and the scenario is kept in the URL's `scenario` parameter (`/demo/?scenario=failed`). Run presses
+packages, a package running, a failed run, a long result, no active students, a CLUE class, the info
+pages and more, from `demo/scenarios.ts`), and the scenario is kept in the URL's `scenario` parameter (`/demo/?scenario=failed`). Run presses
 and a "Student saves" button drive a simulated runner through the queued, running and finished
 writes the real one makes, at a step time the panel sets.
+
+The CLUE class's result is the CLUE Dataflow package's page for a real class, with every id replaced
+by a placeholder. Its replay links point at `redacted.demo.link.invalid`, a host that never resolves,
+and the demo page answers a click on one with an alert rather than opening it (`demo/redacted-links.ts`).
 
 The build ships it beside the dashboard, at `demo/` under every deployment, and the info page a
 visit with no launch shows links to it. It is marked as sample data in its header throughout,
