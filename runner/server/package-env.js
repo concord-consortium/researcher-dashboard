@@ -216,8 +216,7 @@ function readOwnFile(outputDir, name, limit) {
 
 // `display.md` goes into one Firestore field, so it is capped; larger is refused, never
 // truncated. A result keeps the previous run's display and summary beside its own, and two
-// of each at these sizes fit Firestore's 1 MiB document. summary.txt and counts.json are
-// read only up to OUTPUT_READ_LIMIT_BYTES.
+// of each at these sizes fit Firestore's 1 MiB document.
 export const DISPLAY_LIMIT_BYTES = 440 * 1024;
 export const OUTPUT_READ_LIMIT_BYTES = 64 * 1024;
 

@@ -30,7 +30,6 @@ A result document holds the display and the summary twice, the current run's and
 ## Technical Notes
 
 - Neither the runner nor `package run` refuses a large `summary.txt` or `counts.json`: each reads the file only to its limit plus one byte, keeps the summary's first line, and gets no counts from a `counts.json` cut mid-JSON.
-- The cc-data-cli half is cut from REPORT-152's branch `REPORT-152-recent-logs`; REPORT-115 stacks on it.
 - The runner's raise should reach an environment no later than a cc-data-cli release carrying it, since a local limit looser than the runner's passes a page the VM then refuses (final-design.md section 10).
 - The raise reaches a VM only with the runner's next versioned QA release. That version commit is made at release time, covering every runner change queued for the image, not in this branch.
 - `OUTPUT_READ_LIMIT_BYTES` and `OutputReadLimitBytes` are a second value that must agree across the two repos, so final-design.md section 17 names both values.
@@ -50,7 +49,7 @@ A result document holds the display and the summary twice, the current run's and
 **Decision**: Raise the constant and keep the display in the result document; nothing else (Doug, 2026-10-24). A shared fixture, an emulator test and a version bump were all dropped.
 
 ### Summary and counts keep 64 KiB under their own constant
-**Decision**: So they do not grow with the display and the 1 MiB budget holds (Doug, 2026-10-24). The new tests use literal 65,537 and 70,000-byte inputs, so a read left on the display limit fails them.
+**Decision**: So they do not grow with the display and the 1 MiB budget holds (Doug, 2026-10-24). The new test asserts a literal 65,537-byte summary from a 450,560-byte `summary.txt` and feeds a `counts.json` of about 70 KB, so a read left on the display limit fails it.
 
 ### Invalid UTF-8 in display.md
 **Options considered**: A) out of scope, no code; B) refuse non-UTF-8 in both repos; C) check the decoded length in the runner only.
