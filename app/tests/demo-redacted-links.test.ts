@@ -56,6 +56,7 @@ describe("the demo's redacted links", () => {
     remove!();
     remove = null;
     expect(dispatch(link("https://redacted.demo.link.invalid/x"), "click")).toBe(true);
+    expect(dispatch(link("https://redacted.demo.link.invalid/y"), "auxclick", 1)).toBe(true);
     expect(say).toHaveBeenCalledTimes(0);
   });
 });
