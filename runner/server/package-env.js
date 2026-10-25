@@ -214,11 +214,18 @@ function readOwnFile(outputDir, name, limit) {
   }
 }
 
+// `display.md` goes into one Firestore field, so it is capped; larger is refused, never
+// truncated. A result keeps the previous run's display and summary beside its own, and two
+// of each at these sizes fit Firestore's 1 MiB document. summary.txt and counts.json are
+// read only up to OUTPUT_READ_LIMIT_BYTES.
+export const DISPLAY_LIMIT_BYTES = 440 * 1024;
+export const OUTPUT_READ_LIMIT_BYTES = 64 * 1024;
+
 // What the package counted, because it makes the pulls and the runner writes Firestore.
 // Only the counts the scope document holds are read. Absent or unreadable is not a failure.
 export function readPackageCounts(outputDir) {
   try {
-    const parsed = JSON.parse(readOwnFile(outputDir, "counts.json", DISPLAY_LIMIT_BYTES)?.text ?? "");
+    const parsed = JSON.parse(readOwnFile(outputDir, "counts.json", OUTPUT_READ_LIMIT_BYTES)?.text ?? "");
     const counts = {};
     for (const key of ["answers", "logs", "log_freshness_at"]) {
       if (parsed[key] !== undefined) counts[key] = parsed[key];
@@ -229,10 +236,6 @@ export function readPackageCounts(outputDir) {
   }
 }
 
-// `display.md` goes into one Firestore field, so it is capped; larger is refused, never
-// truncated.
-export const DISPLAY_LIMIT_BYTES = 64 * 1024;
-
 // What the package wrote: display.md, required and refused rather than truncated when it
 // is too large, and summary.txt's first line, optional. The output directory dies with
 // the VM, so nothing of a refused display survives anywhere.
@@ -242,7 +245,7 @@ export function readPackageResult(outputDir) {
   if (display.size > DISPLAY_LIMIT_BYTES) {
     throw new Error(`the package's display.md is ${display.size} bytes, over the ${DISPLAY_LIMIT_BYTES}-byte limit`);
   }
-  const summaryFile = readOwnFile(outputDir, "summary.txt", DISPLAY_LIMIT_BYTES);
+  const summaryFile = readOwnFile(outputDir, "summary.txt", OUTPUT_READ_LIMIT_BYTES);
   const summary = summaryFile?.text.split(/\r?\n/)[0].trim() || null;
   return { display: display.text, summary };
 }
