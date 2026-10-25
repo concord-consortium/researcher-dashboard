@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import { App } from "../src/App";
 import { DEMO_LABEL } from "../src/components/Brand";
 import type { Start } from "../src/shell/start";
+import { catchRedactedLinks } from "./redacted-links";
 import { SCENARIOS, type Scenario } from "./scenarios";
 import { World } from "./world";
 import "../src/styles.css";
@@ -172,6 +173,8 @@ const check: CSSProperties = { display: "block", fontWeight: 700 };
 const knobs: CSSProperties = { display: "flex", alignItems: "flex-start", gap: 12 };
 const about: CSSProperties = { margin: "6px 0", color: "var(--muted)", lineHeight: 1.35 };
 const buttons: CSSProperties = { display: "flex", justifyContent: "flex-end", gap: 6, margin: "10px 0 2px" };
+
+catchRedactedLinks(document, (message) => window.alert(message));
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
