@@ -11,7 +11,7 @@ replay links: 23 of 23 episodes
 ### Log events (build_log_events.py)
 
 ```
-log events: 262802 rows, 3947 documents, 863 users
+log events: 266 rows, 5 documents, 2 users
 ```
 
 ### Population (build_population.py)

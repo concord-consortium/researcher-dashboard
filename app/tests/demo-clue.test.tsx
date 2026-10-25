@@ -19,6 +19,7 @@ const CLUE = "official/clue-dataflow-systematicity", KEY = packageKey(CLUE);
 // The package manifest's title and description, which the row carries verbatim.
 const TITLE = "CLUE Dataflow: trial and error vs. systematicity";
 const DESCRIPTION = "For one CLUE class, the Dataflow study's detection of trial-and-error and systematic editing: each stage's summary, every episode, and sampled episodes described cycle by cycle with links that open CLUE at them.";
+const LOGS = Number(/^log events: (\d+) rows/m.exec(CLUE_DATAFLOW)![1]);
 const links = [...CLUE_DATAFLOW.matchAll(/\]\((https?:[^)\s]+)\)/g)].map((m) => new URL(m[1]));
 const clue = () => SCENARIOS.find((s) => s.key === "clue")!.world!(Date.now());
 
@@ -51,8 +52,8 @@ describe("the demo's CLUE class", () => {
   });
 
   it("counts the page's log events", () => {
-    const logs = Number(/^log events: (\d+) rows/m.exec(CLUE_DATAFLOW)![1]);
-    expect(clue().counts?.data?.logs).toBe(logs);
+    expect(LOGS).toBeGreaterThan(0);
+    expect(clue().counts?.data?.logs).toBe(LOGS);
   });
 
   it("opens finished, with the page's first totals line as its summary", () => {
@@ -82,7 +83,7 @@ describe("the demo's CLUE class", () => {
     const result = results.get(KEY)!;
     expect([result.status, result.display, result.summary]).toEqual(["done", CLUE_DATAFLOW, "episodes: 23 (6 systematic, 17 trial-and-error)"]);
     expect(result.started_at).not.toBe(clue().results.get(KEY)!.started_at);
-    expect([counts!.data?.answers, counts!.data?.logs]).toEqual([0, 262802]);
+    expect([counts!.data?.answers, counts!.data?.logs]).toEqual([0, LOGS]);
   });
 
   it("sits before the info pages, in a class of its own", () => {

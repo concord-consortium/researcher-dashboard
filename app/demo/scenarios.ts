@@ -115,7 +115,7 @@ function clue(now: number): WorldState {
     outputs: CLUE_OUTPUTS,
     // Its page is fixed, so a re-run pulls nothing new and the card keeps agreeing with it.
     pulled: { answers: 0, logs: 0 },
-    counts: { data: { answers: 0, logs: 262802, last_pull_at: stamp(now - 40 * MIN), log_freshness_at: stamp(now - 6 * 60 * MIN) } },
+    counts: { data: { answers: 0, logs: 266, last_pull_at: stamp(now - 40 * MIN), log_freshness_at: stamp(now - 6 * 60 * MIN) } },
     // Every save predates the run, or the page would find the result behind and re-run it on open.
     activity: activity(now, [45, 90]),
     results: new Map([done(CLUE_ROW.identity, 40, now)])
