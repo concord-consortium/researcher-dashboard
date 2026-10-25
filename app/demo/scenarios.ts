@@ -60,7 +60,7 @@ const CLUE_SCOPE: Scope = {
   ]
 };
 
-// As REPORT-189's manifest (studies/clue-dataflow-systematicity in cc-data-studies) names it. The
+// As the package's manifest (studies/clue-dataflow-systematicity in cc-data-studies) names it. The
 // class card names a project only from a catalog row's `project`, so the row carries the class's.
 const CLUE_ROW = pkg("official/clue-dataflow-systematicity", "CLUE Dataflow: trial and error vs. systematicity",
   { official: true, project: { id: 22, name: "CLUE Demo Project" } },

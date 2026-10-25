@@ -16,7 +16,9 @@ afterEach(() => {
 
 const STEP = 100;
 const CLUE = "official/clue-dataflow-systematicity", KEY = packageKey(CLUE);
+// As the package's manifest.json gives them.
 const TITLE = "CLUE Dataflow: trial and error vs. systematicity";
+const DESCRIPTION = "For one CLUE class, the Dataflow study's detection of trial-and-error and systematic editing: each stage's summary, every episode, and sampled episodes described cycle by cycle with links that open CLUE at them.";
 const links = [...CLUE_DATAFLOW.matchAll(/\]\((https?:[^)\s]+)\)/g)].map((m) => new URL(m[1]));
 const clue = () => SCENARIOS.find((s) => s.key === "clue")!.world!(Date.now());
 
@@ -36,8 +38,8 @@ describe("the demo's CLUE class", () => {
 
   it("lists the CLUE Dataflow analysis alone", () => {
     const state = clue();
-    expect(state.rows.map((r) => [r.identity, r.official, r.visibility, r.applies, r.runnable, r.current_version.version, r.current_version.title, r.project]))
-      .toEqual([[CLUE, true, "public", true, true, "1.0.0", TITLE, { id: 22, name: "CLUE Demo Project" }]]);
+    expect(state.rows.map((r) => [r.identity, r.official, r.visibility, r.applies, r.runnable, r.current_version.version, r.current_version.title, r.current_version.description, r.project]))
+      .toEqual([[CLUE, true, "public", true, true, "1.0.0", TITLE, DESCRIPTION, { id: 22, name: "CLUE Demo Project" }]]);
     expect(state.scope.project_ids).toEqual([22]);
     expect(CLUE_DATAFLOW.split("\n")[0]).toBe(`# ${TITLE}`);
   });

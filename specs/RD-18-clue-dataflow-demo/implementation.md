@@ -132,7 +132,7 @@ const CLUE_SCOPE: Scope = {
   ]
 };
 
-// As REPORT-189's manifest (studies/clue-dataflow-systematicity in cc-data-studies) names it. The
+// As the package's manifest (studies/clue-dataflow-systematicity in cc-data-studies) names it. The
 // class card names a project only from a catalog row's `project`, so the row carries the class's.
 const CLUE_ROW = pkg("official/clue-dataflow-systematicity", "CLUE Dataflow: trial and error vs. systematicity",
   { official: true, project: { id: 22, name: "CLUE Demo Project" } },
@@ -202,7 +202,7 @@ const links = [...CLUE_DATAFLOW.matchAll(/\]\((https?:[^)\s]+)\)/g)].map((m) => 
 
 - **Every replay link points at the redacted host (R4)**: `links` has length 46 (two per episode, 23 episodes), none has a hostname other than `REDACTED_HOST` (imported from `redacted-links.ts`), and the text holds no `collaborative-learning.concord.org`. Fails on the preview unrewritten, or on a host typo in either file.
 - **The renderer keeps every redacted link (R3, R6's premise)**: `render(<ResultMarkdown markdown={CLUE_DATAFLOW} />)` gives 46 anchors, all on `REDACTED_HOST`. Fails if the host were one `keepUrl` drops.
-- **The CLUE class lists the CLUE Dataflow analysis alone (R2)**: the `clue` world's rows mapped to `[identity, official, visibility, applies, runnable, version, title, project]` equal one tuple, `[CLUE, true, "public", true, true, "1.0.0", "CLUE Dataflow: trial and error vs. systematicity", { id: 22, name: "CLUE Demo Project" }]`, the scope's `project_ids` are `[22]`, and the page's first line is `# ` plus that title.
+- **The CLUE class lists the CLUE Dataflow analysis alone (R2)**: the `clue` world's rows mapped to `[identity, official, visibility, applies, runnable, version, title, description, project]` equal one tuple, with the manifest's version, title and description and `{ id: 22, name: "CLUE Demo Project" }`, the scope's `project_ids` are `[22]`, and the page's first line is `# ` plus that title.
 - **It opens settled (R1, R3)**: the `clue` world has learner activity (size above zero), and `isBehind(result, newestActivity(activity))` is false for its `done` result. Fails if a save is moved after the run's start (with `[35, 90]` it fails), which would make the page re-run the analysis on open.
 - **Its logs count is the page's (R1)**: `counts.data.logs` equals the number in the page's `log events: <n> rows` line. Fails if either drifts.
 - **It opens finished, with the page's first totals line as its summary (R3)**: the result for `KEY` is `done`, its display is `CLUE_DATAFLOW`, and its summary equals `CLUE_DATAFLOW.split("```\n")[1].split("\n")[0]`. Fails if the summary drifts from the page.
