@@ -16,7 +16,7 @@ afterEach(() => {
 
 const STEP = 100;
 const CLUE = "official/clue-dataflow-systematicity", KEY = packageKey(CLUE);
-// As the package's manifest.json gives them.
+// The package manifest's title and description, which the row carries verbatim.
 const TITLE = "CLUE Dataflow: trial and error vs. systematicity";
 const DESCRIPTION = "For one CLUE class, the Dataflow study's detection of trial-and-error and systematic editing: each stage's summary, every episode, and sampled episodes described cycle by cycle with links that open CLUE at them.";
 const links = [...CLUE_DATAFLOW.matchAll(/\]\((https?:[^)\s]+)\)/g)].map((m) => new URL(m[1]));

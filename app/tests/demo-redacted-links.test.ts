@@ -39,6 +39,7 @@ describe("the demo's redacted links", () => {
     const say = install();
     const a = link("https://redacted.demo.link.invalid/x");
     expect(dispatch(a, "auxclick", 2)).toBe(true);
+    expect(dispatch(a, "click", 2)).toBe(true);
     expect(say).toHaveBeenCalledTimes(0);
     expect(dispatch(a, "auxclick", 1)).toBe(false);
     expect(say).toHaveBeenCalledTimes(1);

@@ -6,10 +6,11 @@ export const REDACTED_MESSAGE =
   "The demo's replay links are redacted. On a real class, each opens the student's document in CLUE at that point in its history.";
 
 // The renderer keeps a result's https links and opens them in a new tab, so the demo page stops a
-// click on a redacted one before the browser follows it. A middle-click arrives as an auxclick.
+// click on a redacted one before the browser follows it. A middle-click arrives as an auxclick, as
+// does a right-click, which is left to open the context menu.
 export function catchRedactedLinks(target: Document, say: (message: string) => void): () => void {
   const handle = (event: MouseEvent) => {
-    if (event.type === "auxclick" && event.button !== 1) return;
+    if (event.button !== (event.type === "click" ? 0 : 1)) return;
     const link = event.target instanceof Element ? event.target.closest("a[href]") : null;
     if (!(link instanceof HTMLAnchorElement) || link.hostname !== REDACTED_HOST) return;
     event.preventDefault();

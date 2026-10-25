@@ -90,12 +90,12 @@ function activity(now: number, minutesAgo: number[]): Map<string, Activity> {
   return new Map(minutesAgo.map((m, i) => [`learner-${i + 1}`, { lastActivityAt: stamp(now - m * MIN) }]));
 }
 
-function base(now: number): WorldState {
+function base(now: number, scope = SCOPE): WorldState {
   return {
-    scope: SCOPE,
+    scope,
     profile: {
-      assignment_urls: SCOPE.assignments.map((a) => a.url), interactive_urls: [],
-      assignment_fingerprint: SCOPE.assignment_fingerprint, derived_at: stamp(now - 10 * MIN)
+      assignment_urls: scope.assignments.map((a) => a.url), interactive_urls: [],
+      assignment_fingerprint: scope.assignment_fingerprint, derived_at: stamp(now - 10 * MIN)
     },
     rows: ROWS,
     results: new Map(),
@@ -110,17 +110,12 @@ function base(now: number): WorldState {
 
 function clue(now: number): WorldState {
   return {
-    ...base(now),
-    scope: CLUE_SCOPE,
-    profile: {
-      assignment_urls: CLUE_SCOPE.assignments.map((a) => a.url), interactive_urls: [],
-      assignment_fingerprint: CLUE_SCOPE.assignment_fingerprint, derived_at: stamp(now - 10 * MIN)
-    },
+    ...base(now, CLUE_SCOPE),
     rows: [CLUE_ROW],
     outputs: CLUE_OUTPUTS,
     // Its page is fixed, so a re-run pulls nothing new and the card keeps agreeing with it.
     pulled: { answers: 0, logs: 0 },
-    counts: { data: { answers: 0, logs: 262802, last_pull_at: stamp(now - 41 * MIN), log_freshness_at: stamp(now - 6 * 60 * MIN) } },
+    counts: { data: { answers: 0, logs: 262802, last_pull_at: stamp(now - 40 * MIN), log_freshness_at: stamp(now - 6 * 60 * MIN) } },
     // Every save predates the run, or the page would find the result behind and re-run it on open.
     activity: activity(now, [45, 90]),
     results: new Map([done(CLUE_ROW.identity, 40, now)])
