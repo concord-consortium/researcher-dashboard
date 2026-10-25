@@ -28,6 +28,8 @@ export interface WorldState {
   outputs: Map<string, { summary: string; display: string }>;
   // Package keys whose next run fails, with the error each writes.
   failing: Map<string, string>;
+  // What each finished run's pull adds to the counts.
+  pulled: { answers: number; logs: number };
   // The status the portal refuses the class's scope with, which turns the page into an info page.
   scopeRefused?: number;
 }
@@ -220,7 +222,7 @@ export class World {
       this.setResult(key, { ...queued, ...finished, ...output, status: "done", previous: null, image_version: "0.2.4",
         microvm_id: vm, updated_at: stamp(Date.now()) });
       const data = this.state.counts?.data ?? {};
-      this.state.counts = { data: { ...data, answers: (data.answers ?? 0) + 3, logs: (data.logs ?? 0) + 40, last_pull_at: stamp(startedAt) } };
+      this.state.counts = { data: { ...data, answers: (data.answers ?? 0) + this.state.pulled.answers, logs: (data.logs ?? 0) + this.state.pulled.logs, last_pull_at: stamp(startedAt) } };
       this.on?.counts(this.state.counts);
     }
     const after = this.state.runner!;

@@ -103,7 +103,8 @@ function base(now: number): WorldState {
     counts: { data: { answers: 117, logs: 18195, last_pull_at: stamp(now - 40 * MIN), log_freshness_at: stamp(now - 6 * 60 * MIN) } },
     activity: activity(now, [45, 50, 70]),
     outputs: OUTPUTS,
-    failing: new Map()
+    failing: new Map(),
+    pulled: { answers: 3, logs: 40 }
   };
 }
 
@@ -117,6 +118,8 @@ function clue(now: number): WorldState {
     },
     rows: [CLUE_ROW],
     outputs: CLUE_OUTPUTS,
+    // Its page is fixed, so a re-run pulls nothing new and the card keeps agreeing with it.
+    pulled: { answers: 0, logs: 0 },
     counts: { data: { answers: 0, logs: 262802, last_pull_at: stamp(now - 41 * MIN), log_freshness_at: stamp(now - 6 * 60 * MIN) } },
     // Every save predates the run, or the page would find the result behind and re-run it on open.
     activity: activity(now, [45, 90]),
@@ -235,7 +238,7 @@ export const SCENARIOS: Scenario[] = [
   {
     key: "clue",
     label: "A CLUE class",
-    about: "A CLUE class with one CLUE assignment. Its one analysis, **CLUE Dataflow: trial and error vs. systematicity**, has finished: its result is the page the package wrote for a real class, with every student, document and other id replaced and no names or free text. Its replay links are redacted, so clicking one opens nothing. Press Run to watch it run again.",
+    about: `A CLUE class with one CLUE assignment. Its one analysis, **${CLUE_ROW.current_version.title}**, has finished: its result is the page the package wrote for a real class, with every student, document and other id replaced and no names or free text. Its replay links are redacted, so clicking one opens nothing. Press Run to watch it run again.`,
     world: clue
   },
   { key: "info", label: "Info page (no launch)", about: "What a visit with no launch parameters shows.", info: "no-launch" },

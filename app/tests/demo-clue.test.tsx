@@ -7,7 +7,7 @@ import { World } from "../demo/world";
 import { ResultMarkdown } from "../src/components/ResultMarkdown";
 import { isBehind, newestActivity } from "../src/shell/activity";
 import { packageKey } from "../src/shell/packages";
-import type { Result } from "../src/shell/runs";
+import type { Counts, Result } from "../src/shell/runs";
 
 afterEach(() => {
   cleanup();
@@ -62,14 +62,15 @@ describe("the demo's CLUE class", () => {
     expect(result.summary).toBe(CLUE_DATAFLOW.split("```\n")[1].split("\n")[0]);
   });
 
-  it("lands the same page again when run", async () => {
+  it("lands the same page again when run, with its counts still the page's", async () => {
     vi.useFakeTimers();
     const state = clue();
     const services = new World(state, { stepMs: STEP, failNext: false, refuseNext: false }).services();
     let results = new Map<string, Result>();
+    let counts: Counts | null = null;
     const watching = services.watchClass(state.scope, {
-      profile: () => {}, runner: () => {}, counts: () => {}, activity: () => {}, refused: () => {},
-      results: (r) => { results = r; }
+      profile: () => {}, runner: () => {}, activity: () => {}, refused: () => {},
+      counts: (c) => { counts = c; }, results: (r) => { results = r; }
     });
     await vi.advanceTimersByTimeAsync(200);
     await watching;
@@ -80,13 +81,16 @@ describe("the demo's CLUE class", () => {
     await ran;
     const result = results.get(KEY)!;
     expect([result.status, result.display, result.summary]).toEqual(["done", CLUE_DATAFLOW, "episodes: 23 (6 systematic, 17 trial-and-error)"]);
+    expect(result.started_at).not.toBe(clue().results.get(KEY)!.started_at);
+    expect([counts!.data?.answers, counts!.data?.logs]).toEqual([0, 262802]);
   });
 
   it("sits before the info pages, in a class of its own", () => {
     expect(SCENARIOS.map((s) => s.key).slice(-3)).toEqual(["clue", "info", "withdrawn"]);
-    const others = SCENARIOS.filter((s) => s.world && s.key !== "clue").map((s) => s.world!(Date.now()).scope.id);
+    const others = SCENARIOS.filter((s) => s.world && s.key !== "clue").map((s) => s.world!(Date.now()).scope);
     expect(others.length).toBeGreaterThan(0);
-    expect(others).not.toContain(clue().scope.id);
+    const { id, class_hash, name } = clue().scope;
+    expect(others.filter((o) => o.id === id || o.class_hash === class_hash || o.name === name)).toEqual([]);
   });
 
   it("leaves the Wildfire scenarios' catalog as it was", () => {
