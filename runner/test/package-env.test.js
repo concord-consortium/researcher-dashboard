@@ -100,7 +100,7 @@ test("HOME and the output directory start empty on every run, the corpus does no
 });
 
 // scope.json, from the scope block /work returned.
-test("scope.json carries the six fields, and names the package's dataset and output", async () => {
+test("scope.json carries exactly its fields, in order, and names the package's dataset and output", async () => {
   const chowned = [];
   const { paths, env } = await prepare({ uid: 4242, chown: (target) => chowned.push(target) });
   assert.ok(!chowned.includes(paths.inputDir), "the input directory stays root's");
@@ -108,7 +108,7 @@ test("scope.json carries the six fields, and names the package's dataset and out
   const file = path.join(paths.inputDir, "scope.json");
   assert.equal(env.RD_SCOPE_FILE, file);
   const scope = JSON.parse(fs.readFileSync(file, "utf8"));
-  assert.deepEqual(Object.keys(scope).sort(), ["assignments", "classes", "dataset", "id", "kind", "output_dir"]);
+  assert.deepEqual(Object.keys(scope), ["kind", "id", "classes", "assignments", "dataset", "output_dir"]);
   assert.equal(scope.kind, "class");
   assert.equal(scope.id, CLASS);
   assert.deepEqual(scope.classes, [{ class_hash: CLASS, class_id: 111 }]);
