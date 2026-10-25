@@ -41,7 +41,7 @@ and a "Student saves" button drive a simulated runner through the queued, runnin
 writes the real one makes, at a step time the panel sets.
 
 The CLUE class's result is the CLUE Dataflow package's page for a real class, with every id replaced
-by a placeholder. Its replay links point at `redacted.demo.link.invalid`, a host that never resolves,
+by a placeholder, fetched as a chunk of its own only when that scenario opens. Its replay links point at `redacted.demo.link.invalid`, a host that never resolves,
 and the demo page answers a click on one with an alert rather than opening it (`demo/redacted-links.ts`).
 
 The build ships it beside the dashboard, at `demo/` under every deployment, and the info page a

@@ -1,8 +1,8 @@
 import { cleanup, render } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { CLUE_DATAFLOW } from "../demo/markdown";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import CLUE_DATAFLOW from "../demo/clue-dataflow.md?raw";
 import { REDACTED_HOST } from "../demo/redacted-links";
-import { SCENARIOS } from "../demo/scenarios";
+import { loadClueDataflow, SCENARIOS } from "../demo/scenarios";
 import { World } from "../demo/world";
 import { ResultMarkdown } from "../src/components/ResultMarkdown";
 import { isBehind, newestActivity } from "../src/shell/activity";
@@ -20,12 +20,20 @@ const CLUE = "official/clue-dataflow-systematicity", KEY = packageKey(CLUE);
 const TITLE = "CLUE Dataflow: trial and error vs. systematicity";
 const DESCRIPTION = "For one CLUE class, the Dataflow study's detection of trial-and-error and systematic editing: each stage's summary, every episode, and sampled episodes described cycle by cycle with links that open CLUE at them.";
 const LOGS = Number(/^log events: (\d+) rows/m.exec(CLUE_DATAFLOW)![1]);
+const SUMMARY = CLUE_DATAFLOW.split("```\n")[1]!.split("\n")[0];
 const links = [...CLUE_DATAFLOW.matchAll(/\]\((https?:[^)\s]+)\)/g)].map((m) => new URL(m[1]));
-const clue = () => SCENARIOS.find((s) => s.key === "clue")!.world!(Date.now());
+const scenario = SCENARIOS.find((s) => s.key === "clue")!;
+const clue = () => scenario.world!(Date.now());
 
 describe("the demo's CLUE class", () => {
+  beforeAll(async () => { await scenario.load!(); });
+
+  it("loads the page as the scenario's one fetch", async () => {
+    expect(await loadClueDataflow()).toBe(CLUE_DATAFLOW);
+  });
+
   it("points every replay link at the redacted host", () => {
-    expect(links).toHaveLength(46);
+    expect(links.length).toBeGreaterThan(0);
     expect(links.filter((url) => url.hostname !== REDACTED_HOST)).toEqual([]);
     expect(CLUE_DATAFLOW).not.toContain("collaborative-learning.concord.org");
   });
@@ -33,7 +41,7 @@ describe("the demo's CLUE class", () => {
   it("keeps every redacted link through the renderer", () => {
     const { container } = render(<ResultMarkdown markdown={CLUE_DATAFLOW} />);
     const anchors = [...container.querySelectorAll("a")];
-    expect(anchors).toHaveLength(46);
+    expect(anchors).toHaveLength(links.length);
     expect(anchors.filter((a) => new URL(a.href).hostname !== REDACTED_HOST)).toEqual([]);
   });
 
@@ -60,7 +68,7 @@ describe("the demo's CLUE class", () => {
     const result = clue().results.get(KEY)!;
     expect(result.status).toBe("done");
     expect(result.display).toBe(CLUE_DATAFLOW);
-    expect(result.summary).toBe(CLUE_DATAFLOW.split("```\n")[1].split("\n")[0]);
+    expect(result.summary).toBe(SUMMARY);
   });
 
   it("lands the same page again when run, with its counts still the page's", async () => {
@@ -81,7 +89,7 @@ describe("the demo's CLUE class", () => {
     await vi.advanceTimersByTimeAsync(20 * STEP);
     await ran;
     const result = results.get(KEY)!;
-    expect([result.status, result.display, result.summary]).toEqual(["done", CLUE_DATAFLOW, "episodes: 23 (6 systematic, 17 trial-and-error)"]);
+    expect([result.status, result.display, result.summary]).toEqual(["done", CLUE_DATAFLOW, SUMMARY]);
     expect(result.started_at).not.toBe(clue().results.get(KEY)!.started_at);
     expect([counts!.data?.answers, counts!.data?.logs]).toEqual([0, LOGS]);
   });

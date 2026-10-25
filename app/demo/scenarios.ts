@@ -3,7 +3,7 @@ import { packageKey } from "../src/shell/packages";
 import type { PackageRow, Scope } from "../src/shell/portal";
 import type { Finished, Result } from "../src/shell/runs";
 import type { InfoReason } from "../src/shell/start";
-import { CLUE_DATAFLOW, EXPLANATION_KEYWORDS, MODEL_USE, WILDFIRE_RESPONSES } from "./markdown";
+import { EXPLANATION_KEYWORDS, MODEL_USE, WILDFIRE_RESPONSES } from "./markdown";
 import { stamp, type WorldState } from "./world";
 
 const MIN = 60_000;
@@ -67,13 +67,25 @@ const CLUE_ROW = pkg("official/clue-dataflow-systematicity", "CLUE Dataflow: tri
   "For one CLUE class, the Dataflow study's detection of trial-and-error and systematic editing: each stage's summary, every episode, and sampled episodes described cycle by cycle with links that open CLUE at them.",
   "1.0.0");
 
+// The CLUE Dataflow package's page for a real class, redacted: every id is a placeholder, and every
+// replay link points at REDACTED_HOST (redacted-links.ts). It is a chunk of its own, fetched only
+// when the CLUE scenario opens.
+let clueDataflow: string | null = null;
+export async function loadClueDataflow(): Promise<string> {
+  clueDataflow ??= (await import("./clue-dataflow.md?raw")).default;
+  return clueDataflow;
+}
+
 // The summary is the page's first totals line, which is what the package writes to summary.txt.
-const CLUE_OUTPUTS = new Map([[packageKey(CLUE_ROW.identity), { summary: "episodes: 23 (6 systematic, 17 trial-and-error)", display: CLUE_DATAFLOW }]]);
+function clueOutputs() {
+  if (clueDataflow === null) throw new Error("The CLUE page is not loaded yet: await loadClueDataflow() first.");
+  return new Map([[packageKey(CLUE_ROW.identity), { summary: "episodes: 386 (90 systematic, 296 trial-and-error)", display: clueDataflow }]]);
+}
 
 const row = (identity: string) => [...ROWS, CLUE_ROW].find((r) => r.identity === identity)!;
 
 function finished(identity: string, startedAgoMin: number, now: number, display?: string): Finished {
-  const output = (OUTPUTS.get(packageKey(identity)) ?? CLUE_OUTPUTS.get(packageKey(identity)))!;
+  const output = (OUTPUTS.get(packageKey(identity)) ?? clueOutputs().get(packageKey(identity)))!;
   return {
     package: { identity, version: row(identity).current_version.version, checksum: "sha256:demo" },
     image_version: "0.2.4", summary: output.summary, display: display ?? output.display,
@@ -112,10 +124,10 @@ function clue(now: number): WorldState {
   return {
     ...base(now, CLUE_SCOPE),
     rows: [CLUE_ROW],
-    outputs: CLUE_OUTPUTS,
+    outputs: clueOutputs(),
     // Its page is fixed, so a re-run pulls nothing new and the card keeps agreeing with it.
     pulled: { answers: 0, logs: 0 },
-    counts: { data: { answers: 0, logs: 266, last_pull_at: stamp(now - 40 * MIN), log_freshness_at: stamp(now - 6 * 60 * MIN) } },
+    counts: { data: { answers: 0, logs: 18177, last_pull_at: stamp(now - 40 * MIN), log_freshness_at: stamp(now - 6 * 60 * MIN) } },
     // Every save predates the run, or the page would find the result behind and re-run it on open.
     activity: activity(now, [45, 90]),
     results: new Map([done(CLUE_ROW.identity, 40, now)])
@@ -128,6 +140,8 @@ export interface Scenario {
   // What the scenario shows, in the panel; text between ** and ** is bold.
   about: string;
   world?: (now: number) => WorldState;
+  // What has to be fetched before the world can be built.
+  load?: () => Promise<unknown>;
   info?: InfoReason;
 }
 
@@ -234,7 +248,8 @@ export const SCENARIOS: Scenario[] = [
     key: "clue",
     label: "A CLUE class",
     about: `A CLUE class with one CLUE assignment. Its one analysis, **${CLUE_ROW.current_version.title}**, has finished: its result is the page the package wrote for a real class, with every student, document and other id replaced and no names or free text. Its replay links are redacted, so clicking one opens nothing. Press Run to watch it run again.`,
-    world: clue
+    world: clue,
+    load: loadClueDataflow
   },
   { key: "info", label: "Info page (no launch)", about: "What a visit with no launch parameters shows.", info: "no-launch" },
   {
