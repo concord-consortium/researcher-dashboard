@@ -41,7 +41,7 @@ A result document holds the display and the summary twice, the current run's and
 - A structured result in place of markdown.
 - cc-data-studies' `wildfire-responses`, which trims its own page to 64 KiB; that is the package's own budget.
 - Closed specs that quote 64 KiB (RD-4 pass 2, cc-data-cli's REPORT-146, report-service's REPORT-143), which record what was built then.
-- A `display.md` that is not valid UTF-8. The limit counts the file's bytes, but the runner stores decoded text, in which each invalid byte becomes a 3-byte U+FFFD, so such a page can pass the limit and still overflow the document. The run is then written `failed` with Firestore's size error, while `cc-data package run`, which keeps the raw bytes, accepts it. Only a buggy package writes one.
+- A `display.md` or `summary.txt` that is not valid UTF-8. The limits count the file's bytes, but the runner stores decoded text, in which each invalid byte becomes a 3-byte U+FFFD, so such a file can pass its limit and still overflow the document. The run is then written `failed` with Firestore's size error, while `cc-data package run`, which keeps the raw bytes, accepts it. Only a buggy package writes one.
 
 ## Decisions
 

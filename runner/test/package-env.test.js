@@ -184,6 +184,9 @@ test("summary.txt and counts.json are read only to 64 KiB, whatever the display 
   fs.writeFileSync(path.join(paths.outputDir, "display.md"), "ok");
   fs.writeFileSync(path.join(paths.outputDir, "summary.txt"), "s".repeat(DISPLAY_LIMIT_BYTES));
   assert.equal(readPackageResult(paths.outputDir).summary.length, 65537, "the summary is cut at 64 KiB and a byte");
+  fs.writeFileSync(path.join(paths.outputDir, "counts.json"), JSON.stringify({ answers: 3, pad: "x".repeat(65515) }));
+  assert.equal(fs.statSync(path.join(paths.outputDir, "counts.json")).size, 65537);
+  assert.deepEqual(readPackageCounts(paths.outputDir), { answers: 3 }, "a counts.json of 64 KiB and a byte is read whole and parses");
   fs.writeFileSync(path.join(paths.outputDir, "counts.json"), JSON.stringify({ answers: 3, pad: "x".repeat(70000) }));
   assert.deepEqual(readPackageCounts(paths.outputDir), {}, "a counts.json past 64 KiB is cut and does not parse");
 });
