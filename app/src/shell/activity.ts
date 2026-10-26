@@ -5,8 +5,25 @@ import {
   type Result, type RunRequest, type Runner, type SessionMark, type Stamp
 } from "./runs";
 
-// A learner's activity document, written by report-service; `writeCount` and `changed` are not read here.
-export interface Activity { lastActivityAt?: Stamp }
+// A learner's activity document, written by report-service; `changed` maps each assignment's portal
+// offering id to when the learner last changed it. `writeCount` is a change signal only, never a count.
+export interface Activity { lastActivityAt?: Stamp; changed?: Record<string, Stamp> }
+
+export interface AssignmentActivity { offeringId: number; students: number; last: number | null }
+
+// Per assignment, the learners who have saved work in it and when it last changed, from `changed`.
+export function assignmentActivity(docs: Map<string, Activity>, offeringIds: number[]): AssignmentActivity[] {
+  return offeringIds.map((offeringId) => {
+    let students = 0, last: number | null = null;
+    for (const doc of docs.values()) {
+      const at = millis(doc.changed?.[String(offeringId)]);
+      if (at === null) continue;
+      students += 1;
+      if (last === null || at > last) last = at;
+    }
+    return { offeringId, students, last };
+  });
+}
 
 export const ACTIVE_WINDOW_MINUTES = 5;
 const WINDOW_MS = ACTIVE_WINDOW_MINUTES * 60_000;

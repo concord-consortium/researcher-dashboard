@@ -59,3 +59,19 @@ describe("the demo's runner", () => {
     expect(status(MODEL)).toBe("done");
   });
 });
+
+describe("the demo's student saves", () => {
+  it("marks one of the class's assignments changed at the save, keeping the learner's earlier changes", () => {
+    const state = SCENARIOS.find((s) => s.key === "ready")!.world!(Date.now());
+    const before = state.activity.get("learner-2")!.changed!;
+    const world = new World(state, { stepMs: STEP, failNext: false, refuseNext: false });
+    const at = Date.now();
+    world.save("learner-2");
+    const changed = state.activity.get("learner-2")!.changed!;
+    const offerings = state.scope.assignments.map((a) => String(a.offering_id));
+    const saved = Object.keys(changed).filter((k) => changed[k].toMillis() >= at);
+    expect(saved).toHaveLength(1);
+    expect(offerings).toContain(saved[0]);
+    for (const key of Object.keys(before).filter((k) => k !== saved[0])) expect(changed[key]).toBe(before[key]);
+  });
+});
