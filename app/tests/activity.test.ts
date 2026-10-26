@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
-  activeCount, assignmentActivity, behindRows, isBehind, newestActivity, nextChangeIn, outOfDate, windowLabel, type Activity
+  activeCount, activitySources, assignmentActivity, behindRows, isBehind, mergeActivity, newestActivity, nextChangeIn, outOfDate,
+  windowLabel, type Activity
 } from "../src/shell/activity";
 import { packageKey } from "../src/shell/packages";
 import type { PackageRow } from "../src/shell/portal";
@@ -179,5 +180,92 @@ describe("assignmentActivity", () => {
     expect(assignmentActivity(new Map(), [10, 9])).toEqual([
       { offeringId: 10, students: 0, last: null }, { offeringId: 9, students: 0, last: null }
     ]);
+  });
+});
+
+describe("mergeActivity", () => {
+  const at = (doc: Activity | undefined) => doc?.lastActivityAt?.toMillis();
+
+  it("keeps a learner found in one map only as that document", () => {
+    const only = { lastActivityAt: stamp(5), changed: { "9": stamp(5) } };
+    const merged = mergeActivity(new Map([["a", only]]), new Map([["b", { lastActivityAt: stamp(7) }]]));
+    expect(merged.get("a")).toBe(only);
+    expect(at(merged.get("b"))).toBe(7);
+  });
+
+  it("takes the later save of a learner on both platforms, whichever map holds it, and counts them once", () => {
+    const earlier = new Map([["a", { lastActivityAt: stamp(5) }]]), later = new Map([["a", { lastActivityAt: stamp(9) }]]);
+    expect(at(mergeActivity(earlier, later).get("a"))).toBe(9);
+    expect(at(mergeActivity(later, earlier).get("a"))).toBe(9);
+    expect(mergeActivity(earlier, later).size).toBe(1);
+  });
+
+  it("takes the other's save when one document has none", () => {
+    expect(at(mergeActivity(new Map([["a", {}]]), new Map([["a", { lastActivityAt: stamp(4) }]])).get("a"))).toBe(4);
+    expect(at(mergeActivity(new Map([["a", { lastActivityAt: stamp(4) }]]), new Map([["a", {}]])).get("a"))).toBe(4);
+  });
+
+  it("keeps every assignment's change from both, and the later time for one in both", () => {
+    const merged = mergeActivity(
+      new Map([["a", { changed: { "9": stamp(8), "10": stamp(3) } }]]),
+      new Map([["a", { changed: { "10": stamp(6), "11": stamp(2) } }]])
+    ).get("a")!;
+    expect(Object.fromEntries(Object.entries(merged.changed!).map(([k, v]) => [k, v.toMillis()]))).toEqual({ "9": 8, "10": 6, "11": 2 });
+    const reversed = mergeActivity(
+      new Map([["a", { changed: { "10": stamp(6) } }]]),
+      new Map([["a", { changed: { "10": stamp(3) } }]])
+    ).get("a")!;
+    expect(reversed.changed!["10"].toMillis()).toBe(6);
+  });
+});
+
+describe("activitySources", () => {
+  const ap = new Map([["a", { lastActivityAt: stamp(1) }]]), clue = new Map([["b", { lastActivityAt: stamp(2) }]]);
+  const keys = (onValue: ReturnType<typeof vi.fn>) => [...(onValue.mock.lastCall![0] as Map<string, Activity>).keys()].sort();
+  const from = (onValue: ReturnType<typeof vi.fn>) => onValue.mock.lastCall![1];
+
+  it("hands on each source as it lands, without waiting for the other, then their merge", () => {
+    const onValue = vi.fn();
+    const sources = activitySources(onValue);
+    sources.value("clue-activity", clue);
+    expect(keys(onValue)).toEqual(["b"]);
+    expect(from(onValue)).toEqual(["clue-activity"]);
+    sources.value("activity", ap);
+    expect(keys(onValue)).toEqual(["a", "b"]);
+    expect(from(onValue)).toEqual(["activity", "clue-activity"]);
+  });
+
+  it("merges a later snapshot from either source with the other's latest", () => {
+    const onValue = vi.fn();
+    const sources = activitySources(onValue);
+    sources.value("clue-activity", clue);
+    sources.value("activity", ap);
+    sources.value("clue-activity", new Map([["c", {}]]));
+    expect(keys(onValue)).toEqual(["a", "c"]);
+    sources.value("activity", new Map());
+    expect(keys(onValue)).toEqual(["c"]);
+  });
+
+  it("hands on nothing for a refusal while no source holds documents, and nothing more once both are refused", () => {
+    const onValue = vi.fn();
+    const sources = activitySources(onValue);
+    sources.refused("clue-activity");
+    expect(onValue).not.toHaveBeenCalled();
+    sources.value("activity", ap);
+    expect(keys(onValue)).toEqual(["a"]);
+    expect(from(onValue)).toEqual(["activity"]);
+    sources.refused("activity");
+    expect(onValue).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops a source refused after it answered, handing on the other alone", () => {
+    const onValue = vi.fn();
+    const sources = activitySources(onValue);
+    sources.value("activity", ap);
+    sources.value("clue-activity", clue);
+    sources.refused("clue-activity");
+    expect(onValue).toHaveBeenCalledTimes(3);
+    expect(keys(onValue)).toEqual(["a"]);
+    expect(from(onValue)).toEqual(["activity"]);
   });
 });

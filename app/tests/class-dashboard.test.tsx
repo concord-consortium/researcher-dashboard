@@ -4,7 +4,7 @@ import { RERUNS } from "../src/components/ClassActivity";
 import { ClassDashboard } from "../src/pages/ClassDashboard";
 import { packageKey, type Profile } from "../src/shell/packages";
 import { ApiError, SessionExpired, type PackageRow, type Portal, type ReportServer, type Resolved, type Scope, type User } from "../src/shell/portal";
-import type { Activity } from "../src/shell/activity";
+import { ACTIVITY_SOURCES, type Activity } from "../src/shell/activity";
 import { formatTime, fullTime, type Counts, type Result, type Runner } from "../src/shell/runs";
 import type { ClassListeners, DashboardServices } from "../src/shell/services";
 import pkg from "../package.json";
@@ -30,7 +30,7 @@ function services(over: {
   scope?: () => Promise<Scope>;
   user?: () => Promise<User | null>;
   refresh?: () => Promise<unknown>;
-  watch?: () => Promise<() => void>;
+  watch?: DashboardServices["watchClass"];
   list?: (urls: string[]) => Promise<PackageRow[]>;
   run?: (identity: string, version: string) => Promise<unknown>;
   resolve?: (identity: string, version: string) => Promise<Resolved>;
@@ -56,8 +56,9 @@ function services(over: {
     results: (r: Map<string, Result>) => act(() => on!.results(r)),
     refuseRuns: (which: "runner" | "results" = "results") => act(() => on!.refused(which)),
     refuseCounts: () => act(() => on!.refused("counts")),
-    activity: (a: Map<string, Activity>) => act(() => on!.activity(a)),
-    refuseActivity: () => act(() => on!.refused("activity"))
+    activity: (a: Map<string, Activity>, from = ACTIVITY_SOURCES) => act(() => on!.activity(a, from)),
+    refuseActivity: () => act(() => on!.refused("activity")),
+    refuseClueActivity: () => act(() => on!.refused("clue-activity"))
   };
 }
 
@@ -656,12 +657,26 @@ describe("ClassDashboard", () => {
     expect(screen.queryByText("Your current status could not be read.")).toBeNull();
   });
 
-  it("says the class activity could not be read when its listener is refused, and reads the rest", async () => {
+  it.each([
+    ["CLUE", (s: ReturnType<typeof services>) => s.refuseClueActivity()],
+    ["Activity Player", (s: ReturnType<typeof services>) => s.refuseActivity()]
+  ])("names refused %s activity and keeps the count it last received", async (platform, refuse) => {
+    const s = services();
+    await mounted(s);
+    await s.activity(new Map([["301", { lastActivityAt: stamp(NOW) }]]));
+    await refuse(s);
+    expect(screen.getByText(`${platform} activity could not be read.`)).toBeDefined();
+    expect(screen.queryByText("Class activity could not be read.")).toBeNull();
+    expect(document.querySelector(".active-count")?.getAttribute("title")).toMatch(/^1 student active/);
+  });
+
+  it("says the class activity could not be read when both its sources are refused, and reads the rest", async () => {
     const s = services();
     await mounted(s);
     await s.activity(new Map([["301", { lastActivityAt: stamp(NOW) }]]));
     expect(document.querySelector(".active-count")?.getAttribute("title")).toMatch(/^1 student active/);
     await s.refuseActivity();
+    await s.refuseClueActivity();
     expect(screen.getByText("Class activity could not be read.")).toBeDefined();
     expect(document.querySelector(".active-count")).toBeNull();
     expect(screen.queryByText("Your runs could not be read.")).toBeNull();
@@ -723,12 +738,64 @@ describe("the Assignments card's activity numbers", () => {
     return s;
   }
 
-  it("says so before the first snapshot, and after the listener is refused", async () => {
+  it("says so before the first snapshot, still waits while one source is refused, and says unknown once both are", async () => {
     const s = await shown();
     expect(cells("Wildfire")).toEqual(["Wildfire · Activity Player", "…", "…"]);
     await s.refuseActivity();
+    expect(cells("Wildfire")).toEqual(["Wildfire · Activity Player", "…", "…"]);
+    await s.refuseClueActivity();
     expect(cells("Wildfire")).toEqual(["Wildfire · Activity Player", "unknown", "unknown"]);
     expect(footnote()).toBeNull();
+  });
+
+  it("shows the source that has landed and says the other is still loading until it does", async () => {
+    const s = await shown();
+    await s.activity(new Map<string, Activity>([["a", { lastActivityAt: stamp(NOW - 60_000), changed: { "9": stamp(NOW - 60_000) } }]]), ["activity"]);
+    expect(cells("Wildfire")).toEqual(["Wildfire · Activity Player", "1", capitalized(NOW - 60_000)]);
+    expect(footnote()).toBe("n/a: No student saves have been recorded for that assignment. CLUE activity is still loading, so its assignments may also show n/a.");
+    await s.activity(new Map<string, Activity>([["a", { lastActivityAt: stamp(NOW - 60_000), changed: { "9": stamp(NOW - 60_000) } }]]));
+    expect(footnote()).toBe("n/a: No student saves have been recorded for that assignment.");
+  });
+
+  it("waits again when the only source shown is refused while the other can still answer", async () => {
+    const s = await shown();
+    await s.activity(new Map<string, Activity>([["a", { lastActivityAt: stamp(NOW - 60_000), changed: { "9": stamp(NOW - 60_000) } }]]), ["clue-activity"]);
+    expect(cells("Wildfire")).toEqual(["Wildfire · Activity Player", "1", capitalized(NOW - 60_000)]);
+    await s.refuseClueActivity();
+    expect(cells("Wildfire")).toEqual(["Wildfire · Activity Player", "…", "…"]);
+    expect(document.querySelector(".active-count")).toBeNull();
+  });
+
+  it("says unknown when the watch fails after a source has been shown", async () => {
+    await mounted(services({
+      scope: async () => TWO,
+      watch: async (_scope, listeners) => {
+        act(() => listeners.activity(new Map<string, Activity>([["a", { lastActivityAt: stamp(NOW - 60_000), changed: { "9": stamp(NOW - 60_000) } }]]), ["clue-activity"]));
+        throw new Error("auth/network-request-failed");
+      }
+    }));
+    infoTab();
+    await screen.findByText("Class activity could not be read.");
+    expect(cells("Wildfire")).toEqual(["Wildfire · Activity Player", "unknown", "unknown"]);
+    expect(document.querySelector(".active-count")).toBeNull();
+  });
+
+  it("says unknown when the sign-in fails", async () => {
+    await mounted(services({ scope: async () => TWO, watch: async () => { throw new Error("auth/network-request-failed"); } }));
+    infoTab();
+    await screen.findByText("Class activity could not be read.");
+    expect(cells("Wildfire")).toEqual(["Wildfire · Activity Player", "unknown", "unknown"]);
+  });
+
+  it.each([
+    ["CLUE", (s: Awaited<ReturnType<typeof shown>>) => s.refuseClueActivity()],
+    ["Activity Player", (s: Awaited<ReturnType<typeof shown>>) => s.refuseActivity()]
+  ])("adds to the footnote that %s activity could not be read while that source is refused", async (platform, refuse) => {
+    const s = await shown();
+    await s.activity(new Map<string, Activity>([["a", { lastActivityAt: stamp(NOW - 60_000), changed: { "9": stamp(NOW - 60_000) } }]]));
+    expect(footnote()).toBe("n/a: No student saves have been recorded for that assignment.");
+    await refuse(s);
+    expect(footnote()).toBe(`n/a: No student saves have been recorded for that assignment. ${platform} activity could not be read, so its assignments may also show n/a.`);
   });
 
   it("counts each assignment's students and its last change, with n/a and the footnote for one with none", async () => {
@@ -1375,6 +1442,16 @@ describe("the automatic re-run", () => {
     expect(s.runPackage).not.toHaveBeenCalled();
   });
 
+  it("still re-runs on a save from the other source while CLUE's activity is refused", async () => {
+    const s = services();
+    await listed(s);
+    await s.results(new Map([[KEY, doneAt(1000)]]));
+    await s.refuseClueActivity();
+    await s.activity(learner(2000));
+    await vi.waitFor(() => expect(s.runPackage).toHaveBeenCalledTimes(1));
+    expect(screen.getByText("CLUE activity could not be read.")).toBeDefined();
+  });
+
   it("requests nothing more once the re-run's result has no save after its start", async () => {
     const s = services();
     await listed(s);
@@ -1611,11 +1688,12 @@ describe("the automatic re-run", () => {
     await vi.waitFor(() => expect(s.runPackage).toHaveBeenCalledTimes(2));
   });
 
-  it("requests nothing when the activity listener is refused before any snapshot", async () => {
+  it("requests nothing when both activity sources are refused before any snapshot", async () => {
     const s = services();
     await listed(s);
     await s.results(new Map([[KEY, doneAt(1000)]]));
     await s.refuseActivity();
+    await s.refuseClueActivity();
     expect(screen.getByText("Class activity could not be read.")).toBeDefined();
     expect(s.runPackage).not.toHaveBeenCalled();
   });

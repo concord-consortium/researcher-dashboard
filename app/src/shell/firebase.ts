@@ -2,8 +2,9 @@ import { initializeApp, type FirebaseApp } from "firebase/app";
 import { connectAuthEmulator, getAuth, inMemoryPersistence, initializeAuth, signInWithCustomToken } from "firebase/auth";
 import { collection, connectFirestoreEmulator, doc, getFirestore, onSnapshot, type Firestore } from "firebase/firestore";
 
-// The Firebase project this app reads, and the sign-in that gets it in: report-service's,
-// which holds the dashboard tree, with a custom token the portal minted for one class.
+// The Firebase projects this app reads, and the sign-in that gets it in: report-service's,
+// which holds the dashboard tree, and CLUE's, which holds CLUE's activity documents, each with a
+// custom token the portal minted for one class.
 //
 // None of these values is secret. A Web API key identifies a project to Identity Toolkit
 // and carries quota; it authorizes nothing, and access is decided by the custom token and
@@ -18,6 +19,24 @@ const PROJECTS: Record<string, Record<string, string>> = {
     storageBucket: "report-service-dev.appspot.com",
     messagingSenderId: "402218300971",
     appId: "1:402218300971:web:32b7266ef5226ff7"
+  },
+  "collaborative-learning-staging": {
+    apiKey: atob("QUl6YVN5Q0dKRjQybE15XzhjSFpkU0lQa0FvWE9WWFBHMmotSHAw"),
+    authDomain: "collaborative-learning-staging.firebaseapp.com",
+    databaseURL: "https://collaborative-learning-staging-default-rtdb.firebaseio.com",
+    projectId: "collaborative-learning-staging",
+    storageBucket: "collaborative-learning-staging.firebasestorage.app",
+    messagingSenderId: "822807055414",
+    appId: "1:822807055414:web:9e08fe0f4ffaf6130f9c97"
+  },
+  "collaborative-learning-ec215": {
+    apiKey: atob("QUl6YVN5QVV6T2JMblZESURYYTB4ZUxmSVpLV3BiLTJZSWpYSXBJ"),
+    authDomain: "collaborative-learning-ec215.firebaseapp.com",
+    databaseURL: "https://collaborative-learning-ec215.firebaseio.com",
+    projectId: "collaborative-learning-ec215",
+    storageBucket: "collaborative-learning-ec215.appspot.com",
+    messagingSenderId: "112537088884",
+    appId: "1:112537088884:web:c51b1b8432fff36faff221"
   }
 };
 

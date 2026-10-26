@@ -5,8 +5,10 @@ import {
   type Result, type RunRequest, type Runner, type SessionMark, type Stamp
 } from "./runs";
 
-// A learner's activity document, written by report-service; `changed` maps each assignment's portal
-// offering id to when the learner last changed it. `writeCount` is a change signal only, never a count.
+// A learner's activity document, written by report-service for Activity Player answers and by the CLUE
+// app for CLUE documents, each in its own Firebase project, at the same path and with the same fields.
+// `changed` maps each assignment's portal offering id to when the learner last changed it. `writeCount`
+// is a change signal only, never a count.
 export interface Activity { lastActivityAt?: Stamp; changed?: Record<string, Stamp> }
 
 export interface AssignmentActivity { offeringId: number; students: number; last: number | null }
@@ -23,6 +25,47 @@ export function assignmentActivity(docs: Map<string, Activity>, offeringIds: num
     }
     return { offeringId, students, last };
   });
+}
+
+// The later of two server times, either of which may be missing.
+const later = (a: Stamp | undefined, b: Stamp | undefined): Stamp | undefined =>
+  (millis(b) ?? -Infinity) > (millis(a) ?? -Infinity) ? b : a;
+
+// Report-service's and CLUE's documents for one class, as one map. Both are keyed by the portal user
+// id, so a learner on both platforms is one entry, with the later save and, per assignment, the later
+// change.
+export function mergeActivity(a: Map<string, Activity>, b: Map<string, Activity>): Map<string, Activity> {
+  const merged = new Map(a);
+  for (const [id, doc] of b) {
+    const other = merged.get(id);
+    if (!other) {
+      merged.set(id, doc);
+      continue;
+    }
+    const changed: Record<string, Stamp> = { ...other.changed };
+    for (const [key, at] of Object.entries(doc.changed ?? {})) changed[key] = later(changed[key], at) ?? at;
+    merged.set(id, { lastActivityAt: later(other.lastActivityAt, doc.lastActivityAt), changed });
+  }
+  return merged;
+}
+
+// Report-service's activity listener, and CLUE's.
+export type ActivitySource = "activity" | "clue-activity";
+export const ACTIVITY_SOURCES: ActivitySource[] = ["activity", "clue-activity"];
+
+// Each source's latest documents, or null once it is refused. The page gets the merge of the sources
+// holding documents, and which they are, each time one lands, so a slow source never holds the other.
+export function activitySources(onValue: (docs: Map<string, Activity>, from: ActivitySource[]) => void) {
+  const latest = new Map<ActivitySource, Map<string, Activity> | null>();
+  const emit = () => {
+    const from = ACTIVITY_SOURCES.filter((source) => latest.get(source));
+    if (from.length === 0) return;
+    onValue(mergeActivity(latest.get("activity") ?? new Map(), latest.get("clue-activity") ?? new Map()), from);
+  };
+  return {
+    value(source: ActivitySource, docs: Map<string, Activity>) { latest.set(source, docs); emit(); },
+    refused(source: ActivitySource) { latest.set(source, null); emit(); }
+  };
 }
 
 export const ACTIVE_WINDOW_MINUTES = 5;
