@@ -17,11 +17,9 @@ const csp = (): Plugin => ({
   }]
 });
 
-// The copy of index.html a release puts at the prefix root, where `./assets/...` would miss: each
-// reference to the build's own files carries the path this build is deployed to, which
-// s3-deploy-action passes as DEPLOY_PATH (`version/<tag>` or `branch/<name>`). Post-order, because
-// Vite adds index.html to the bundle, policy included, only in its own generateBundle; and the
-// policy's `base-uri 'none'` rules out a <base> instead.
+// index.html with each `./` reference prefixed by DEPLOY_PATH (s3-deploy-action's `version/<tag>` or
+// `branch/<name>`), for a release to copy to the prefix root. Post-order: Vite adds index.html, CSP
+// included, only in its own generateBundle; the CSP's `base-uri 'none'` rules out a <base>.
 const indexTop = (): Plugin => ({
   name: "researcher-dashboard-index-top",
   apply: "build",
