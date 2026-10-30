@@ -39,26 +39,21 @@ A single build accepts launches from both portals, and each launch talks only to
 
 - **R14.** `app/README.md` names both portals in its launch section, and its Deploy section describes the tag form, `index-top.html`, `index-main.html`, the release workflow and the production URL. The top-level README gives the app's tag form.
 - **R15.** The typecheck, the test suite and the build pass.
-- **R16.** Checked live on staging, as listed under Staging checks below. *(Not yet run at close: the before-merge check needs the branch pushed and deployed, and the after-merge check needs the merge.)*
+- **R16.** The deployed files are checked live, as listed under Staging checks below. *(Not yet run at close: the before-merge check needs the branch deployed, and the after-merge check needs the merge.)*
 
 ## Staging checks
 
-Each portal change is made on Doug's go, read back after saving, and put back afterwards; Doug types every credential. The staging portal's `researcher-dashboard` Client (client 14) and its "Researcher Dashboard" ExternalReport (report 79, launched from class 590) normally name `https://models-resources.concord.org/researcher-dashboard/branch/main/index.html`.
+Plain page loads in Playwright, with no launch and no portal change: they check what the tests cannot, the deployed files. Sign-in is not checked, since this change leaves the OAuth and launch code as it was, and the tests cover which servers and projects each portal's launch reaches.
 
-**Before merge, on the branch deploy:**
-1. Add `https://models-resources.concord.org/researcher-dashboard/branch/production-config/index.html` to client 14's redirect URIs, beside `main`, and point report 79 at it.
-2. Launch from class 590 as a researcher. It signs in and renders the class (Info tab, Assignments card, packages listed), and the console shows no errors except the existing `/favicon.ico` 404 and no CSP refusals.
-3. Open the same URL with no query string, which shows the info page (the build footer and demo link appear only there). The footer reads `deployed at models-resources.concord.org/researcher-dashboard/branch/production-config/`, and "Open the demo" opens `branch/production-config/demo/?scenario=ready`.
-4. Confirm `branch/production-config/index-top.html` was uploaded and its three references start with `branch/production-config/assets/`.
-5. Put report 79 back to `branch/main/index.html` and remove the branch URI from client 14.
+**Before merge, on the branch deploy** (`https://models-resources.concord.org/researcher-dashboard/branch/production-config/index.html`, no query string, which shows the info page):
+1. The page loads with no console errors except the existing `/favicon.ico` 404, and no CSP refusals.
+2. The footer reads `deployed at models-resources.concord.org/researcher-dashboard/branch/production-config/`.
+3. "Open the demo" opens `branch/production-config/demo/?scenario=ready`, and the demo loads.
+4. `branch/production-config/index-top.html` is published, and its three references start with `branch/production-config/assets/`.
 
-**After merge, before RD-2's release, on `index-main.html`:**
-1. Confirm the merge's Deploy app run published `https://models-resources.concord.org/researcher-dashboard/index-main.html`.
-2. Add that URL to client 14's redirect URIs and point report 79 at it.
-3. Launch the same way, then open `index-main.html` with no query string, and check the same things. The footer reads `deployed at models-resources.concord.org/researcher-dashboard/branch/main/`, not the prefix root, and the demo link opens `branch/main/demo/?scenario=ready`.
-4. Put report 79 back to `branch/main/index.html` and remove `index-main.html` from client 14.
-
-`branch/main/index.html` launching as before is the check that staging still works.
+**After merge, before RD-2's release, on `https://models-resources.concord.org/researcher-dashboard/index-main.html`:**
+1. The merge's Deploy app run published it.
+2. The same checks as above, with the footer reading `deployed at models-resources.concord.org/researcher-dashboard/branch/main/`, not the prefix root, and the demo link opening `branch/main/demo/?scenario=ready`. This is the first live load of a root copy (R7, R8).
 
 ## Technical Notes
 
@@ -107,8 +102,8 @@ From a root copy, `window.location` would hide which version is live, the questi
 ### An app tag must match `package.json`'s version
 The About box shows `package.json`'s version, so an unchecked tag could release a build that names the wrong version. The check sits in the job the deploy job needs.
 
-### The staging checks are split around the merge
-`index-main.html` exists only once `main` moves, so before merge the branch deploy is checked and R7's build test covers the root copy. Doug chose to keep the steps in the spec. The footer and demo link are checked on the URL with no query string, since a launched class never shows the info page.
+### The staging checks are page loads, split around the merge
+Doug's call: no sign-in check and no portal change, since the OAuth and launch code are unchanged and the tests cover each portal's destinations; the live checks cover only the deployed files. `index-main.html` exists only once `main` moves, so before merge the branch deploy is checked and R7's build test covers the root copy. The footer and demo link are on the info page, which a load with no query string shows.
 
 ### Implementation
 
