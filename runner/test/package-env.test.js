@@ -169,12 +169,26 @@ test("summary.txt is optional, display.md is not", async () => {
 });
 
 // An oversized display is refused with its size and the limit, never truncated.
-test("a display.md over 64 KiB is refused with its size and the limit", async () => {
+test("a display.md over the limit is refused with its size and the limit", async () => {
   const { paths } = await prepare();
   fs.writeFileSync(path.join(paths.outputDir, "display.md"), "x".repeat(DISPLAY_LIMIT_BYTES));
   assert.equal(readPackageResult(paths.outputDir).display.length, DISPLAY_LIMIT_BYTES, "exactly at the cap is accepted");
+  fs.writeFileSync(path.join(paths.outputDir, "display.md"), "x".repeat(DISPLAY_LIMIT_BYTES + 1));
+  assert.throws(() => readPackageResult(paths.outputDir), /is 450561 bytes, over the 450560-byte limit/);
   fs.writeFileSync(path.join(paths.outputDir, "display.md"), "é".repeat(DISPLAY_LIMIT_BYTES / 2 + 1));
-  assert.throws(() => readPackageResult(paths.outputDir), /is 65538 bytes, over the 65536-byte limit/);
+  assert.throws(() => readPackageResult(paths.outputDir), /is 450562 bytes, over the 450560-byte limit/);
+});
+
+test("summary.txt and counts.json are read only to 64 KiB, whatever the display limit", async () => {
+  const { paths } = await prepare();
+  fs.writeFileSync(path.join(paths.outputDir, "display.md"), "ok");
+  fs.writeFileSync(path.join(paths.outputDir, "summary.txt"), "s".repeat(DISPLAY_LIMIT_BYTES));
+  assert.equal(readPackageResult(paths.outputDir).summary.length, 65537, "the summary is cut at 64 KiB and a byte");
+  fs.writeFileSync(path.join(paths.outputDir, "counts.json"), JSON.stringify({ answers: 3, pad: "x".repeat(65515) }));
+  assert.equal(fs.statSync(path.join(paths.outputDir, "counts.json")).size, 65537);
+  assert.deepEqual(readPackageCounts(paths.outputDir), { answers: 3 }, "a counts.json of 64 KiB and a byte is read whole and parses");
+  fs.writeFileSync(path.join(paths.outputDir, "counts.json"), JSON.stringify({ answers: 3, pad: "x".repeat(70000) }));
+  assert.deepEqual(readPackageCounts(paths.outputDir), {}, "a counts.json past 64 KiB is cut and does not parse");
 });
 
 test("the package is told where the egress proxy is, and nothing when there is none", () => {
