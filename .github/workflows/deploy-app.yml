@@ -2,7 +2,11 @@
 #
 # `models-resources` is where Concord's SPAs live, one prefix each, served from
 # https://models-resources.concord.org/<prefix>/. The s3-deploy-action puts a tag at
-# version/<tag>/ and a branch at branch/<name>/, and copies a top branch to the prefix root.
+# version/<tag>/ and a branch at branch/<name>/. The build also writes index-top.html there,
+# which `topBranches` copies to index-<branch>.html at the prefix root, so `main` gives
+# index-main.html, a root-level copy to check before a release; release-production.yml copies a
+# tag's to the prefix's index.html, the production URL. Nothing in this workflow writes
+# index.html at the root.
 #
 # Credentials are assumed, not stored: the `researcher-dashboard` role trusts this
 # repository through GitHub's OIDC provider, and the shared `S3-deploy-by-role-tag` policy
@@ -21,6 +25,11 @@ name: Deploy app
 
 on:
   push:
+    # Branches only when the app or this workflow changes. GitHub ignores path filters on tag
+    # pushes, so tags are limited by name instead: an `app-*` tag is an app release and a
+    # runner tag is not.
+    branches: ["**"]
+    tags: ["app-*"]
     paths:
       - "app/**"
       - ".github/workflows/deploy-app.yml"
@@ -48,6 +57,9 @@ jobs:
           cache: npm
           cache-dependency-path: app/package-lock.json
       - run: npm ci
+      # An app tag names the version package.json gives the build, which the About box shows.
+      - if: startsWith(github.ref, 'refs/tags/app-')
+        run: test "$GITHUB_REF_NAME" = "app-$(node -p 'require("./package.json").version')"
       - run: npm run test
       - run: npm run build
 
