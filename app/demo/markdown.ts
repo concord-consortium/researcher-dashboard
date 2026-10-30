@@ -15,8 +15,7 @@ Questions with an open response, by assignment, in question-id order rather than
 | Explain what the wind did to the fire. | 3 |
 `;
 
-// wildfire-simulation-use's report in the layout and wording of a real run, with every number made
-// up, so nothing from a real class is in this repo.
+// wildfire-simulation-use's report in the layout and wording of a real run, with every number made up.
 export { default as MODEL_USE } from "./model-use.md?raw";
 
 export const EXPLANATION_KEYWORDS = `# Explanation keywords

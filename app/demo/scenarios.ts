@@ -20,12 +20,12 @@ const SCOPE: Scope = {
 };
 
 let catalog = 0;
-function pkg(identity: string, title: string, over: Partial<PackageRow> = {}, description: string | null = null): PackageRow {
+function pkg(identity: string, title: string, over: Partial<PackageRow> = {}, description: string | null = null, version = "1.2.0"): PackageRow {
   catalog += 1;
   return {
     catalog_id: catalog, identity, name: identity.split("/").pop()!, visibility: "public", official: false, mine: false,
     project: null, applies: true, runnable: true,
-    current_version: { version: "1.2.0", title, description }, ...over
+    current_version: { version, title, description }, ...over
   };
 }
 
@@ -48,10 +48,44 @@ const OUTPUTS = new Map([
   ["users/402/time-on-task", { summary: "Median 14 minutes per page across 9 pages.", display: "# Time on task\n\nMedian 14 minutes per page across 9 pages.\n\n| Page | Median minutes |\n|---|---:|\n| Activity 2, page 3 | 18 |\n| Activity 2, page 4 | 15 |\n| Activity 3, page 2 | 12 |\n" }]
 ].map(([identity, output]) => [packageKey(identity as string), output as { summary: string; display: string }]));
 
-const row = (identity: string) => ROWS.find((r) => r.identity === identity)!;
+// A CLUE class, apart from the Wildfire one: the CLUE package applies only to CLUE assignments, and
+// the Wildfire packages never to them.
+const CLUE_SCOPE: Scope = {
+  kind: "class", id: 591, name: "Dataflow, period 4", class_hash: "demo591", platform_user_id: 200,
+  teachers: [{ id: 4, name: "Jordan Teacher" }],
+  cohorts: [{ id: 5, name: "Spring 2026 pilot" }],
+  project_ids: [22], assignment_fingerprint: "v1:demo-clue",
+  assignments: [
+    { offering_id: 1301, runnable_id: 912, name: "Brain-Inspired Robotics: Dataflow", url: "https://collaborative-learning.concord.org/?unit=brain", tool: "CLUE" }
+  ]
+};
+
+// As the package's manifest (studies/clue-dataflow-systematicity in cc-data-studies) names it. The
+// class card names a project only from a catalog row's `project`, so the row carries the class's.
+const CLUE_ROW = pkg("official/clue-dataflow-systematicity", "CLUE Dataflow: trial and error vs. systematicity",
+  { official: true, project: { id: 22, name: "CLUE Demo Project" } },
+  "For one CLUE class, the Dataflow study's detection of trial-and-error and systematic editing: each stage's summary, every episode, and sampled episodes described cycle by cycle with links that open CLUE at them.",
+  "1.0.0");
+
+// The CLUE Dataflow package's page for a real class, redacted: every id is a placeholder, and every
+// replay link points at REDACTED_HOST (redacted-links.ts). It is a chunk of its own, fetched only
+// when the CLUE scenario opens.
+let clueDataflow: string | null = null;
+export async function loadClueDataflow(): Promise<string> {
+  clueDataflow ??= (await import("./clue-dataflow.md?raw")).default;
+  return clueDataflow;
+}
+
+// The summary is the page's first totals line, which is what the package writes to summary.txt.
+function clueOutputs() {
+  if (clueDataflow === null) throw new Error("The CLUE page is not loaded yet: await loadClueDataflow() first.");
+  return new Map([[packageKey(CLUE_ROW.identity), { summary: "episodes: 386 (90 systematic, 296 trial-and-error)", display: clueDataflow }]]);
+}
+
+const row = (identity: string) => [...ROWS, CLUE_ROW].find((r) => r.identity === identity)!;
 
 function finished(identity: string, startedAgoMin: number, now: number, display?: string): Finished {
-  const output = OUTPUTS.get(packageKey(identity))!;
+  const output = (OUTPUTS.get(packageKey(identity)) ?? clueOutputs().get(packageKey(identity)))!;
   return {
     package: { identity, version: row(identity).current_version.version, checksum: "sha256:demo" },
     image_version: "0.2.4", summary: output.summary, display: display ?? output.display,
@@ -77,12 +111,12 @@ function activity(now: number, minutesAgo: number[]): Map<string, Activity> {
 const DAY = 24 * 60 * MIN;
 const minutes = (count: number, from: number, step: number) => Array.from({ length: count }, (_, i) => from + i * step);
 
-function base(now: number): WorldState {
+function base(now: number, scope = SCOPE): WorldState {
   return {
-    scope: SCOPE,
+    scope,
     profile: {
-      assignment_urls: SCOPE.assignments.map((a) => a.url), interactive_urls: [],
-      assignment_fingerprint: SCOPE.assignment_fingerprint, derived_at: stamp(now - 10 * MIN)
+      assignment_urls: scope.assignments.map((a) => a.url), interactive_urls: [],
+      assignment_fingerprint: scope.assignment_fingerprint, derived_at: stamp(now - 10 * MIN)
     },
     rows: ROWS,
     results: new Map(),
@@ -90,7 +124,22 @@ function base(now: number): WorldState {
     counts: { data: { answers: 117, logs: 18195, last_pull_at: stamp(now - 40 * MIN), log_freshness_at: stamp(now - 6 * 60 * MIN) } },
     activity: activity(now, minutes(18, 45, 37)),
     outputs: OUTPUTS,
-    failing: new Map()
+    failing: new Map(),
+    pulled: { answers: 3, logs: 40 }
+  };
+}
+
+function clue(now: number): WorldState {
+  return {
+    ...base(now, CLUE_SCOPE),
+    rows: [CLUE_ROW],
+    outputs: clueOutputs(),
+    // Its page is fixed, so a re-run pulls nothing new and the card keeps agreeing with it.
+    pulled: { answers: 0, logs: 0 },
+    counts: { data: { answers: 0, logs: 18177, last_pull_at: stamp(now - 40 * MIN), log_freshness_at: stamp(now - 6 * 60 * MIN) } },
+    // Every save predates the run, or the page would find the result behind and re-run it on open.
+    activity: activity(now, [45, 90]),
+    results: new Map([done(CLUE_ROW.identity, 40, now)])
   };
 }
 
@@ -100,6 +149,8 @@ export interface Scenario {
   // What the scenario shows, in the panel; text between ** and ** is bold.
   about: string;
   world?: (now: number) => WorldState;
+  // What has to be fetched before the world can be built.
+  load?: () => Promise<unknown>;
   info?: InfoReason;
 }
 
@@ -223,6 +274,13 @@ export const SCENARIOS: Scenario[] = [
     about: "Students saved work in the first assignment since the dashboard began recording activity; the second was worked on only before then, so its activity columns show n/a.",
     world: (now) => ({ ...base(now),
       activity: new Map(minutes(12, 45, 37).map((m, i) => [`learner-${i + 1}`, { lastActivityAt: stamp(now - m * MIN), changed: { "1255": stamp(now - m * MIN) } }])) })
+  },
+  {
+    key: "clue",
+    label: "A CLUE class",
+    about: `A CLUE class with one CLUE assignment. Its one analysis, **${CLUE_ROW.current_version.title}**, has finished: its result is the page the package wrote for a real class, with every student, document and other id replaced and no names or free text. Its replay links are redacted, so clicking one opens nothing. Press Run to watch it run again.`,
+    world: clue,
+    load: loadClueDataflow
   },
   { key: "info", label: "Info page (no launch)", about: "What a visit with no launch parameters shows.", info: "no-launch" },
   {

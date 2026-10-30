@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import { App } from "../src/App";
 import { DEMO_LABEL } from "../src/components/Brand";
 import type { Start } from "../src/shell/start";
+import { catchRedactedLinks } from "./redacted-links";
 import { SCENARIOS, type Scenario } from "./scenarios";
 import { World } from "./world";
 import "../src/styles.css";
@@ -51,10 +52,20 @@ function Demo() {
   };
   const drop = () => { drag.current = null; };
   const [, rerender] = useState(0);
+  // A scenario with something to fetch first shows nothing until it arrives, rather than a page
+  // that fills in a moment later.
+  const [loaded, setLoaded] = useState<string | null>(null);
+  useEffect(() => {
+    let current = true;
+    scenario.load?.().then(() => { if (current) setLoaded(scenario.key); },
+      () => window.alert("The demo could not load this scenario. Reload the page to try again."));
+    return () => { current = false; };
+  }, [scenario]);
+  const ready = !scenario.load || loaded === scenario.key;
   const world = useMemo(
-    () => (scenario.world ? new World(scenario.world(Date.now()), { stepMs, failNext: false, refuseNext: false }, () => rerender((n) => n + 1)) : null),
-    // A new world only when the scenario is chosen or reset; the step time is set on it in place.
-    [scenario, generation]
+    () => (scenario.world && ready ? new World(scenario.world(Date.now()), { stepMs, failNext: false, refuseNext: false }, () => rerender((n) => n + 1)) : null),
+    // A new world only when the scenario is chosen, loaded or reset; the step time is set on it in place.
+    [scenario, generation, ready]
   );
   if (world) world.knobs.stepMs = stepMs;
   const services = useMemo(() => world?.services(), [world]);
@@ -90,8 +101,8 @@ function Demo() {
 
   return (
     <>
-      <App key={`${scenario.key}:${generation}`} start={start} services={services}
-        reauthorize={() => window.alert("The page would sign in again here.")} demo />
+      {ready && <App key={`${scenario.key}:${generation}`} start={start} services={services}
+        reauthorize={() => window.alert("The page would sign in again here.")} demo />}
       <aside ref={aside} aria-label="Demo controls"
         style={{ ...panel, ...(open ? {} : { width: "auto" }), ...(at ? { left: at.x, top: at.y, right: "auto", bottom: "auto" } : {}) }}>
         <div style={{ ...head, ...(open ? { marginBottom: 6 } : {}) }} onPointerDown={grab} onPointerMove={move} onPointerUp={drop} onPointerCancel={drop}>
@@ -172,6 +183,8 @@ const check: CSSProperties = { display: "block", fontWeight: 700 };
 const knobs: CSSProperties = { display: "flex", alignItems: "flex-start", gap: 12 };
 const about: CSSProperties = { margin: "6px 0", color: "var(--muted)", lineHeight: 1.35 };
 const buttons: CSSProperties = { display: "flex", justifyContent: "flex-end", gap: 6, margin: "10px 0 2px" };
+
+catchRedactedLinks(document, (message) => window.alert(message));
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
