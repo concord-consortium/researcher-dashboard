@@ -20,6 +20,12 @@ export const DEPLOYED: PortalConfig[] = [
     reportServer: "https://report-server.concordqa.org",
     firebaseProject: "report-service-dev",
     clue: { firebaseApp: "collaborative-learning-staging", projectId: "collaborative-learning-staging" }
+  },
+  {
+    origin: "https://learn.concord.org",
+    reportServer: "https://report-server.concord.org",
+    firebaseProject: "report-service-pro",
+    clue: { firebaseApp: "collaborative-learning", projectId: "collaborative-learning-ec215" }
   }
 ];
 

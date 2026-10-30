@@ -56,7 +56,10 @@ describe("portalFor", () => {
     expect(portalFor("https://learn.portal.staging.concord.org.evil.test/")).toBeNull();
     expect(portalFor("http://learn.portal.staging.concord.org/")).toBeNull();
     expect(portalFor("https://learn.portal.staging.concord.org:8443/")).toBeNull();
-    expect(portalFor("https://learn.concord.org/")).toBeNull();
+    expect(portalFor("https://learn.concord.org.evil.test/")).toBeNull();
+    expect(portalFor("http://learn.concord.org/")).toBeNull();
+    expect(portalFor("https://learn.concord.org:8443/")).toBeNull();
+    expect(portalFor("https://concord.org/")).toBeNull();
     expect(portalFor("not a url")).toBeNull();
   });
 
