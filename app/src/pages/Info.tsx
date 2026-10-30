@@ -1,5 +1,5 @@
 import { ArrowLeftIcon, ArrowTopRightOnSquareIcon, BeakerIcon, CubeIcon, PlayCircleIcon } from "@heroicons/react/16/solid";
-import { BUILD_VERSION } from "../build-info";
+import { BUILD_VERSION, DEPLOY_ROOT } from "../build-info";
 import { Brand, UserInfo } from "../components/Brand";
 import type { User } from "../shell/portal";
 import { Callout } from "../components/Callout";
@@ -80,7 +80,7 @@ export function Info({ reason, detail, demo = false, user = null, portal = null 
                 without signing in. Nothing in it is real student data.
               </p>
             </div>
-            <a className="link-button" href={demo ? "?scenario=ready" : "demo/?scenario=ready"}>
+            <a className="link-button" href={demo ? "?scenario=ready" : new URL("demo/?scenario=ready", DEPLOY_ROOT).href}>
               <PlayCircleIcon aria-hidden="true" />Open the demo
             </a>
           </section>
@@ -126,6 +126,6 @@ export function Info({ reason, detail, demo = false, user = null, portal = null 
 // published it to. Shown because the first question about a deployed SPA is always which
 // build you are looking at.
 function deployPath(): string {
-  const path = window.location.pathname.replace(/\/[^/]*$/, "/");
-  return `${window.location.host}${path}`;
+  const root = new URL(DEPLOY_ROOT);
+  return `${root.host}${root.pathname}`;
 }

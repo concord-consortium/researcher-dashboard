@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
+import { DEPLOY_ROOT } from "../src/build-info";
 import type { Portal, ReportServer } from "../src/shell/portal";
 import { SCOPE } from "./fixtures";
 
@@ -29,13 +30,27 @@ describe("App", () => {
 
   it("links to the demo beside it only when there is no launch, and to its own ready state from the demo", () => {
     render(<App start={{ kind: "info", reason: "no-launch" }} reauthorize={none} />);
-    expect(screen.getByRole("link", { name: "Open the demo" }).getAttribute("href")).toBe("demo/?scenario=ready");
+    const href = screen.getByRole("link", { name: "Open the demo" }).getAttribute("href")!;
+    expect(href).toBe(new URL("demo/?scenario=ready", DEPLOY_ROOT).href);
+    expect(href).toMatch(/^[a-z]+:\/\/.*\/demo\/\?scenario=ready$/);
     cleanup();
     render(<App start={{ kind: "info", reason: "no-launch" }} reauthorize={none} demo />);
     expect(screen.getByRole("link", { name: "Open the demo" }).getAttribute("href")).toBe("?scenario=ready");
     cleanup();
     render(<App start={{ kind: "info", reason: "expired" }} reauthorize={none} />);
     expect(screen.queryByRole("link", { name: "Open the demo" })).toBeNull();
+  });
+
+  it("names the path its files were deployed to, not the page's own", () => {
+    window.history.pushState({}, "", "/researcher-dashboard/index.html");
+    try {
+      render(<App start={{ kind: "info", reason: "no-launch" }} reauthorize={none} />);
+      const root = new URL(DEPLOY_ROOT);
+      expect(screen.getByRole("heading", { name: "Build info" }).nextElementSibling!.textContent)
+        .toContain(`deployed at ${root.host}${root.pathname}.`);
+    } finally {
+      window.history.pushState({}, "", "/");
+    }
   });
 
   it("says why it is not showing a class, with the portal's error where it sent one", () => {
