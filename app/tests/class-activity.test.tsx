@@ -2,6 +2,7 @@ import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ActiveCount, ClassActivity, RERUNS, type Stopped } from "../src/components/ClassActivity";
 import type { Activity } from "../src/shell/activity";
+import { formatTime } from "../src/shell/runs";
 import { stamp } from "./fixtures";
 
 const MIN = 60_000;
@@ -20,6 +21,10 @@ function show(over: { activity?: Map<string, Activity>; problem?: string | null;
 function showCount(activity: Map<string, Activity> | undefined) {
   render(<ActiveCount activity={activity} now={() => Date.now()} />);
 }
+
+// The value Student Saves gives for `label`, or null when it gives none.
+const fact = (label: string) =>
+  [...document.querySelectorAll(".facts dt")].find((dt) => dt.textContent === label)?.nextElementSibling?.textContent ?? null;
 
 const count = () => document.querySelector(".active-count")?.getAttribute("title") ?? null;
 
@@ -61,10 +66,28 @@ describe("ActiveCount", () => {
 });
 
 describe("ClassActivity", () => {
+  it("says how many students have saved work and when the latest save was", () => {
+    show({ activity: docs(START - 2 * MIN, START - MIN) });
+    expect(fact("Students who have saved work")).toBe("2");
+    expect(fact("Latest save")).toBe(formatTime(START - MIN).replace(/^./, (c) => c.toUpperCase()));
+  });
+
+  it("says the latest save is unknown when no document has a readable time", () => {
+    show({ activity: new Map<string, Activity>([["u0", {}]]) });
+    expect(fact("Students who have saved work")).toBe("1");
+    expect(fact("Latest save")).toBe("unknown");
+  });
+
+  it("shows neither line with no documents", () => {
+    show({ activity: new Map() });
+    expect(fact("Students who have saved work")).toBeNull();
+    expect(fact("Latest save")).toBeNull();
+  });
+
   it("says what the count means under its heading", () => {
     show({ activity: docs(START - MIN) });
     expect(screen.getByRole("heading", { level: 2, name: "Student Saves" })).toBeDefined();
-    expect(screen.getByText(/how many students saved an answer/).textContent).toMatch(/in the last 5 minutes\.$/);
+    expect(screen.getByText(/how many students saved work/).textContent).toMatch(/in this class's Activity Player or CLUE assignments in the last 5 minutes\.$/);
     expect(screen.getByText(/not a count of who is logged in/).textContent).toMatch(/same for every researcher of this class/);
     expect(screen.getByText(RERUNS)).toBeDefined();
     expect(count()).toBeNull();
@@ -73,12 +96,12 @@ describe("ClassActivity", () => {
   it("shows the refusal and no explanation", () => {
     show({ activity: undefined, problem: "Class activity could not be read." });
     expect(screen.getByText("Class activity could not be read.").closest("[aria-live]")).not.toBeNull();
-    expect(screen.queryByText(/how many students saved an answer/)).toBeNull();
+    expect(screen.queryByText(/how many students saved work/)).toBeNull();
   });
 
   it("shows only the heading before the first snapshot", () => {
     show({ activity: undefined });
-    expect(screen.queryByText(/how many students saved an answer/)).toBeNull();
+    expect(screen.queryByText(/how many students saved work/)).toBeNull();
     expect(screen.queryByText(/re-run on their own/)).toBeNull();
     expect(screen.getByRole("status").textContent).toBe("");
   });

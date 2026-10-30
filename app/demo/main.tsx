@@ -14,7 +14,7 @@ import "../src/styles.css";
 
 const READY: Start = {
   kind: "ready",
-  portal: { origin: "https://portal.example.com", reportServer: "https://report-server.demo.invalid", firebaseProject: "demo" },
+  portal: { origin: "https://portal.example.com", reportServer: "https://report-server.demo.invalid", firebaseProject: "demo", clue: { firebaseApp: "demo-clue", projectId: "demo-clue" } },
   launch: { authDomain: "https://portal.example.com", classId: "590", loginHint: null },
   token: { accessToken: "demo", issuedAt: 0, expiresAt: Number.MAX_SAFE_INTEGER }
 };

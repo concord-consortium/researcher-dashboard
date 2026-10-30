@@ -108,7 +108,7 @@ describe("start", () => {
 });
 
 describe("reauthorizer", () => {
-  const PORTAL = { origin: STAGING, reportServer: "https://report-server.concordqa.org", firebaseProject: "report-service-dev" };
+  const PORTAL = { origin: STAGING, reportServer: "https://report-server.concordqa.org", firebaseProject: "report-service-dev", clue: { firebaseApp: "collaborative-learning-staging", projectId: "collaborative-learning-staging" } };
   const LAUNCH = { authDomain: `${STAGING}/`, classId: "223", loginHint: null };
 
   it("starts one authorization however often it is called, so the stored state is the one sent", async () => {

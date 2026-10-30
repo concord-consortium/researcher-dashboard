@@ -104,7 +104,7 @@ describe("the demo's CLUE class", () => {
 
   it("leaves the Wildfire scenarios' catalog as it was", () => {
     const wildfire = SCENARIOS.filter((s) => s.world && s.key !== "clue");
-    expect(wildfire.map((s) => s.key)).toEqual(["ready", "running", "failed", "long", "quiet", "first", "edge", "withdrawn"]);
+    expect(wildfire.map((s) => s.key)).toEqual(["ready", "running", "failed", "long", "quiet", "first", "edge", "past", "before", "mixed", "withdrawn"]);
     for (const s of wildfire) {
       expect(s.world!(Date.now()).rows.map((r) => [r.identity, r.catalog_id])).toEqual([
         ["official/wildfire-responses", 1], ["projects/20/activity-model-use", 2],

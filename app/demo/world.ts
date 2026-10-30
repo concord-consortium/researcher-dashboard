@@ -1,4 +1,4 @@
-import type { Activity } from "../src/shell/activity";
+import { ACTIVITY_SOURCES, type Activity } from "../src/shell/activity";
 import { packageKey, type Profile } from "../src/shell/packages";
 import { ApiError, type PackageRow, type Scope } from "../src/shell/portal";
 import { latestFinished, millis, type Counts, type QueueEntry, type Result, type Runner } from "../src/shell/runs";
@@ -99,8 +99,11 @@ export class World {
 
   // A learner saves an answer now, which is what makes a finished result fall behind.
   save(learner = `learner-${1 + Math.floor(Math.random() * 6)}`) {
-    this.state.activity = new Map(this.state.activity).set(learner, { lastActivityAt: stamp(Date.now()) });
-    this.on?.activity(this.state.activity);
+    const offering = this.state.scope.assignments[Math.floor(Math.random() * this.state.scope.assignments.length)].offering_id;
+    const was = this.state.activity.get(learner);
+    this.state.activity = new Map(this.state.activity).set(learner,
+      { lastActivityAt: stamp(Date.now()), changed: { ...was?.changed, [String(offering)]: stamp(Date.now()) } });
+    this.on?.activity(this.state.activity, ACTIVITY_SOURCES);
   }
 
   private log(call: string) {
@@ -114,7 +117,7 @@ export class World {
     on.runner(s.runner);
     on.counts(s.counts);
     on.results(s.results);
-    on.activity(s.activity);
+    on.activity(s.activity, ACTIVITY_SOURCES);
   }
 
   private setRunner(next: Runner | null) {
