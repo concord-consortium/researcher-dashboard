@@ -122,9 +122,9 @@ export function Info({ reason, detail, demo = false, user = null, portal = null 
   );
 }
 
-// Where this copy of the app is served from, which is the versioned path the S3 deploy
-// published it to. Shown because the first question about a deployed SPA is always which
-// build you are looking at.
+// Where this build's files are, which is the versioned path the S3 deploy published them to,
+// even when a release serves the page itself from the prefix root. Shown because the first
+// question about a deployed SPA is always which build you are looking at.
 function deployPath(): string {
   const root = new URL(DEPLOY_ROOT);
   return `${root.host}${root.pathname}`;

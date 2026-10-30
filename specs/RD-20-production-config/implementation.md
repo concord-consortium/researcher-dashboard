@@ -179,7 +179,7 @@ function deployPath(): string {
 }
 ```
 
-Its comment is kept: it already says the line names the versioned path the deploy published.
+Its comment says the line names where the build's files are, the versioned path the deploy published, even when a release serves the page from the prefix root.
 
 `build-info.test.ts`, in the node environment: under jsdom, Vitest resolves any `new URL(rel, import.meta.url)` to `http://localhost:3000/`, so `"."` and `".."` give the same answer there and the test could not fail. The test's own `new URL` needs `/* @vite-ignore */` too, or Vite rewrites it to an `@fs` path.
 
