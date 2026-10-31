@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { activityPath, classPath, emulatorsFromEnv, firebaseConfig, portalSegment, resultsPath, runnerPath, scopeDocPath } from "../src/shell/firebase";
+import { DEPLOYED } from "../src/shell/portals";
 
 describe("portalSegment", () => {
   // The convention CLUE and report-service already use for portal-keyed collections.
@@ -61,8 +62,18 @@ describe("emulatorsFromEnv", () => {
 });
 
 describe("firebaseConfig", () => {
-  it.each(["report-service-dev", "collaborative-learning-staging", "collaborative-learning-ec215"])("keys the %s entry by its own project id and auth domain", (id) => {
+  it.each(["report-service-dev", "report-service-pro", "collaborative-learning-staging", "collaborative-learning-ec215"])("keys the %s entry by its own project id and auth domain", (id) => {
     expect(firebaseConfig(id).projectId).toBe(id);
     expect(firebaseConfig(id).authDomain).toBe(`${id}.firebaseapp.com`);
+  });
+
+  // A deployed portal whose project has no config would launch, mint a token and then fail at sign-in.
+  it("has a config for every deployed portal's report-service and CLUE projects", () => {
+    expect(DEPLOYED.length).toBeGreaterThan(1);
+    for (const portal of DEPLOYED) {
+      for (const project of [portal.firebaseProject, portal.clue.projectId]) {
+        expect(firebaseConfig(project).projectId, portal.origin).toBe(project);
+      }
+    }
   });
 });

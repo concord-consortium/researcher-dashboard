@@ -22,8 +22,9 @@ index.html?authDomain=<portal>&classId=<id>&loginHint=<user id>
 ```
 
 `authDomain` must be a portal in the allowlist compiled into the build
-(`src/shell/portals.ts`), which also names the report-server and Firebase project the app
-uses with it; anything else renders the info page and requests nothing. The app is an OAuth2
+(`src/shell/portals.ts`): staging's `learn.portal.staging.concord.org` and production's
+`learn.concord.org`, each with its own report-server and Firebase projects, which the app uses
+only with that portal; anything else renders the info page and requests nothing. The app is an OAuth2
 public client: it sends the browser to the portal's authorize endpoint with a PKCE challenge
 and `context=class:<classId>`, redeems the code it is sent back with at `/oauth/token`, and
 holds the access token in memory only. The class it shows is the one the token is bound to.
@@ -143,8 +144,21 @@ preamble is an inline script.
 ## Deploy
 
 `.github/workflows/deploy-app.yml` publishes to `models-resources/researcher-dashboard/` on
-every push that touches `app/`, assuming an AWS role through OIDC rather than storing a key.
-A branch lands at `branch/<name>/`, less a leading ticket key such as `RD-3-`, and a tag at `version/<tag>/`.
+every branch push that touches `app/` or the workflow, and on every push of an `app-*` tag,
+assuming an AWS role through OIDC rather than storing a key. A branch lands at
+`branch/<name>/`, less a leading ticket key such as `RD-3-`, and a tag at `version/<tag>/`.
+
+App tags are `app-x.y.z`, where `x.y.z` is `package.json`'s `version`; a tag that names any
+other version fails the workflow before anything is published. The build also writes
+`index-top.html` when s3-deploy-action passes `DEPLOY_PATH`: `index.html` with its references
+carrying the deploy path, so it works once copied to the prefix root. A push to `main` copies
+its `index-top.html` to `index-main.html` at the root, a root-level copy to check before a
+release.
+
+The production URL is `https://models-resources.concord.org/researcher-dashboard/index.html`.
+The Release Production workflow (`.github/workflows/release-production.yml`, run by hand with a
+deployed tag) copies that tag's `index-top.html` there. The production portal's `Client`
+redirect URI and its `ExternalReport` both name that URL.
 
 A branch build can be launched on staging only once its URL is among the staging
 `researcher-dashboard` `Client`'s redirect URIs; an unregistered redirect URI is a portal

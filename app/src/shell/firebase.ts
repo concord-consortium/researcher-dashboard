@@ -20,6 +20,15 @@ const PROJECTS: Record<string, Record<string, string>> = {
     messagingSenderId: "402218300971",
     appId: "1:402218300971:web:32b7266ef5226ff7"
   },
+  "report-service-pro": {
+    apiKey: atob("QUl6YVN5Qm1OU2EyVXozRGFFd0tjbHN2SFBCd2Z1Y1NtWldBQXpn"),
+    authDomain: "report-service-pro.firebaseapp.com",
+    databaseURL: "https://report-service-pro.firebaseio.com",
+    projectId: "report-service-pro",
+    storageBucket: "report-service-pro.appspot.com",
+    messagingSenderId: "22386066971",
+    appId: "1:22386066971:web:e0cdec7cb0f0893a8a5abe"
+  },
   "collaborative-learning-staging": {
     apiKey: atob("QUl6YVN5Q0dKRjQybE15XzhjSFpkU0lQa0FvWE9WWFBHMmotSHAw"),
     authDomain: "collaborative-learning-staging.firebaseapp.com",

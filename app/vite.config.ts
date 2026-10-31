@@ -17,12 +17,33 @@ const csp = (): Plugin => ({
   }]
 });
 
+// index.html with each `./` reference prefixed by DEPLOY_PATH (s3-deploy-action's `version/<tag>` or
+// `branch/<name>`), for a release to copy to the prefix root. Post-order: Vite adds index.html, CSP
+// included, only in its own generateBundle; the CSP's `base-uri 'none'` rules out a <base>.
+const indexTop = (): Plugin => ({
+  name: "researcher-dashboard-index-top",
+  apply: "build",
+  enforce: "post",
+  generateBundle(_options, bundle) {
+    const deployPath = process.env.DEPLOY_PATH;
+    if (!deployPath) return;
+    const index = bundle["index.html"];
+    if (index?.type !== "asset") throw new Error("index-top.html needs the built index.html");
+    this.emitFile({
+      type: "asset",
+      fileName: "index-top.html",
+      source: String(index.source).replace(/(src|href)="\.\//g, `$1="${deployPath}/`)
+    });
+  }
+});
+
 // Every deployment is plain files under a versioned path in S3, so assets are referenced
 // relatively rather than from the site root: the same build has to work at
-// /researcher-dashboard/version/v1.2.3/ and at /researcher-dashboard/branch/main/.
+// /researcher-dashboard/version/app-1.2.3/, at /researcher-dashboard/branch/main/, and, as
+// index-top.html, from /researcher-dashboard/ itself.
 export default defineConfig({
   base: "./",
-  plugins: [react(), csp()],
+  plugins: [react(), csp(), indexTop()],
   build: {
     // The dashboard, and the demo page beside it at demo/, which the info page links to.
     rollupOptions: {

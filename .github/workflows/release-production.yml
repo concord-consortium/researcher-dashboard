@@ -1,0 +1,33 @@
+# Publishes a deployed app tag at the production URL,
+# https://models-resources.concord.org/researcher-dashboard/index.html, by copying the tag's
+# index-top.html (written by its deploy-app run) over the prefix's index.html. The index file
+# keeps the no-cache header the deploy gave it, so the release shows at once.
+name: Release Production
+run-name: Release Production ${{ inputs.version }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: The app tag to release, such as app-0.1.0
+        required: true
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::612297603577:role/researcher-dashboard
+          aws-region: us-east-1
+      # The input is passed through the environment rather than spliced into the script.
+      - env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          [[ "$VERSION" =~ ^app-[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "not an app tag: $VERSION" >&2; exit 1; }
+          aws s3 cp "s3://models-resources/researcher-dashboard/version/$VERSION/index-top.html" \
+            "s3://models-resources/researcher-dashboard/index.html"

@@ -17,7 +17,7 @@ One repository holds both halves because they share the result a package writes,
 
 The two halves release separately, each with its own version prefixed by the half it belongs to:
 
-- `app x.y.z`
+- `app x.y.z`, tagged `app-x.y.z`, which is also the `version/` path it deploys to
 - `runner x.y.z`
 
 A release of one does not imply a release of the other. When a change alters the result the runner writes, both are released, app last, so the runner never writes a shape the deployed app cannot read.

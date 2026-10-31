@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { DEPLOYED, portalFor } from "../src/shell/portals";
 import { SCOPE, stamp } from "./fixtures";
 
 type Listener = [unknown, string, (value: unknown) => void, (error: Error) => void];
@@ -268,5 +269,47 @@ describe("makeServices", () => {
     await expect(makeServices(CONFIG, TOKEN).watchClass(SCOPE, listenersOn())).rejects.toThrow("invalid path");
     expect([...stops.keys()]).toEqual(expected);
     for (const s of stops.values()) expect(s).toHaveBeenCalledTimes(1);
+  });
+});
+
+// Written out rather than read from DEPLOYED, so an entry with another portal's value fails.
+const DESTINATIONS = [
+  { origin: "https://learn.portal.staging.concord.org", reportServer: "https://report-server.concordqa.org",
+    firebaseProject: "report-service-dev", clueApp: "collaborative-learning-staging", clueProject: "collaborative-learning-staging" },
+  { origin: "https://learn.concord.org", reportServer: "https://report-server.concord.org",
+    firebaseProject: "report-service-pro", clueApp: "collaborative-learning", clueProject: "collaborative-learning-ec215" }
+];
+
+it("checks every deployed portal's destinations below", () => {
+  expect(DEPLOYED.map((p) => p.origin)).toEqual(DESTINATIONS.map((d) => d.origin));
+});
+
+describe.each(DESTINATIONS)("a launch from $origin", (expected) => {
+  it("sends the access token only to that portal and its report-server, and signs in only to its projects", async () => {
+    const fetchImpl = vi.fn(async (url: string, _init?: RequestInit) => {
+      const app = new URL(url).searchParams.get("firebase_app");
+      return { ok: true, status: 200, json: async () => ({ token: `token-${app}`, packages: [] }) };
+    });
+    vi.stubGlobal("fetch", fetchImpl);
+    const { makeServices } = await import("../src/shell/services");
+    const services = makeServices(portalFor(`${expected.origin}/`)!, TOKEN);
+    const stop = await services.watchClass(SCOPE, listenersOn());
+    await services.reportServer.listPackages([]);
+    await settle();
+
+    const calls = fetchImpl.mock.calls.map(([url, init]) => ({ url: new URL(url), auth: init?.headers }));
+    expect(calls.length).toBe(3);
+    for (const { url, auth } of calls) {
+      expect([expected.origin, expected.reportServer]).toContain(url.origin);
+      expect(auth).toMatchObject({ Authorization: `Bearer ${TOKEN.accessToken}` });
+    }
+    expect(calls.filter(({ url }) => url.origin === expected.reportServer).map(({ url }) => url.pathname)).toEqual(["/api/v1/packages/list"]);
+    expect(calls.filter(({ url }) => url.origin === expected.origin).map(({ url }) => url.searchParams.get("firebase_app")).sort())
+      .toEqual([expected.clueApp, expected.firebaseProject].sort());
+    expect(signIn.mock.calls.map(([project, token]) => [project, token]).sort()).toEqual([
+      [expected.clueProject, `token-${expected.clueApp}`],
+      [expected.firebaseProject, `token-${expected.firebaseProject}`]
+    ].sort());
+    stop();
   });
 });
